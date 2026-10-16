@@ -611,7 +611,8 @@ cmd_uninstall() {
         die "Broadsword's Wine folder has leftovers of a Wine wrapper that is not SWTOR on Mac's ($BS_WINE/bin-real). SWTOR on Mac leaves them alone unless you confirm." ;;
   esac
   lock
-  trap 'rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
+  # (the folder itself goes too once empty; a backup of another wrapper stays in it)
+  trap 'rmdir "$SOM/.lock" "$SOM" 2>/dev/null || true' EXIT
 
   step "Restoring the official launcher's Wine"
   if [ -d "$real" ]; then

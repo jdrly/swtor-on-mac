@@ -19,6 +19,8 @@ Mode. You keep starting the game from the official app, as usual.
 >
 > Star Wars: The Old Republic and SWTOR are trademarks of their respective owners.
 
+<img src="docs/screenshots/installed-sandbox.png" width="420" alt="The SWTOR on Mac window after an install">
+
 ## Requirements
 
 - A Mac with Apple Silicon and macOS 26 or later (developed on macOS 27).

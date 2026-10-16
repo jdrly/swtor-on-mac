@@ -50,7 +50,8 @@ final class Installer {
   var installed: Bool { status["installed"] == "yes" }
   var running: Bool { status["running"] == "yes" }
   var wrapper: String { status["wrapper"] ?? "" }
-  var otherWrapper: Bool { wrapper == "personal" || wrapper == "foreign" }
+  // a wrapper (or its leftovers) that is not ours: install/uninstall ask before going ahead
+  var otherWrapper: Bool { wrapper == "personal" || wrapper == "foreign" || (wrapper == "replaced" && !installed) }
   var appleSilicon: Bool { status["arch"].map { $0 == "arm64" } ?? true }
   var loaded: Bool { !status.isEmpty }
 
@@ -247,15 +248,22 @@ struct MainView: View {
         .padding(.top, 30)
         .padding(.bottom, 4)
 
-      Form {
-        NoticeSection(installer: installer)
-        StatusSection(installer: installer)
-        if installer.phase != .idle {
-          ProgressSection(installer: installer)
+      ScrollViewReader { proxy in
+        Form {
+          NoticeSection(installer: installer)
+          StatusSection(installer: installer)
+          if installer.phase != .idle {
+            ProgressSection(installer: installer)
+              .id("progress")
+          }
+        }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        // bring the progress into view when an install or uninstall starts or ends
+        .onChange(of: installer.phase) { _, _ in
+          withAnimation(.smooth) { proxy.scrollTo("progress", anchor: .bottom) }
         }
       }
-      .formStyle(.grouped)
-      .scrollContentBackground(.hidden)
 
       ActionBar(installer: installer, uninstall: askUninstall, install: askInstall)
         .padding(.horizontal, 28)
@@ -263,7 +271,8 @@ struct MainView: View {
 
       Footer(credits: installer.credits)
     }
-    .frame(minWidth: 580, idealWidth: 580, maxWidth: 680, minHeight: 640, idealHeight: 820)
+    .frame(width: 600)
+    .frame(minHeight: 620, idealHeight: 840)
     .animation(.smooth, value: installer.phase)
     .animation(.smooth, value: installer.status)
     .alert("Uninstall SWTOR on Mac?", isPresented: $confirmUninstall) {
@@ -367,6 +376,7 @@ struct NoticeSection: View {
 
 struct StatusSection: View {
   let installer: Installer
+  private var installed: Bool { installer.installed }
 
   var body: some View {
     Section("This Mac") {
@@ -413,6 +423,11 @@ struct StatusSection: View {
       Text("Something else is hooked into Broadsword's Wine folder. SWTOR on Mac leaves it alone and "
            + "asks before replacing it.")
         .font(.callout).foregroundStyle(.secondary)
+    case "replaced" where !installed:
+      row("Wine wrapper", ok: false, detail: "Leftovers of another setup", warning: true)
+      Text("Broadsword's Wine folder has a bin-real folder SWTOR on Mac did not make. SWTOR on Mac "
+           + "asks before taking it over.")
+        .font(.callout).foregroundStyle(.secondary)
     case "replaced":
       row("Wine wrapper", ok: false, detail: "Removed by a launcher update", warning: true)
       Text("The official launcher updated its Wine and dropped SWTOR on Mac's hook. Reinstall to put it back.")
@@ -428,19 +443,12 @@ struct StatusSection: View {
 
   private func row(_ title: String, ok: Bool, detail: String, neutral: Bool = false, warning: Bool = false) -> some View {
     LabeledContent(title) {
-      Label(detail, systemImage: neutral ? "circle.dashed" : ok ? "checkmark.circle.fill"
-            : warning ? "exclamationmark.triangle.fill" : "xmark.circle.fill")
-        .foregroundStyle(neutral ? Color.secondary : ok ? Color.green : warning ? Color.orange : Color.red)
-        .labelStyle(TrailingIconLabelStyle())
-    }
-  }
-}
-
-struct TrailingIconLabelStyle: LabelStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    HStack(spacing: 6) {
-      configuration.title.foregroundStyle(.secondary)
-      configuration.icon
+      HStack(spacing: 6) {
+        Text(detail).foregroundStyle(.secondary)
+        Image(systemName: neutral ? "circle.dashed" : ok ? "checkmark.circle.fill"
+              : warning ? "exclamationmark.triangle.fill" : "xmark.circle.fill")
+          .foregroundStyle(neutral ? Color.secondary : ok ? Color.green : warning ? Color.orange : Color.red)
+      }
     }
   }
 }
@@ -455,7 +463,7 @@ struct ProgressSection: View {
         VStack(alignment: .leading, spacing: 8) {
           if let p = installer.progress, p.total > 0 {
             ProgressView(value: Double(min(p.done, p.total)), total: Double(p.total))
-            Text("\(installer.step): \(p.label) \(mb(p.done)) of \(mb(p.total))")
+            Text("Downloading \(p.label): \(mb(p.done)) of \(mb(p.total))")
           } else {
             ProgressView().progressViewStyle(.linear)
             Text(installer.step)
@@ -619,7 +627,8 @@ struct SWTORonMacApp: App {
         }
     }
     .windowStyle(.hiddenTitleBar)
-    .windowResizability(.contentMinSize)
+    .windowResizability(.contentSize)
+    .defaultSize(width: 600, height: 840)
     .defaultLaunchBehavior(.presented)
     .restorationBehavior(.disabled)
     .commands { CommandGroup(replacing: .newItem) {} }
