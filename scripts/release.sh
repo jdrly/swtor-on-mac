@@ -219,8 +219,11 @@ case "$MODE" in
     # A pre-release never becomes releases/latest. The tag also starts the Release workflow,
     # which stops at its version check for dev versions (release.yml); cancel the run anyway.
     echo "[release] creating the GitHub pre-release v$VERSION (DMG only, no feed)"
-    gh release create "v$VERSION" --repo "$REPO" --prerelease --title "SWTOR on Mac $VERSION (development build)" \
-      --notes-file "$NOTES" "$DMG"
+    # the tag goes on the commit this was built from (the dev branch), which must be pushed
+    head=$(git rev-parse HEAD)
+    git branch -r --contains "$head" | grep -q . || { echo "Push $head first" >&2; exit 1; }
+    gh release create "v$VERSION" --repo "$REPO" --prerelease --target "$head" \
+      --title "SWTOR on Mac $VERSION (development build)" --notes-file "$NOTES" "$DMG"
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); pre-release v$VERSION"
     exit 0 ;;
   --ci)
