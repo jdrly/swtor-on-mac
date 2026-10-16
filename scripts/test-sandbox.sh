@@ -133,10 +133,118 @@ fi
 kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true
 rm -f "$BS_APP/Contents/MacOS/test-sleep"
 
+echo "== 2b. leftover Wine processes of the engine (dummy programs; only those may end)"
+# One dummy program for every part: as .../wineserver it is a Wine server (writes ws.pid next
+# to itself; "wineserver -k" sends that one SIGTERM and returns at once, and it lingers
+# $FAKE_LINGER s before it exits); anything else sleeps argv[1] seconds (default 60).
+cat >"$SANDBOX/fake.c" <<'C'
+#include <libgen.h>
+#include <mach-o/dyld.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+static volatile sig_atomic_t term;
+static void on_term(int s) { (void)s; term = 1; }
+int main(int argc, char **argv)
+{
+    char dir[1024], pidf[1100];
+    uint32_t size = sizeof(dir);
+    if (_NSGetExecutablePath(dir, &size) != 0) return 2;  /* (argv[0] may be a bare name) */
+    snprintf(pidf, sizeof(pidf), "%s/ws.pid", dirname(dir));
+    const char *base = strrchr(argv[0], '/');
+    base = base ? base + 1 : argv[0];
+    if (!strcmp(base, "wineserver")) {
+        if (argc > 1 && !strcmp(argv[1], "-k")) {
+            FILE *f = fopen(pidf, "r");
+            int pid = 0;
+            if (f) { if (fscanf(f, "%d", &pid) != 1) pid = 0; fclose(f); }
+            return pid > 1 && kill(pid, SIGTERM) == 0 ? 0 : 1;
+        }
+        FILE *f = fopen(pidf, "w");
+        if (f) { fprintf(f, "%d\n", getpid()); fclose(f); }
+        signal(SIGTERM, on_term);
+        for (int i = 0; i < 60 && !term; i++) sleep(1);
+        if (term && getenv("FAKE_LINGER")) sleep(atoi(getenv("FAKE_LINGER")));
+        return 0;
+    }
+    sleep(argc > 1 ? atoi(argv[1]) : 60);
+    return 0;
+}
+C
+clang -o "$SANDBOX/fake" "$SANDBOX/fake.c"
+# orphan <program> [args]: runs it detached (parent launchd, like Wine's orphans); prints its pid
+orphan() { ( "$@" </dev/null >/dev/null 2>&1 & echo $! >"$SANDBOX/orphan.pid" ); cat "$SANDBOX/orphan.pid"; }
+# alive <pid>: running (not gone, not a zombie)
+alive() { local s; s=$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' '); [ -n "$s" ] && [ "${s#Z}" = "$s" ]; }
+all_alive() { local p; for p; do alive "$p" || return 1; done; }
+all_gone() { local p; for p; do ! alive "$p" || return 1; done; }
+EB="$SOM/engine/bin"
+mkdir -p "$EB"
+cp "$SANDBOX/fake" "$EB/wine-preloader"
+cp "$SANDBOX/fake" "$EB/wineserver"
+# CrossOver's re-exec names: hard links of the preloader in winetemp-<inode>-<size>-...
+WT="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$EB/wine-preloader")-1-2"
+mkdir -p "$WT" && ln "$EB/wine-preloader" "$WT/winedevice.exe"
+# decoys: the same program elsewhere (another file, also in a winetemp-like folder)
+mkdir -p "$SANDBOX/decoy/winetemp-1-2-3-4"
+cp "$SANDBOX/fake" "$SANDBOX/decoy/wine-preloader"
+cp "$SANDBOX/fake" "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe"
+d1=$(orphan "$SANDBOX/decoy/wine-preloader")
+d2=$(orphan "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe")
+l1=$(orphan "$WT/winedevice.exe")
+l2=$(orphan "$EB/wine-preloader")
+# one whose parent still runs and is not Wine (a winedevice.exe whose services.exe is alive)
+( "$EB/wine-preloader" & echo $! >"$SANDBOX/child.pid"; "$SANDBOX/decoy/wine-preloader" 60 ) </dev/null >/dev/null 2>&1 &
+p3=$!
+sleep 0.5
+l3=$(cat "$SANDBOX/child.pid")
+check "leftovers: status busy=leftovers" test "$(st busy)" = leftovers
+check "leftovers: not counted as running" test "$(st running)" = no
+check "leftovers: names ($(st busy_detail))" eval 'st busy_detail | grep -q winedevice.exe'
+check "leftovers: settings running=no" test "$(som settings | sed -n 's/^running=//p')" = no
+s1=$(orphan "$EB/wineserver"); sleep 0.3
+check "session: status busy=session" test "$(st busy)" = session
+check "session: running=yes" test "$(st running)" = yes
+check "session: end-leftovers refuses" eval '! som end-leftovers >"$SANDBOX/end1.txt" 2>&1'
+check "session: install refuses with a message" eval '! som install >"$SANDBOX/session.txt" 2>&1 && grep -q "^@error SWTOR on Mac.s Wine is still running" "$SANDBOX/session.txt"'
+check "session: nothing ended" all_alive "$l1" "$l2" "$l3" "$s1"
+kill "$s1"; sleep 0.5
+som end-leftovers >"$SANDBOX/end2.txt" 2>&1 || bad "end-leftovers exit"
+sleep 0.3
+check "end-leftovers: @done" grep -q '^@done Ended the leftover' "$SANDBOX/end2.txt"
+check "end-leftovers: the engine's processes ended (any parent)" all_gone "$l1" "$l2" "$l3"
+check "end-leftovers: decoys left alone" all_alive "$d1" "$d2"
+check "end-leftovers: the non-Wine parent left alone" alive "$p3"
+check "end-leftovers: logged" grep -q 'Ended leftover Wine processes' "$LOGS/install.log"
+check "end-leftovers: status busy=none" test "$(st busy)" = none
+# the game and Broadsword's Wine are not leftovers, and keep leftovers from ending
+cp "$SANDBOX/fake" "$SANDBOX/decoy/swtor.exe"
+g=$(orphan "$SANDBOX/decoy/swtor.exe"); l4=$(orphan "$WT/winedevice.exe"); sleep 0.3
+check "game: status busy=game" test "$(st busy)" = game
+check "game: end-leftovers refuses" eval '! som end-leftovers >/dev/null 2>&1'
+check "game: nothing ended" all_alive "$l4" "$g"
+check "game: install refuses" eval '! som install >"$SANDBOX/game.txt" 2>&1 && grep -q "^@error Quit the game first" "$SANDBOX/game.txt"'
+kill "$g"
+cp "$SANDBOX/fake" "$BS_WINE/test-wine"
+w=$(orphan "$BS_WINE/test-wine"); sleep 0.3
+check "Broadsword's Wine: status busy=wine" test "$(st busy)" = wine
+check "Broadsword's Wine: install refuses" eval '! som install >"$SANDBOX/wine.txt" 2>&1 && grep -q "Broadsword.s Wine is still running" "$SANDBOX/wine.txt"'
+check "Broadsword's Wine: the leftover not ended" alive "$l4"
+kill "$w"; sleep 0.3; rm -f "$BS_WINE/test-wine"
+kill "$p3" "$d1" "$d2" 2>/dev/null || true; wait "$p3" 2>/dev/null || true
+pkill -f "$SANDBOX/decoy/" 2>/dev/null || true
+rm -f "$EB/wineserver" "$EB/ws.pid"
+# l4 is still running: the next (failed) install ends it first
+
 echo "== 3. failed install rolls back (bin not writable)"
 chmod a-w "$BS_WINE/bin"
 if som install >"$SANDBOX/fail.txt" 2>&1; then bad "install with read-only bin succeeded"; fi
 chmod u+w "$BS_WINE/bin"
+check "install: ended the leftover first, logged" grep -q "^Ended leftover Wine processes" "$SANDBOX/fail.txt"
+check "install: the leftover is gone" all_gone "$l4"
+rm -rf "$WT"
 check "fail: official install unchanged" test "$STOCK" = "$(snap "$BS_WINE")"
 check "fail: no engine/prefix left" test ! -e "$SOM/engine" -a ! -e "$SOM/prefix" -a ! -e "$SOM/install-manifest.json"
 check "fail: no Wine left running" test -z "$(sandbox_wine)"
@@ -200,10 +308,13 @@ som set gamemode off >/dev/null && check "set gamemode off" grep -q '^#SWTOR_GAM
 som set updates off >/dev/null && check "set updates off" grep -qx 'SWTOR_UPDATE_CHECK=0' "$SOM/env"
 check "set: bad value refused" eval '! som set memory huge >/dev/null 2>&1'
 check "set: bad key refused" eval '! som set foo on >/dev/null 2>&1'
+cp "$SANDBOX/fake" "$SOM/engine/bin/test-leftover"; l5=$(orphan "$SOM/engine/bin/test-leftover"); sleep 0.3
 som set retina off >/dev/null && check "set retina off: user.reg" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="n"'
 out=$(env -u WINEPREFIX WINEPREFIX="$SOM/prefix" WINEDEBUG=-all DYLD_FALLBACK_LIBRARY_PATH="$SOM/frameworks:/usr/lib" \
   "$SOM/engine/bin/wine" reg query 'HKCU\Software\Wine\Mac Driver' /v RetinaMode 2>/dev/null | tr -d '\r' || true)
 cleanup_wine
+check "set retina: ended a leftover first" all_gone "$l5"
+rm -f "$SOM/engine/bin/test-leftover"
 check "set retina off: Wine reads n ($(echo "$out" | awk '/RetinaMode/ { print $NF }'))" test "$(echo "$out" | awk '/RetinaMode/ { print $NF }')" = n
 check "set retina: no Wine left running" test -z "$(sandbox_wine)"
 printf '#include <unistd.h>\nint main(void) { sleep(30); return 0; }\n' >"$SANDBOX/sleep2.c"
@@ -256,7 +367,15 @@ SWTOR_NOTIFY_LOG="$U/notifications.log"
 ENV
 sed "s|@CONF@|$U/env|" "$APP/Contents/Resources/wine-wrapper.sh" >"$U/bin/wine64-preloader"; chmod +x "$U/bin/wine64-preloader"
 game() { "$U/bin/wine64-preloader" "$U/bin/wine64" 'C:\swtor\retailclient\swtor.exe' -set username TESTACCOUNT >/dev/null 2>&1; sleep 1.5; }
+cp "$SANDBOX/fake" "$U/engine/bin/wine-preloader"
+UWT="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$U/engine/bin/wine-preloader")-7-8"
+mkdir -p "$UWT" && ln "$U/engine/bin/wine-preloader" "$UWT/winedevice.exe"
+l6=$(orphan "$UWT/winedevice.exe"); d6=$(orphan "$SANDBOX/fake" 60); sleep 0.3
 feed 0.0.2; game
+check "wrapper: ended a leftover of the engine before starting Wine" all_gone "$l6"
+check "wrapper: logged it" grep -q "ended leftover Wine process $l6 (winedevice.exe" "$U/logs/hold.log"
+check "wrapper: left the same program elsewhere alone" alive "$d6"
+kill "$d6" 2>/dev/null || true
 check "update check: notification for 0.0.2" grep -q 'update available (0.0.2)' "$U/notifications.log"
 check "update check: update-available for the app" test "$(cat "$U/app/update-available" 2>/dev/null)" = 0.0.2
 check "update check: the game started anyway" grep -q swtor.exe "$U/wine-args"
@@ -269,6 +388,71 @@ t0=$SECONDS; game
 check "update check: offline is silent" test "$(wc -l <"$U/notifications.log")" = "$n" -a ! -e "$U/app/update-available"
 check "update check: the game does not wait ($((SECONDS - t0)) s incl. 1.5 s pause)" test $((SECONDS - t0)) -le 3
 check "update check: no account in the logs" eval '! grep -rq TESTACCOUNT "$U/logs"'
+
+echo "== 6d. hold-launcher ends what is left of the engine's Wine once the launcher quits (dummies)"
+T="$SANDBOX/hold-test"
+TE="$T/engine/bin"
+FL="$T/Fake.app/Contents/MacOS/Star Wars - The Old Republic Launcher"
+HL="$APP/Contents/Resources/helpers/hold-launcher"
+mkdir -p "$TE" "${FL%/*}" "$T/logs"
+cp "$SANDBOX/fake" "$TE/wine-preloader"
+cp "$SANDBOX/fake" "$TE/wineserver"
+TWT="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$TE/wine-preloader")-5-6"
+mkdir -p "$TWT" && ln "$TE/wine-preloader" "$TWT/winedevice.exe" && ln "$TE/wine-preloader" "$TWT/services.exe"
+mkdir -p "$SANDBOX/decoy/winetemp-1-2-3-4"
+cp "$SANDBOX/fake" "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe"
+d7=$(orphan "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe")
+# --reap (what the wrapper runs): nothing while a wineserver of the engine runs
+srv=$(orphan "$TE/wineserver"); r1=$(orphan "$TWT/winedevice.exe"); r2=$(orphan "$TE/wine-preloader"); sleep 0.3
+SWTOR_ENGINE="$T/engine" "$HL" --reap 2>>"$T/logs/reap.log"
+check "hold --reap: leaves a running session alone" all_alive "$r1" "$r2" "$srv"
+kill "$srv"; sleep 0.3
+SWTOR_ENGINE="$T/engine" "$HL" --reap 2>>"$T/logs/reap.log"; sleep 0.3
+check "hold --reap: ended the leftovers" all_gone "$r1" "$r2"
+check "hold --reap: logged each" test "$(grep -c 'ended leftover Wine process' "$T/logs/reap.log")" = 2
+check "hold --reap: decoy left alone" alive "$d7"
+# A whole game: a fake launcher (its executable named like the real one) starts the "game"
+# (a script that runs hold-launcher, then becomes the engine's program for 3 s) and, once
+# resumed, the "last Wine call" that leaves a session behind: a new wineserver, an orphaned
+# winedevice.exe, a services.exe whose parent is still alive. The servers linger 3 s after
+# "wineserver -k" (the old hold-launcher gave up on that: it saw the server and left all).
+printf '#include <stdlib.h>\n#include <sys/wait.h>\n#include <unistd.h>\nint main(int argc, char **argv) { if (argc < 2) return 2; pid_t p = fork(); if (p == 0) { execv(argv[1], argv + 1); _exit(127); } int st; waitpid(p, &st, 0); if (getenv("FAKE_AFTER")) system(getenv("FAKE_AFTER")); return 0; }\n' >"$T/launcher.c"
+clang -o "$FL" "$T/launcher.c"
+printf '#!/bin/bash\n"%s" $$ </dev/null >/dev/null 2>>"%s"\nexec "%s" 3\n' "$HL" "$T/logs/hold.log" "$TE/wine-preloader" >"$T/game.sh"
+cat >"$T/after.sh" <<AFTER
+#!/bin/bash
+( "$TE/wineserver" </dev/null >/dev/null 2>&1 & )
+( "$TWT/winedevice.exe" </dev/null >/dev/null 2>&1 & echo \$! >"$T/orphan.pid" )
+( "$TWT/services.exe" & echo \$! >"$T/svc.pid"; "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe" 60 ) </dev/null >/dev/null 2>&1 &
+echo \$! >"$T/svc-parent.pid"
+sleep 0.3
+AFTER
+chmod +x "$T/game.sh" "$T/after.sh"
+s1=$(FAKE_LINGER=3 orphan "$TE/wineserver")
+t0=$SECONDS
+FAKE_LINGER=3 FAKE_AFTER="$T/after.sh" SWTOR_ENGINE="$T/engine" WINEPREFIX="$T/prefix" "$FL" "$T/game.sh" </dev/null >/dev/null 2>&1 &
+fl=$!
+for _ in $(seq 40); do
+  grep -q -e 'ended leftover' -e 'no leftover' -e 'leaving the engine' "$T/logs/hold.log" 2>/dev/null && break
+  sleep 1
+done
+sleep 0.5
+echo "  (hold-launcher done after $((SECONDS - t0)) s)"
+sed 's/^/    hold.log: /' "$T/logs/hold.log"
+check "hold: held the launcher, then resumed it" eval 'grep -q "stopped, waiting for game" "$T/logs/hold.log" && grep -q "resumed (game exited)" "$T/logs/hold.log"'
+check "hold: the launcher quit" all_gone "$fl"
+check "hold: both sessions' wineservers gone" eval 'all_gone "$s1" && test -z "$(ps -axww -o comm= | grep -Fx "$TE/wineserver")"'
+o=$(cat "$T/orphan.pid"); sv=$(cat "$T/svc.pid"); sp=$(cat "$T/svc-parent.pid")
+check "hold: ended the orphaned winedevice.exe" all_gone "$o"
+check "hold: logged it (parent 1)" grep -q "ended leftover Wine process $o (winedevice.exe, parent 1)" "$T/logs/hold.log"
+check "hold: ended services.exe although its parent runs" all_gone "$sv"
+check "hold: logged it" grep -q "ended leftover Wine process $sv (services.exe" "$T/logs/hold.log"
+check "hold: left the non-Wine parent alone" alive "$sp"
+check "hold: left the decoy alone" alive "$d7"
+check "hold: nothing of the engine left" test -z "$(ps -axww -o comm= | grep -F -e "$T/" -e "${TWT##*/}/")"
+kill "$sp" "$d7" 2>/dev/null || true
+pkill -f "$SANDBOX/decoy/" 2>/dev/null || true
+wait "$fl" 2>/dev/null || true
 
 echo "== 6c. the launchd job (simulated: run as launchd would)"
 watch; check "watch: wrapper in place, nothing to do" test "$(st wrapper)" = ours
@@ -328,7 +512,11 @@ fi
 pre="$SOM/engine/bin/wine-preloader"; m=$(stat -f '%Fm' "$pre")
 link="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$pre")-${m%.*}-$((10#${m#*.}))/swtor.exe"
 mkdir -p "$(dirname "$link")" && ln -sf "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe" "$link"
+cp "$SANDBOX/fake" "$SOM/engine/bin/test-leftover"; l8=$(orphan "$SOM/engine/bin/test-leftover"); sleep 0.3
+check "before uninstall: status shows the leftover" test "$(st busy)" = leftovers
 som uninstall >"$SANDBOX/uninstall.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall.txt"; bad "uninstall exit"; }
+check "uninstall: ended the leftover first, logged" grep -q "^Ended leftover Wine processes.*test-leftover" "$SANDBOX/uninstall.txt"
+check "uninstall: the leftover is gone" all_gone "$l8"
 check "uninstall: @done" grep -q '^@done' "$SANDBOX/uninstall.txt"
 check "uninstall: official install identical to stock" like_stock uninstall
 check "uninstall: status stock" test "$(st wrapper)" = stock

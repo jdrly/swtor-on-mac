@@ -179,18 +179,30 @@ Deleting only the folder also works: the wrapper then runs Broadsword's own Wine
 The official launcher starts every Wine process through `bin/wine64`, which loads
 `bin/wine64-preloader`. The wrapper (`src/wine-wrapper.sh`) sits in its place, reads
 `~/Library/Application Support/SWTOR on Mac/env` and runs the command on SWTOR on Mac's engine
-and prefix instead (falling back to Broadsword's real preloader if those are missing). For the
+and prefix instead (falling back to Broadsword's real preloader if those are missing). It first
+ends leftover Wine processes of the engine, if any (`hold-launcher --reap`, see below). For the
 game (`swtor.exe`) it also:
 
 - starts the engine's wineserver in its own session (`setsid-exec`), and sends the game's output
   to `wine.log` instead of the launcher's pipe;
 - runs `hold-launcher`: the launcher quits ~30 s after starting the game, and its exit takes the
   engine's wineserver with it, so the launcher is hidden and frozen (SIGSTOP) until the game
-  exits, then resumed to finish quitting; afterwards orphaned Wine processes of the engine are
-  cleaned up. It waits in kqueue: nothing polls;
+  exits, then resumed to finish quitting. It waits in kqueue: nothing polls. Once the launcher
+  has quit (within 2 minutes of the game), it ends the engine's Wine session
+  (`wineserver -k`), waits up to 10 s for its wineserver to go, and then ends whatever is left
+  of the engine, each logged in `hold.log`;
 - links CrossOver's re-exec name for the game (`winetemp-…/swtor.exe`) to
   `gamemode/SWTOR.app`, a bundle with `LSSupportsGameMode` around an identical clone of the
   engine's preloader, so macOS turns Game Mode on.
+
+Leftover Wine processes are processes of SWTOR on Mac's engine (its preloader, or CrossOver's
+`winetemp-<inode>-…` hard links of it) while no wineserver of the engine runs: what is left of
+a session whose server is gone, such as a `winedevice.exe` that would wait forever. They don't
+block anything: the window says so and offers **End Leftover Wine Processes**, and Install,
+Uninstall and the Retina setting end them first (logged in `install.log`). The launcher, the
+game, Broadsword's Wine or a running Wine session of the engine (its wineserver) do block
+those; the window says which, and the buttons say why when clicked. The window looks again
+when it becomes active and when the launcher or the game quits.
 
 Fixed settings (`env` and the prefix's registry): `WINEMSYNC=1`, `WINEDEBUG=-all`,
 `WINEDLLOVERRIDES=d3d9=n,b` (also per app for `swtor.exe`), `d3d9.allowOutOfRangeVsDefs = True`
@@ -198,7 +210,8 @@ in d9mt's `dxvk.conf`, and `GrabPointer=n` for `swtor.exe` (no hitch when mouse-
 Vsync is on by default because SWTOR asks for none in borderless mode, which tears. The rest is
 in the Settings window (above).
 
-The installer is `src/som.sh` (`status`, `install`, `uninstall`, `settings`, `set`, `watch`);
+The installer is `src/som.sh` (`status`, `install`, `uninstall`, `settings`, `set`, `watch`,
+`end-leftovers`);
 the window (`src/native`, SwiftUI) runs it and shows its progress as a timeline. Install is idempotent and
 all-or-nothing: it refuses while the launcher or game runs, checks every download against a
 pinned sha256, prepares everything in SWTOR on Mac's folders first, touches Broadsword's folder
@@ -215,7 +228,9 @@ a sandbox. In a sandbox the launchd job is written but not loaded, and notificat
 `notifications.log`. `scripts/test-sandbox.sh` builds a sandbox from APFS clones of this Mac's
 official install and runs install, the settings, reinstall, the wrapper's update check (with a
 stub engine and a local feed), a simulated launcher update and the launchd job's repair (run as
-launchd would), a failed install, Collect Logs, the conflict cases and uninstall end to end,
+launchd would), leftover Wine processes (dummy programs under the sandbox engine: what
+`status` reports, that only they end, from `end-leftovers`, install, uninstall, the wrapper and
+`hold-launcher` after a fake launcher and game, and never while a wineserver runs), a failed install, Collect Logs, the conflict cases and uninstall end to end,
 checking that uninstall restores Broadsword's folder byte for byte, copies the game settings
 back and that no Wine process is left behind. `scripts/test-update.sh` tests app updates with
 two Developer ID builds and a local feed, as in SWGL on Mac.

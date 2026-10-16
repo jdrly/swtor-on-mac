@@ -72,6 +72,10 @@ if [ -n "$SWTOR_ENGINE" ]; then
   # setsid-exec sits next to the real preloaders (not perl: macOS strips DYLD_* when it
   # starts SIP-protected binaries, and Wine needs them).
   setsid_exec() { exec "$(dirname "$REAL")/setsid-exec" "$@"; }
+  # First, if no wineserver of the engine runs: end leftover Wine processes of the engine
+  # (a session whose server is gone, e.g. the launcher's last Wine call after a game, when
+  # the launcher stayed open longer than hold-launcher waits). Each is logged in hold.log.
+  "$(dirname "$REAL")/hold-launcher" --reap </dev/null >/dev/null 2>>"$LOG_DIR/hold.log" || true
   ( setsid_exec "$SWTOR_ENGINE/bin/wineserver" -p 10 ) </dev/null >/dev/null 2>>"$LOG_DIR/wineserver.log"
   case " $* " in
     *swtor.exe*)
@@ -95,6 +99,7 @@ if [ -n "$SWTOR_ENGINE" ]; then
       # freezes it (SIGSTOP) until the game exits, then lets it finish quitting (SIGCONT).
       # It waits in kqueue for the exit of $$, which stays the game (the exec below keeps
       # this pid). Returns once the launcher is stopped; does nothing if it cannot find it.
+      # After the launcher has quit, it ends the engine's session and its leftovers.
       "$(dirname "$REAL")/hold-launcher" $$ </dev/null >/dev/null 2>>"$LOG_DIR/hold.log"
       # macOS Game Mode: point the name CrossOver's ntdll re-execs the game from (a hard link
       # of bin/wine-preloader in winetemp-<ino>-<size>-<mtime_s>-<mtime_ns>/, reused if

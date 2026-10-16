@@ -1,4 +1,5 @@
 // hold-launcher GAME_PID
+// hold-launcher --reap
 //
 // Freezes the SWTOR launcher (SIGSTOP) while the game runs on another Wine engine
 // (SWTOR_ENGINE) and lets it go on (SIGCONT) once the game has exited.
@@ -19,6 +20,12 @@
 // kevent() for the game's exit (EVFILT_PROC NOTE_EXIT): no polling, no CPU.
 // It also resumes the launcher if it is told to quit (SIGTERM/SIGINT/SIGHUP/SIGQUIT)
 // or kevent() fails, and does nothing if the launcher exited first (pid reuse).
+// Once the launcher has quit (within 2 min of the game), it ends the engine's Wine session
+// and whatever is left of it (see reap_leftovers).
+//
+// --reap: only end leftover Wine processes of SWTOR_ENGINE (processes of the engine while
+// no wineserver of it runs), logging each to stderr. The wrapper runs it before it starts
+// the engine's wineserver.
 //
 // build: clang -O2 -arch x86_64 -arch arm64 -fobjc-arc -framework AppKit \
 //          -o hold-launcher hold_launcher.c hide_app.m
@@ -32,6 +39,7 @@
 #include <string.h>
 #include <sys/event.h>
 #include <sys/proc_info.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -103,6 +111,7 @@ static void close_inherited_fds(int keep)
 // Before letting the launcher go: shut the engine's Wine session down cleanly
 // (wineserver -k, with the WINEPREFIX the wrapper exported). Otherwise the launcher's
 // exit kills the wineserver and leaves its winedevice.exe orphaned, ticking forever.
+// (wineserver -k exits 0 once it has ended a server, 1 if none was running.)
 static void stop_wine_session(void)
 {
     const char *engine = getenv("SWTOR_ENGINE");
@@ -119,42 +128,98 @@ static void stop_wine_session(void)
     if (pid > 0)
         while (waitpid(pid, &st, 0) < 0 && errno == EINTR)
             ;
-    logf_("wineserver -k: %s", pid < 0 ? strerror(errno) : WIFEXITED(st) ? "done" : "timed out");
+    if (pid < 0) logf_("wineserver -k: %s", strerror(errno));
+    else if (WIFEXITED(st)) logf_("wineserver -k: exit %d%s", WEXITSTATUS(st), WEXITSTATUS(st) == 1 ? " (no server was running)" : "");
+    else logf_("wineserver -k: timed out");
 }
 
-// The launcher often runs one more Wine command after the game (on this engine too),
-// which starts a fresh session; its exit then kills that wineserver and orphans the
-// session's winedevice.exe/services.exe. So once the launcher is gone, and only if no
-// engine wineserver is left: end orphaned (ppid 1) processes of this engine. Wine runs
-// them from hard links of bin/wine-preloader, and the kernel reports the preloader's
-// own path for those, so they are matched by that. Nothing else is touched.
-static void reap_orphans(void)
+// The engine's processes at this moment. Sets *SERVER to a live wineserver of the engine (0:
+// none) and puts up to MAX of the others into PIDS; returns how many. Wine runs them from
+// bin/wine-preloader or from hard links of it (CrossOver's winetemp-<inode>-.../<name>.exe),
+// so they are matched by that file: its path, or the same inode. Nothing else matches (the
+// game's Game Mode copy in SWTOR.app is an APFS clone, another inode; this process neither).
+static int engine_procs(pid_t *server, pid_t *pids, int max)
 {
+    *server = 0;
     const char *engine = getenv("SWTOR_ENGINE");
-    if (!engine) return;
-    char pre[1024], server[1024];
+    if (!engine || !*engine) return 0;
+    char pre[1024], srv[1024];
     snprintf(pre, sizeof(pre), "%s/bin/wine-preloader", engine);
-    snprintf(server, sizeof(server), "%s/bin/wineserver", engine);
+    snprintf(srv, sizeof(srv), "%s/bin/wineserver", engine);
+    struct stat ps;
+    int have_ino = stat(pre, &ps) == 0;
     int n = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
-    pid_t *pids = n > 0 ? malloc(n) : NULL;
-    if (!pids) return;
-    n = proc_listpids(PROC_ALL_PIDS, 0, pids, n) / (int)sizeof(pid_t);
-    pid_t victims[64];
-    int nv = 0;
+    pid_t *all = n > 0 ? malloc(n) : NULL;
+    if (!all) return 0;
+    n = proc_listpids(PROC_ALL_PIDS, 0, all, n) / (int)sizeof(pid_t);
+    int found = 0;
     for (int i = 0; i < n; i++) {
         char path[PROC_PIDPATHINFO_MAXSIZE];
-        struct proc_bsdinfo bi;
-        if (pids[i] <= 1 || proc_pidpath(pids[i], path, sizeof(path)) <= 0) continue;
-        if (!strcmp(path, server)) {  // a live session (maybe a new game): leave it all
-            free(pids);
-            return;
+        struct stat st;
+        if (all[i] <= 1 || all[i] == getpid() || proc_pidpath(all[i], path, sizeof(path)) <= 0) continue;
+        if (!strcmp(path, srv)) {
+            *server = all[i];
+            continue;
         }
-        if (!strcmp(path, pre) && bsdinfo(pids[i], &bi) && bi.pbi_ppid == 1 && nv < 64)
-            victims[nv++] = pids[i];
+        // (only winetemp paths are looked at: no stat() of other programs' files)
+        if (strcmp(path, pre) &&
+            !(have_ino && strstr(path, "/winetemp-") && stat(path, &st) == 0 &&
+              st.st_dev == ps.st_dev && st.st_ino == ps.st_ino))
+            continue;
+        if (found < max) pids[found] = all[i];
+        found++;
     }
-    free(pids);
-    for (int i = 0; i < nv; i++)
-        if (kill(victims[i], SIGKILL) == 0) logf_("ended orphaned Wine process %d", victims[i]);
+    free(all);
+    return found < max ? found : max;
+}
+
+// Waits (at most SECONDS, looking once a second) until no wineserver of the engine runs;
+// returns the one still running, or 0.
+static pid_t wait_no_server(int seconds)
+{
+    pid_t server;
+    for (int i = 0;; i++) {
+        engine_procs(&server, NULL, 0);
+        if (!server || i >= seconds) return server;
+        sleep(1);
+    }
+}
+
+// Leftovers: processes of the engine while no wineserver of it runs. Without a server there
+// is no Wine session they could belong to (every Wine start brings up its server first, the
+// wrapper before anything else), so they only tick on: Wine's system processes
+// (winedevice.exe, services.exe, ...) of a session whose server is gone, waiting forever on
+// msync, whatever their parent. All of them end (SIGKILL), each logged; with a server
+// running, none. QUIET: no log line when there is nothing to do.
+static void reap_leftovers(int quiet)
+{
+    pid_t server, pids[256];
+    int n = engine_procs(&server, pids, 256);
+    if (server) {
+        if (!quiet) logf_("Wine session running (wineserver %d): leaving the engine's processes alone", server);
+        return;
+    }
+    if (n == 0) {
+        if (!quiet) logf_("no leftover Wine processes of the engine");
+        return;
+    }
+    // once more right before: a new session (a game start) may have begun in between
+    pid_t again;
+    engine_procs(&again, NULL, 0);
+    if (again) {
+        if (!quiet) logf_("Wine session started (wineserver %d): leaving the engine's processes alone", again);
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        char name[2 * MAXCOMLEN + 1] = "?";
+        struct proc_bsdinfo bi;
+        int ppid = bsdinfo(pids[i], &bi) ? (int)bi.pbi_ppid : -1;
+        proc_name(pids[i], name, sizeof(name));
+        if (kill(pids[i], SIGKILL) == 0)
+            logf_("ended leftover Wine process %d (%s, parent %d)", pids[i], name, ppid);
+        else if (errno != ESRCH)
+            logf_("could not end leftover Wine process %d (%s): %s", pids[i], name, strerror(errno));
+    }
 }
 
 static void resume(pid_t launcher, const char *why)
@@ -243,11 +308,22 @@ static int hold(pid_t game, int ready)
                 while (kevent(kq, NULL, 0, &e, 1, NULL) < 0 && errno == EINTR)
                     ;
                 if (e.filter == EVFILT_PROC && e.ident == (uintptr_t)launcher) {
-                    // the launcher's last Wine call may have left a session running (its
-                    // wineserver still alive, so reap_orphans would leave it): end it too
+                    // The launcher's last Wine call (on this engine too) may have left a
+                    // session running: end it as well. Its wineserver can take a moment
+                    // to go after -k, and a client still starting may bring up a new one:
+                    // wait for that (bounded), then end what is left of the engine.
                     stop_wine_session();
-                    sleep(2);  // let the dead wineserver's clients notice first
-                    reap_orphans();
+                    pid_t server = wait_no_server(10);
+                    if (server) {
+                        logf_("wineserver %d still running 10 s after the launcher quit: "
+                              "leaving the engine's processes alone", server);
+                    } else {
+                        sleep(1);  // let the session's clients exit on their own first
+                        reap_leftovers(0);
+                    }
+                } else if (e.filter == EVFILT_TIMER) {
+                    logf_("launcher %d still open 2 min after the game: leftover Wine processes "
+                          "are ended at the next Wine start or by SWTOR on Mac", launcher);
                 }
                 return 0;
             }
@@ -263,9 +339,14 @@ static int hold(pid_t game, int ready)
 
 int main(int argc, char **argv)
 {
+    // --reap: end leftover processes of the engine (none if its wineserver runs), at once
+    if (argc == 2 && !strcmp(argv[1], "--reap")) {
+        reap_leftovers(1);
+        return 0;
+    }
     pid_t game = argc == 2 ? (pid_t)atoi(argv[1]) : 0;
     if (game <= 1) {
-        fprintf(stderr, "usage: hold-launcher GAME_PID\n");
+        fprintf(stderr, "usage: hold-launcher GAME_PID | hold-launcher --reap\n");
         return 2;
     }
     int fds[2];

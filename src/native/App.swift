@@ -95,6 +95,14 @@ final class Installer {
   var rosetta: Bool { status["rosetta"] == "yes" }
   var installed: Bool { status["installed"] == "yes" }
   var running: Bool { status["running"] == "yes" }
+  // What runs (som.sh status "busy"): launcher (the SWTOR launcher), game, wine (Broadsword's
+  // Wine), session (a Wine session of SWTOR on Mac's engine), leftovers (only leftover
+  // processes of its engine, no wineserver: install and uninstall end them first), none
+  var busy: String { status["busy"] ?? (running ? "launcher" : "none") }
+  var busyDetail: String { status["busy_detail"] ?? "" }
+  var leftovers: Bool { busy == "leftovers" }
+  // ending them (End Leftover Wine Processes)
+  var endingLeftovers = false
   var wrapper: String { status["wrapper"] ?? "" }
   // a wrapper (or its leftovers) that is not ours: install/uninstall ask before going ahead
   var otherWrapper: Bool { wrapper == "personal" || wrapper == "foreign" || (wrapper == "replaced" && !installed) }
@@ -116,17 +124,35 @@ final class Installer {
     return min(1, (Double(i) + part) / Double(steps.count))
   }
 
+  // (a running launcher, game or Wine session does not disable them: clicking says why it
+  // can't go ahead, see blockedReason)
   var canInstall: Bool {
-    loaded && !isBusy && officialPresent && rosetta && appleSilicon && !running && (installed || understood)
+    loaded && !isBusy && officialPresent && rosetta && appleSilicon && (installed || understood)
   }
   var canUninstall: Bool {
-    loaded && !isBusy && !running && (installed || wrapper == "ours" || wrapper == "replaced")
+    loaded && !isBusy && (installed || wrapper == "ours" || wrapper == "replaced")
+  }
+
+  // Why install/uninstall can't go ahead right now, or nil. Leftover Wine processes don't
+  // stop them (som.sh ends those first and logs it).
+  var blockedReason: String? {
+    let names = busyDetail.isEmpty ? "" : " (\(busyDetail))"
+    switch busy {
+    case "launcher": return "The SWTOR launcher is running. Quit it first."
+    case "game": return "The game is running\(names). Quit it first."
+    case "wine": return "Broadsword's Wine is still running\(names). Quit the SWTOR launcher and the game first."
+    case "session":
+      return "SWTOR on Mac's Wine is still running\(names). It ends by itself a few seconds after the "
+        + "launcher and the game have quit; try again then."
+    default: return nil
+    }
   }
 
   // MARK: Actions
 
-  func refresh() {
-    guard !isBusy else { return }
+  // then: runs once the new status is in
+  func refresh(then: (() -> Void)? = nil) {
+    guard !isBusy else { then?(); return }
     Task {
       var values: [String: String] = [:]
       let output = await Installer.capture(script: script, arguments: ["status"])
@@ -140,7 +166,76 @@ final class Installer {
         try? FileManager.default.removeItem(atPath: dir + "/update-available")
         if Installer.isNewer(version, than: appVersion) { onUpdateAvailable?(version) }
       }
+      then?()
     }
+  }
+
+  // End Leftover Wine Processes: som.sh ends them if nothing else of SWTOR runs. Returns its
+  // error, if any.
+  func endLeftovers(then: @escaping (String?) -> Void) {
+    guard !isBusy, !endingLeftovers else { return }
+    endingLeftovers = true
+    let script = script
+    Task {
+      let output = await Installer.capture(script: script, arguments: ["end-leftovers"])
+      endingLeftovers = false
+      let error = output.contains("@done ") ? nil
+        : output.split(separator: "\n").first { $0.hasPrefix("@error ") }.map { String($0.dropFirst(7)) }
+          ?? "The leftover Wine processes could not be ended."
+      refresh { then(error) }
+    }
+  }
+
+  // MARK: Re-checking (event-driven, no polling)
+
+  // the official launcher's bundle, and the game's Game Mode bundle (src/som.sh)
+  nonisolated static let launcherBundleID = "com.solidstatenetworks.host"
+  nonisolated static let gameBundleID = "cz.jandrly.swtoronmac.game"
+  // a SWTOR app quit (the settings window re-reads too)
+  var onSWTORQuit: (() -> Void)?
+  private var activeObserver: NSObjectProtocol?
+  private var appsObserver: NSKeyValueObservation?
+  private var recheck: DispatchWorkItem?
+
+  // Re-check when the user comes back to the app, and when the launcher or the game quits:
+  // NSWorkspace's runningApplications (KVO; its didTerminate notification leaves out
+  // LSUIElement apps, and the game runs from the Game Mode bundle, which is one).
+  func observe() {
+    guard activeObserver == nil else { return }
+    activeObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+      MainActor.assumeIsolated { self?.refresh() }
+    }
+    let swtorPids = PidSet()
+    appsObserver = NSWorkspace.shared.observe(\.runningApplications, options: [.initial, .old, .new]) { [weak self] _, change in
+      for app in change.newValue ?? [] where Installer.isSWTOR(app) { swtorPids.insert(app.processIdentifier) }
+      let quit = (change.oldValue ?? []).contains { swtorPids.remove($0.processIdentifier) || Installer.isSWTOR($0) }
+      guard quit else { return }
+      DispatchQueue.main.async { MainActor.assumeIsolated { self?.swtorQuit() } }
+    }
+  }
+
+  nonisolated static func isSWTOR(_ app: NSRunningApplication?) -> Bool {
+    guard let app else { return false }
+    if let id = app.bundleIdentifier, id == launcherBundleID || id == gameBundleID { return true }
+    let path = app.executableURL?.path ?? ""
+    return path.hasSuffix("/swtor.exe") || path.hasSuffix("/Star Wars - The Old Republic Launcher")
+  }
+
+  private func swtorQuit() {
+    refresh()
+    onSWTORQuit?()
+    // After the launcher quits, its Wine session ends and hold-launcher clears what is left of
+    // it within about 12 s: one more look then.
+    recheck?.cancel()
+    let work = DispatchWorkItem { [weak self] in
+      MainActor.assumeIsolated {
+        self?.refresh()
+        self?.onSWTORQuit?()
+      }
+    }
+    recheck = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: work)
   }
 
   func start(_ operation: Operation, force: Bool = false) {
@@ -312,6 +407,15 @@ final class LineReader: @unchecked Sendable {
     lock.unlock()
     if let rest { emit(rest) }
   }
+}
+
+// The pids of SWTOR's apps seen running (KVO calls back on any thread)
+final class PidSet: @unchecked Sendable {
+  private var pids = Set<pid_t>()
+  private let lock = NSLock()
+  func insert(_ pid: pid_t) { lock.lock(); pids.insert(pid); lock.unlock() }
+  // true if it was there
+  func remove(_ pid: pid_t) -> Bool { lock.lock(); defer { lock.unlock() }; return pids.remove(pid) != nil }
 }
 
 // MARK: - App menu actions
@@ -497,6 +601,8 @@ struct SWTORonMacApp: App {
             installer.onUpdateAvailable = { [updates] _ in updates.checkForUpdates() }
             updates.start()
           }
+          installer.onSWTORQuit = { [settings] in settings.reload() }
+          installer.observe()
           installer.refresh()
           settings.reload()
           // (not for the UI test script, which drives the window in the background)
@@ -505,10 +611,6 @@ struct SWTORonMacApp: App {
           case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
           default: break
           }
-        }
-        // Re-check when the user comes back (e.g. after quitting the launcher): no polling.
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-          installer.refresh()
         }
     }
     .windowStyle(.hiddenTitleBar)

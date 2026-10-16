@@ -9,6 +9,8 @@
 #                      auto/low/medium/high/ultra/unlimited; updates: on/off)
 #   som.sh watch       the launchd job (cz.jandrly.swtoronmac.watch): Broadsword's Wine/bin
 #                      changed; hook the wrapper back in if a launcher update replaced it
+#   som.sh end-leftovers  end leftover Wine processes of the engine (only if no launcher,
+#                      game or Wine session runs); install, uninstall and set retina do it too
 #
 # Environment:
 #   SWTOR_ON_MAC_ROOT=/abs/dir  sandbox for tests: the official install, the app's own files,
@@ -173,12 +175,69 @@ wrapper_state() {
   fi
 }
 
-# Processes that must not run during install/uninstall: the official launcher, anything
-# from Broadsword's Wine or SWTOR on Mac's engine, and the game itself (any engine).
-running_list() {
-  ps -axww -o pid=,comm= 2>/dev/null | awk -v a="$BS_APP/" -v w="$BS_WINE/" -v e="$SOM/engine/" -v t="$(winetemp_tag)" '
-    index($0, a) || index($0, w) || index($0, e) || (t != "" && index($0, t)) ||
-    /\/Star Wars - The Old Republic Launcher$/ || /\/swtor\.exe$/ { print }' || true
+# The processes that matter for install/uninstall, one per line, "<kind> <pid> <program>":
+#   launcher  the official launcher (anything in its app)
+#   game      the game, swtor.exe (any engine)
+#   wine      Broadsword's Wine
+#   session   a wineserver of SWTOR on Mac's engine: a Wine session of it is running
+#   engine    any other process of SWTOR on Mac's engine (its folder, or CrossOver's
+#             winetemp-<preloader inode>-... hard links of its preloader)
+proc_list() {
+  ps -axww -o pid=,comm= 2>/dev/null | awk -v a="$BS_APP/" -v w="$BS_WINE/" -v e="$SOM/engine/" \
+    -v s="$SOM/engine/bin/wineserver" -v t="$(winetemp_tag)" '
+    { pid = $1; prog = $0; sub(/^ *[0-9]+ /, "", prog) }
+    index(prog, a) || prog ~ /\/Star Wars - The Old Republic Launcher$/ { print "launcher", pid, prog; next }
+    prog ~ /\/swtor\.exe$/ { print "game", pid, prog; next }
+    index(prog, w) { print "wine", pid, prog; next }
+    prog == s { print "session", pid, prog; next }
+    index(prog, e) == 1 || (t != "" && index(prog, t)) { print "engine", pid, prog }' || true
+}
+
+# busy_of <proc_list output>: what keeps install/uninstall from going ahead, the first of
+# launcher, game, wine, session; else leftovers (only processes of SWTOR on Mac's engine,
+# without its wineserver: what is left of a session whose server is gone), else none
+busy_of() {
+  local k
+  for k in launcher game wine session; do
+    if printf '%s\n' "$1" | grep -q "^$k "; then echo "$k"; return; fi
+  done
+  if printf '%s\n' "$1" | grep -q '^engine '; then echo leftovers; else echo none; fi
+}
+
+# proc_names <proc_list output> <kind>: the programs' names, "a, b"
+proc_names() {
+  printf '%s\n' "$1" | awk -v k="$2" '$1 == k { $1 = ""; $2 = ""; sub(/^ +/, ""); n = split($0, p, "/"); print p[n] }' |
+    sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g'
+}
+
+# busy_message <kind> <proc_list output>: why install/uninstall cannot go ahead
+busy_message() {
+  case "$1" in
+    launcher) echo "Quit the SWTOR launcher first. Still running: $(proc_names "$2" launcher)" ;;
+    game) echo "Quit the game first. Still running: $(proc_names "$2" game)" ;;
+    wine) echo "Quit the SWTOR launcher and the game first: Broadsword's Wine is still running ($(proc_names "$2" wine))." ;;
+    session) echo "SWTOR on Mac's Wine is still running (a Wine session: $(proc_names "$2" session)$(n=$(proc_names "$2" engine); [ -z "$n" ] || echo ", $n")). It ends by itself a few seconds after the launcher and the game have quit; try again then." ;;
+  esac
+}
+
+# Is anything running that install/uninstall must wait for? (leftovers do not count: they
+# are ended first, see end_leftovers)
+running_now() { case "$(busy_of "$(proc_list)")" in launcher|game|wine|session) return 0 ;; esac; return 1; }
+
+# Ends leftover Wine processes of SWTOR on Mac's engine: only when nothing else of SWTOR runs
+# (no launcher, game, Broadsword's Wine, or wineserver of the engine), so they cannot belong
+# to a Wine session. Only processes running from the engine's folder or from hard links of
+# its preloader; each is logged.
+end_leftovers() {
+  local l pids names
+  l=$(proc_list)
+  [ "$(busy_of "$l")" = leftovers ] || return 0
+  pids=$(printf '%s\n' "$l" | awk '$1 == "engine" { print $2 }' | tr '\n' ' ')
+  names=$(proc_names "$l" engine)
+  if [ -n "$DRY" ]; then echo "[dry-run] end leftover Wine processes: $names (${pids% })"; return 0; fi
+  # shellcheck disable=SC2086
+  kill -9 $pids 2>/dev/null || true
+  say "Ended leftover Wine processes of SWTOR on Mac's engine (no Wine session was running): $names (pids ${pids% })"
 }
 
 # CrossOver's ntdll runs every Wine process of an engine from hard links in
@@ -191,7 +250,7 @@ winetemp_tag() {
 rosetta_ok() { /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; }
 
 status() {
-  local s
+  local s l b
   echo "version=$VERSION"
   echo "d9mt=$D9MT_VERSION"
   echo "engine=$ENGINE_NAME"
@@ -215,7 +274,17 @@ status() {
   else
     echo "installed=no"
   fi
-  if [ -n "$(running_list)" ]; then echo "running=yes"; else echo "running=no"; fi
+  # busy: launcher, game, wine, session (install/uninstall wait for those: running=yes),
+  # leftovers (they end them first), none; busy_detail: the programs' names
+  l=$(proc_list)
+  b=$(busy_of "$l")
+  echo "busy=$b"
+  case "$b" in
+    launcher|game|wine) echo "busy_detail=$(proc_names "$l" "$b")"; echo "running=yes" ;;
+    session) echo "busy_detail=$(proc_names "$l" session)"; echo "running=yes" ;;
+    leftovers) echo "busy_detail=$(proc_names "$l" engine)"; echo "running=no" ;;
+    *) echo "busy_detail="; echo "running=no" ;;
+  esac
   echo "app_dir=$SOM"
   echo "log_dir=$LOGS"
 }
@@ -259,7 +328,7 @@ write_settings() { # [<key> <value>]: settings.conf with every key, one of them 
 settings() {
   local k
   echo "installed=$([ -f "$MANIFEST" ] && echo yes || echo no)"
-  if [ -n "$(running_list)" ]; then echo "running=yes"; else echo "running=no"; fi
+  if running_now; then echo "running=yes"; else echo "running=no"; fi
   for k in $SETTING_KEYS; do echo "$k=$(setting "$k")"; done
 }
 
@@ -291,15 +360,15 @@ set_retina() {
 }
 
 cmd_set() {
-  local key="${1:-}" value="${2:-}" r
+  local key="${1:-}" value="${2:-}"
   setting_valid "$key" "$value" || { echo "@error Unknown setting: $key=$value"; exit 2; }
   [ -f "$MANIFEST" ] || die "SWTOR on Mac is not installed."
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
   log "---- set $key=$value"
   if [ "$key" = retina ]; then
     # Wine keeps the registry in its wineserver and writes it back on exit
-    r=$(running_list)
-    [ -z "$r" ] || die "Quit the SWTOR launcher and the game to change Retina mode."
+    end_leftovers
+    ! running_now || die "Quit the SWTOR launcher and the game to change Retina mode."
   fi
   lock
   trap 'rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
@@ -317,9 +386,17 @@ preflight() {
   [ -d "$BS_APP" ] && [ -x "$BS_WINE/bin/wine64" ] ||
     die "The official SWTOR Mac app was not found. Install SWTOR from the official website (https://www.swtor.com) first, start it once so it sets up the game, then try again."
   rosetta_ok || die "Rosetta is not installed. Start the official SWTOR app once (macOS offers to install Rosetta), then try again."
-  local r
-  r=$(running_list)
-  [ -z "$r" ] || die "Quit the SWTOR launcher and the game first. Still running: $(echo "$r" | awk '{ $1 = ""; print }' | sed 's|.*/||' | sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+  check_not_running
+}
+
+# Refuses while the launcher, the game or a Wine session runs; leftover Wine processes of the
+# engine are ended first (logged)
+check_not_running() {
+  local l b
+  end_leftovers
+  l=$(proc_list)
+  b=$(busy_of "$l")
+  case "$b" in launcher|game|wine|session) die "$(busy_message "$b" "$l")" ;; esac
 }
 
 # check_wrapper <install|uninstall>: refuse over a wrapper that is not ours unless forced
@@ -913,6 +990,22 @@ cmd_watch() {
   notify "SWTOR's launcher updated its Wine; SWTOR on Mac has hooked itself back in. Start the game as usual."
 }
 
+# The app's "End Leftover Wine Processes": ends them if that is all that runs
+cmd_end_leftovers() {
+  local l b
+  if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
+  log "---- end-leftovers"
+  l=$(proc_list)
+  b=$(busy_of "$l")
+  case "$b" in
+    none) echo "@done No leftover Wine processes are running." ;;
+    leftovers)
+      end_leftovers
+      echo "@done Ended the leftover Wine processes ($(proc_names "$l" engine))." ;;
+    *) die "$(busy_message "$b" "$l")" ;;
+  esac
+}
+
 on_install_exit() {
   local st=$?
   if [ $st -ne 0 ] && [ -z "$DRY" ]; then
@@ -983,9 +1076,8 @@ cmd_uninstall() {
   log "---- uninstall $VERSION root=${ROOT:-/} dry=${DRY:-0} force=${FORCE:-0}"
   phase 1
   step "Checking your Mac"
-  local r bin="$BS_WINE/bin" real="$BS_WINE/bin-real" b h want got left c
-  r=$(running_list)
-  [ -z "$r" ] || die "Quit the SWTOR launcher and the game first."
+  local bin="$BS_WINE/bin" real="$BS_WINE/bin-real" b h want got left c
+  check_not_running
   WRAPPER_STATE=$(wrapper_state)
   case "$WRAPPER_STATE" in
     personal|foreign)
@@ -1066,5 +1158,6 @@ case "${1:-}" in
   settings) settings ;;
   set) shift; cmd_set "$@" ;;
   watch) cmd_watch ;;
+  end-leftovers) cmd_end_leftovers ;;
   *) sed -n '2,/^# Environment/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac

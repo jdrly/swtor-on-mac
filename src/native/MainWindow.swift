@@ -27,6 +27,14 @@ struct MainView: View {
   @State private var confirmReplace: Installer.Operation?
   @State private var showNotice = false
   @State private var showLogSheet = false
+  // why an action can't go ahead (an alert, so a click is never a silent no-op)
+  @State private var blocked: Blocked?
+
+  struct Blocked: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+  }
 
   // narrower than this: one column
   static let wideWidth: CGFloat = 820
@@ -89,8 +97,9 @@ struct MainView: View {
       showLogSheet = false
       confirmUninstall = false
       confirmReplace = nil
+      blocked = nil
     }
-    .onChange(of: showNotice || showLogSheet || confirmUninstall || confirmReplace != nil) { _, open in
+    .onChange(of: showNotice || showLogSheet || confirmUninstall || confirmReplace != nil || blocked != nil) { _, open in
       installer.sheetOpen = open
     }
     .onChange(of: installer.loaded) { _, loaded in
@@ -105,6 +114,12 @@ struct MainView: View {
            + "key bindings) are copied back to the official app first, with a backup of its "
            + "previous ones. Your characters and the game itself are not affected. Logs are kept.")
     }
+    .alert(blocked?.title ?? "", isPresented: Binding(get: { blocked != nil }, set: { if !$0 { blocked = nil } }),
+           presenting: blocked) { _ in
+      Button("OK", role: .cancel) { blocked = nil }
+    } message: { b in
+      Text(b.message)
+    }
     .alert(replaceTitle, isPresented: Binding(get: { confirmReplace != nil }, set: { if !$0 { confirmReplace = nil } })) {
       Button(confirmReplace == .install ? "Replace It" : "Restore Stock Wine", role: .destructive) {
         if let op = confirmReplace { installer.start(op, force: true) }
@@ -117,9 +132,10 @@ struct MainView: View {
   }
 
   private var actions: PanelActions {
-    PanelActions(install: askInstall, uninstall: { confirmUninstall = true },
+    PanelActions(install: askInstall, uninstall: askUninstall,
                  review: { showNotice = true }, showLog: { showLogSheet = true },
-                 settings: { settings.reload(); openWindow(id: "settings") })
+                 settings: { settings.reload(); openWindow(id: "settings") },
+                 endLeftovers: endLeftovers)
   }
 
   private var replaceTitle: String {
@@ -136,9 +152,37 @@ struct MainView: View {
     return "\(what) \(action) A copy of it is kept in ~/Library/Application Support/SWTOR on Mac/backup."
   }
 
+  // Install and Uninstall look again first (the launcher or the game may just have quit), and
+  // say why they can't go ahead if something still runs.
   private func askInstall() {
     guard installer.understood || installer.installed else { showNotice = true; return }
-    if installer.otherWrapper { confirmReplace = .install } else { installer.start(.install) }
+    installer.refresh {
+      guard !installer.isBusy else { return }
+      if let reason = installer.blockedReason {
+        blocked = Blocked(title: installer.installed ? "Can't reinstall now" : "Can't install now", message: reason)
+      } else if installer.otherWrapper {
+        confirmReplace = .install
+      } else {
+        installer.start(.install)
+      }
+    }
+  }
+
+  private func askUninstall() {
+    installer.refresh {
+      guard !installer.isBusy else { return }
+      if let reason = installer.blockedReason {
+        blocked = Blocked(title: "Can't uninstall now", message: reason)
+      } else {
+        confirmUninstall = true
+      }
+    }
+  }
+
+  private func endLeftovers() {
+    installer.endLeftovers { error in
+      if let error { blocked = Blocked(title: "Could not end the leftover Wine processes", message: error) }
+    }
   }
 
   private func uninstall() {
@@ -152,6 +196,7 @@ struct PanelActions {
   let review: () -> Void
   let showLog: () -> Void
   let settings: () -> Void
+  let endLeftovers: () -> Void
 }
 
 // MARK: - Hero
@@ -442,7 +487,9 @@ struct ActionPanel: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       PrimaryAction(installer: installer, actions: actions)
-      if let note = blockingNote {
+      if installer.loaded, !installer.isBusy, installer.leftovers {
+        LeftoversNote(installer: installer, end: actions.endLeftovers)
+      } else if let note = blockingNote {
         Label(note, systemImage: "pause.circle.fill")
           .font(.callout)
           .foregroundStyle(.orange)
@@ -480,12 +527,49 @@ struct ActionPanel: View {
 
   private var blockingNote: String? {
     guard installer.loaded, !installer.isBusy else { return nil }
-    if installer.running { return "Quit the SWTOR launcher and the game to install or uninstall." }
+    let names = installer.busyDetail.isEmpty ? "" : " (\(installer.busyDetail))"
+    switch installer.busy {
+    case "launcher": return "The SWTOR launcher is running. Quit it to install or uninstall."
+    case "game": return "The game is running\(names). Quit it to install or uninstall."
+    case "wine": return "Broadsword's Wine is still running\(names). Quit the SWTOR launcher and the game to install or uninstall."
+    case "session": return "SWTOR on Mac's Wine is still running\(names). It ends by itself a few seconds after the launcher and the game have quit."
+    default: break
+    }
     switch installer.wrapper {
     case "personal": return "The developer setup from swtor-mac-proper is hooked into Broadsword's Wine folder. SWTOR on Mac asks before replacing it."
     case "foreign": return "Something else is hooked into Broadsword's Wine folder. SWTOR on Mac asks before replacing it."
     case "replaced" where !installer.installed: return "Broadsword's Wine folder has a bin-real folder SWTOR on Mac did not make. SWTOR on Mac asks before taking it over."
     default: return nil
+    }
+  }
+}
+
+// Neither the launcher nor the game runs, only what is left of a Wine session of SWTOR on Mac's
+// engine: say so, and offer to end it (Install and Uninstall also do that first).
+struct LeftoversNote: View {
+  let installer: Installer
+  let end: () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Label("Leftover Wine processes of SWTOR on Mac's engine are still running"
+            + (installer.busyDetail.isEmpty ? "" : " (\(installer.busyDetail))")
+            + ", from a session that has ended. The SWTOR launcher and the game are not running. "
+            + "They are not needed; Install and Uninstall end them first.",
+            systemImage: "exclamationmark.triangle.fill")
+        .font(.callout)
+        .foregroundStyle(.orange)
+        .fixedSize(horizontal: false, vertical: true)
+      Button(action: end) {
+        if installer.endingLeftovers {
+          HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Ending…") }
+        } else {
+          Label("End Leftover Wine Processes", systemImage: "xmark.octagon")
+        }
+      }
+      .buttonStyle(.glass)
+      .disabled(installer.endingLeftovers)
+      .pointerStyle(.link)
     }
   }
 }
@@ -600,7 +684,7 @@ struct PrimaryAction: View {
         Button(action: actions.settings) { Label("Settings", systemImage: "slider.horizontal.3") }
         Spacer(minLength: 0)
         Button(role: .destructive, action: actions.uninstall) {
-          Label("Uninstall…", systemImage: "trash").foregroundStyle(.red)
+          Label("Uninstall…", systemImage: "trash").foregroundStyle(installer.canUninstall ? .red : .secondary)
         }
         .disabled(!installer.canUninstall)
       }
