@@ -103,7 +103,7 @@ next time the game starts.
 |---|---|---|
 | Retina Mode | on | Wine's Mac driver `RetinaMode` in the prefix's registry (only while the launcher and the game are closed) |
 | Vsync | on | `d3d9.presentInterval = 1` in `dxvk.conf` (off: unset) |
-| Video Memory Profile | Automatic | `D9MT_MEMORY_PROFILE` (auto, low, medium, high, ultra, unlimited) |
+| Video Memory Profile | Automatic | `D9MT_MEMORY_PROFILE` (auto, low, medium, high, ultra, unlimited). The video memory the game is told it has: Low 2 GB, Medium 3 GB, High and above 4 GB. Automatic picks by the Mac's memory: 8 GB Low, 16 GB Medium, 24 GB High, more Ultra |
 | Game Mode | on | `SWTOR_GAMEMODE_APP` in `env` |
 | Show Metal HUD | off | `MTL_HUD_ENABLED=1` in `env`. It can't be toggled with a key in the game; turn it on here before starting the game |
 | Game keys by keyboard position | off | The game sees every key by its position on a US keyboard (see below): SWTOR on Mac's build of Wine's Mac driver in its engine and `PhysicalKeyboard=y` for `swtor.exe` in the prefix's registry; off, the engine's own driver (only while the launcher and the game are closed) |
@@ -187,6 +187,9 @@ game start, at some cost in performance, so turn it off again afterwards.
   changed while the launcher and the game are closed.
 - **Official launcher updates** replace SWTOR on Mac's hook. The launchd job puts it back by
   itself, but if the update looks unfinished it only notifies, and you click **Reinstall**.
+- **Blurry or missing textures in busy places** on 8 or 16 GB Macs: the game gets 2 or 3 GB of
+  video memory there (official app: about 4 GB). Raise **Video Memory Profile** in Settings if
+  macOS has memory to spare; lower it if macOS runs short of memory.
 - Like the official Mac app, everything runs under **Rosetta** (the launcher and Wine are
   x86_64). Apple Silicon only.
 - Only the official Mac app from swtor.com is supported (not the Windows or Steam version in
@@ -408,7 +411,7 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 | Wine engine `WS12WineCX24.0.7_7` (CrossOver 24.0.7, Wine 9.0, x86_64) | [Sikarugir-App/Engines v1.0](https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS12WineCX24.0.7_7.tar.xz) | `203f9e9fd6c2cc77e6525d798a434ced326145db34a356355e05659d3445fd1c` |
 | Engine libraries (`Template-1.0.21.app/Contents/Frameworks`, without `renderer/`) | [Sikarugir-App/Template v1.0](https://github.com/Sikarugir-App/Template/releases/download/v1.0/Template-1.0.21.tar.xz) | `bbe996e4e4375318485953d0c7818b7b4b0a4dc1f13303bcc584f99f7602f78d` |
 | Sparkle 2.10.0 (bundled) | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
-| d9mt `159bec7` (bundled, `prebuilt/d9mt`) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/159bec7c5f3433cb3273db2ed576464086ac762c) | see `prebuilt/d9mt` |
+| d9mt `c2a819d` (bundled, `prebuilt/d9mt`) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/c2a819d14355723c2425d0cef0d29ea9b4b9e4b7) | see `prebuilt/d9mt` |
 | CrossOver 24.0.7 sources (for the Mac driver, `prebuilt/winemac`) | [CodeWeavers](https://media.codeweavers.com/pub/crossover/source/crossover-sources-24.0.7.tar.gz) | `56749e926df9f0437dbcea259cf0bff6657a43871af50182887fe15a84fc2e4e` |
 
 ## Credits and licenses

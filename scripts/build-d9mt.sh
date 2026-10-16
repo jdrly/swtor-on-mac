@@ -24,7 +24,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 REPO="${D9MT_SRC:-https://github.com/jdrly/d9mt.git}"
-COMMIT=159bec7c5f3433cb3273db2ed576464086ac762c
+COMMIT=c2a819d14355723c2425d0cef0d29ea9b4b9e4b7
 MACOS_MIN=26.0
 V="${D9MT_WORK:-/tmp/swtor-on-mac-d9mt}"
 OUT="$ROOT/prebuilt/d9mt"

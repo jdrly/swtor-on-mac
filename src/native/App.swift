@@ -473,7 +473,7 @@ enum AppActions {
     ])
   }
 
-  // "d9mt 159bec7 · Wine WS12WineCX24.0.7_7" from Resources/VERSIONS.
+  // "d9mt c2a819d · Wine WS12WineCX24.0.7_7" from Resources/VERSIONS.
   static func componentVersions() -> String {
     let url = Bundle.main.resourceURL!.appendingPathComponent("VERSIONS")
     guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }

@@ -130,9 +130,10 @@ struct SettingsView: View {
           ForEach(GameSettings.memoryProfiles, id: \.0) { value, title in Text(title).tag(value) }
         } label: {
           Text("Video Memory Profile")
-          Text("How much memory d9mt reports to the game and keeps pooled. Automatic picks by your "
-               + "Mac's memory (8 GB: Low, 16 GB: Medium, 24 GB: High, more: Ultra). Lower it if "
-               + "macOS runs short of memory; Unlimited is for comparisons.")
+          Text("Automatic picks by your Mac's memory: 8 GB → Low (2 GB for the game), 16 GB → "
+               + "Medium (3 GB), 24 GB → High (4 GB), more → Ultra (4 GB). Raise it if you have "
+               + "headroom and want sharper textures in busy places; lower it if macOS runs short "
+               + "of memory. Unlimited is for comparisons.")
         }
       }
 
