@@ -932,10 +932,11 @@ struct NoticeText: View {
         .font(.headline)
         .foregroundStyle(.primary)
       Text("It is not made, endorsed or supported by Broadsword Games, Electronic Arts, Lucasfilm or "
-           + "Disney. Broadsword doesn't support third-party modifications, so you use it at your own risk.")
-      Text("It doesn't modify the game's files. It only changes the graphics layer the official Mac app "
-           + "already uses (Wine, plus d9mt for Direct3D 9 on Metal), and Uninstall puts that back the "
-           + "way Broadsword ships it.")
+           + "Disney. Broadsword doesn't support third-party tools or compatibility layers, so you use "
+           + "it at your own risk.")
+      Text("It's not a game mod: it doesn't change the game's files, memory or network traffic. It only "
+           + "replaces the compatibility layer the official Mac app already runs on (Wine, plus d9mt for "
+           + "Direct3D 9 on Metal), and Uninstall puts that back the way Broadsword ships it.")
       Text("For help, contact Pharaphobia on Discord or open a GitHub issue. Please don't send logs or "
            + "bug reports about SWTOR on Mac to Broadsword or SWTOR customer support.")
       Text("Star Wars: The Old Republic and SWTOR are trademarks of their respective owners.")

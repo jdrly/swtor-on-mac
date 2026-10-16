@@ -8,9 +8,12 @@ Mode. You keep starting the game from the official app, as usual.
 
 > **SWTOR on Mac is an unofficial community project.** It is not made, endorsed or supported
 > by Broadsword Games, Electronic Arts, Lucasfilm or Disney. Broadsword doesn't support
-> third-party modifications, so you use it at your own risk. It doesn't modify the game's
-> files: it only changes the graphics layer the official Mac app already uses (Wine, plus
-> d9mt for Direct3D 9 on Metal), and Uninstall puts that back the way Broadsword ships it.
+> third-party tools or compatibility layers, so you use it at your own risk.
+>
+> **It's not a game mod.** It doesn't change the game's files, memory or network traffic and
+> doesn't affect gameplay. It only replaces the compatibility layer the official Mac app
+> already runs on (Wine, plus d9mt for Direct3D 9 on Metal), the same kind of software as
+> CrossOver or Proton, and Uninstall puts that back the way Broadsword ships it.
 >
 > **All support for SWTOR on Mac comes from its developer, Jan Drlý (Pharaphobia).** For
 > help, contact Pharaphobia on Discord or open a
@@ -147,7 +150,7 @@ and the game's command line (the launcher passes the account on it) is never inc
 **Settings > Debug Logging** only when asked: it makes the logs much more detailed for the next
 game start, at some cost in performance, so turn it off again afterwards.
 
-## Known issues (0.0.1, first test version)
+## Known issues (0.0.x test versions)
 
 - **Stutter the first time** you see an area or effect, while d9mt compiles and caches its
   shaders (see [Install](#install)). It gets smooth after that.
