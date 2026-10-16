@@ -149,7 +149,8 @@ crash_reports | while IFS= read -r f; do add "$f" "crash-reports/${f##*/}"; done
   echo "Versions: $(tr -s '\n' ' ' <"$RES/VERSIONS" 2>/dev/null)"
   echo "Installed: $(plutil -extract version raw -o - "$SOM/install-manifest.json" 2>/dev/null || echo no)," \
     "d9mt $(plutil -extract d9mt raw -o - "$SOM/install-manifest.json" 2>/dev/null || echo -)," \
-    "engine $(plutil -extract engine raw -o - "$SOM/install-manifest.json" 2>/dev/null || echo -)"
+    "engine $(plutil -extract engine raw -o - "$SOM/install-manifest.json" 2>/dev/null || echo -)," \
+    "Mac driver $(plutil -extract winemac raw -o - "$SOM/install-manifest.json" 2>/dev/null || echo -)"
   echo "Mac: $(sysctl -n hw.model), $(sysctl -n machdep.cpu.brand_string)" \
     "($(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null)+$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null) cores)," \
     "$(($(sysctl -n hw.memsize) / 1073741824)) GB, macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))"

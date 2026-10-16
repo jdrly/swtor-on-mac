@@ -64,6 +64,7 @@ jobs:
           for f in Contents/MacOS/SWTORonMac Contents/Resources/som.sh Contents/Resources/wine-wrapper.sh \
                    Contents/Resources/helpers/hold-launcher Contents/Resources/helpers/setsid-exec \
                    Contents/Resources/d9mt/d3d9.dll Contents/Resources/d9mt/winemetal.so \
+                   Contents/Resources/wine/winemac.so Contents/Resources/Licenses/winemac/COPYING.LIB \
                    Contents/Resources/collect-logs.sh Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle \
                    Contents/Resources/Licenses/d9mt/bridge/COPYING.LIB Contents/Resources/Licenses/sparkle/LICENSE \
                    Contents/Resources/Licenses/SWTOR-on-Mac-LICENSE.txt Contents/Resources/Licenses/THIRD_PARTY_NOTICES.md; do

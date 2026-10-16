@@ -29,7 +29,8 @@ Mode. You start the game with **Play SWTOR** in its window, or from the official
 - **d9mt**: the game's Direct3D 9 goes straight to Metal, on CrossOver 24.0.7 Wine, with
   macOS **Game Mode** and Retina rendering.
 - **Settings** (SWTOR on Mac > Settings…, ⌘,): Retina mode, vsync, d9mt's video memory
-  profile, Game Mode, the Metal HUD, debug logging, automatic update checks.
+  profile, Game Mode, the Metal HUD, game keys by keyboard position (for non-US layouts),
+  debug logging, automatic update checks.
 - **Updates**: the app updates itself with [Sparkle](https://sparkle-project.org) (SWTOR on
   Mac > Check for Updates…), and the game's start looks for a new version once a day.
 - **Survives launcher updates**: when the official launcher updates its Wine and drops SWTOR on
@@ -105,6 +106,7 @@ next time the game starts.
 | Video Memory Profile | Automatic | `D9MT_MEMORY_PROFILE` (auto, low, medium, high, ultra, unlimited) |
 | Game Mode | on | `SWTOR_GAMEMODE_APP` in `env` |
 | Show Metal HUD | off | `MTL_HUD_ENABLED=1` in `env`. It can't be toggled with a key in the game; turn it on here before starting the game |
+| Game keys by keyboard position | off | The game sees every key by its position on a US keyboard (see below): SWTOR on Mac's build of Wine's Mac driver in its engine and `PhysicalKeyboard=y` for `swtor.exe` in the prefix's registry; off, the engine's own driver (only while the launcher and the game are closed) |
 | Check for updates automatically | on | Sparkle's automatic checks and the daily check at the game's start |
 | Debug Logging | off | `DXVK_LOG_LEVEL=info`, `D9MT_PROFILE=1`, `D9MT_MEMSTATS=1` (else `DXVK_LOG_LEVEL=warn`) |
 | Quit SWTOR on Mac after launching | off | The app quits once **Play SWTOR** has opened the official app (the app's own preference) |
@@ -112,6 +114,18 @@ next time the game starts.
 They are kept in `~/Library/Application Support/SWTOR on Mac/settings.conf`; `env` and
 `dxvk.conf` are made from it (`som.sh settings`, `som.sh set <key> <value>`). *Quit SWTOR on
 Mac after launching* is kept in the app's preferences instead.
+
+**Game keys by keyboard position** is for keyboard layouts whose keys type something else than
+a US keyboard's. Wine names a key by what it types in your current layout, so with Czech the
+game's key binds and action bars show the number row as *+ ě š č ř ž ý á í é* (French: *& é "
+' (*…). With the setting on, the game sees every key by its position on a US keyboard: the
+number row is 1–0, the key right of P is `[`, and so on, in key binds and action bars. Typing
+in chat still uses your layout (ě š č, dead keys like ´ + e = é, Shift and Option). The
+catch: everything follows US positions, so on QWERTZ layouts (Czech, German) the key labelled
+Z is *Y* in the game and the other way round. Settings says when your current layout's number
+row doesn't type 1–0. It works with the patched Mac driver, which is used only while the
+setting is on (see [Credits and licenses](#credits-and-licenses)); changing it needs no
+Reinstall.
 
 ## Updates
 
@@ -167,6 +181,10 @@ game start, at some cost in performance, so turn it off again afterwards.
   Wine prefix's registry).
 - **The Metal HUD** can't be toggled with a key in the game; turn it on in Settings before
   starting the game.
+- **Non-US keyboard layouts**: without *Game keys by keyboard position* the game names keys by
+  what your layout types (Czech: *+ ě š* … on the number row). With it, keys are named by
+  their US positions, so on QWERTZ layouts Z and Y swap names in the game. It can only be
+  changed while the launcher and the game are closed.
 - **Official launcher updates** replace SWTOR on Mac's hook. The launchd job puts it back by
   itself, but if the update looks unfinished it only notifies, and you click **Reinstall**.
 - Like the official Mac app, everything runs under **Rosetta** (the launcher and Wine are
@@ -183,7 +201,8 @@ game start, at some cost in performance, so turn it off again afterwards.
 - **A button says the launcher, the game or Wine is running.** Quit the SWTOR launcher and the
   game. SWTOR on Mac's own Wine ends by itself a few seconds after they quit.
 - **Leftover Wine processes of SWTOR on Mac's engine.** Click **End Leftover Wine Processes**
-  (Install, Uninstall and the Retina setting also end them first).
+  (Install, Uninstall, the Retina setting and Game keys by keyboard position also end them
+  first).
 - **Another Wine wrapper is installed** in Broadsword's Wine folder (another tool, or a manual
   setup). SWTOR on Mac leaves it alone unless you confirm; it then keeps a copy in
   `~/Library/Application Support/SWTOR on Mac/backup/`.
@@ -218,7 +237,9 @@ The game files, the launcher app and Broadsword's Wine prefix are only read (the
 cloned once). Everything else lives in SWTOR on Mac's own folders:
 
 - `~/Library/Application Support/SWTOR on Mac/`
-  - `engine/` – the Wine engine, with d9mt's winemetal bridge
+  - `engine/` – the Wine engine, with d9mt's winemetal bridge (and, while *Game keys by
+    keyboard position* is on, SWTOR on Mac's build of its Mac driver `winemac.so`; the
+    engine's own is kept as `winemac.so.stock`)
   - `frameworks/` – the engine's libraries
   - `prefix/` – the game's Wine prefix: an APFS clone of Broadsword's, updated for the engine,
     with d9mt's `d3d9.dll` in `system32` (Wine's own kept as `d3d9.dll.wine`) and the settings
@@ -323,7 +344,10 @@ stub engine and a local feed), a simulated launcher update and the launchd job's
 launchd would), leftover Wine processes (dummy programs under the sandbox engine: what
 `status` reports, that only they end, from `end-leftovers`, install, uninstall, the wrapper and
 `hold-launcher` after a fake launcher and game, and never while a wineserver runs), a failed
-install, Collect Logs, what Play SWTOR would open, the conflict cases and uninstall end to end, checking that uninstall
+install, Collect Logs, what Play SWTOR would open, *Game keys by keyboard position* (the Mac
+driver and the registry value, and what the game sees: a probe program run as `swtor.exe`
+with Czech, German and US layouts, picked through the driver's `WINEMAC_TEST_KEYBOARD_LAYOUT`
+test hook without changing the Mac's input source), the conflict cases and uninstall end to end, checking that uninstall
 restores Broadsword's folder byte for byte, copies the game settings back and that no Wine
 process is left behind. `scripts/test-update.sh` tests app updates with two Developer ID builds
 and a local feed, as in SWGL on Mac.
@@ -347,7 +371,14 @@ and a local feed, as in SWGL on Mac.
   `.github/workflows/release.yml` signs and notarizes on a `v*` tag. Both build on GitHub's
   `xcode-27` image (macOS 27 with Xcode 27, a public preview; there is no `macos-27` label).
 
-`prebuilt/` holds the d9mt binaries, so `build.sh` works from a fresh clone. Build outputs
+- `scripts/build-winemac.sh` builds Wine's Mac driver (`winemac.so`, x86_64) from CodeWeavers'
+  CrossOver 24.0.7 sources (pinned sha256; the engine download pinned in `src/som.sh` for
+  linking) with `patches/winemac-physical-keys.patch` into `prebuilt/winemac`, together with an
+  unpatched build: `scripts/winemac-compare.py` checks that one against the engine's own file
+  and that the patch changes only the keyboard functions and the option (Xcode, Rosetta,
+  Homebrew bison and mingw-w64). The build is reproducible.
+
+`prebuilt/` holds the d9mt binaries and the Mac driver, so `build.sh` works from a fresh clone. Build outputs
 (`dist/`, `release/`) are not committed; DMGs, deltas and `appcast.xml` are release assets.
 
 ### Releasing
@@ -378,6 +409,7 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 | Engine libraries (`Template-1.0.21.app/Contents/Frameworks`, without `renderer/`) | [Sikarugir-App/Template v1.0](https://github.com/Sikarugir-App/Template/releases/download/v1.0/Template-1.0.21.tar.xz) | `bbe996e4e4375318485953d0c7818b7b4b0a4dc1f13303bcc584f99f7602f78d` |
 | Sparkle 2.10.0 (bundled) | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
 | d9mt `159bec7` (bundled, `prebuilt/d9mt`) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/159bec7c5f3433cb3273db2ed576464086ac762c) | see `prebuilt/d9mt` |
+| CrossOver 24.0.7 sources (for the Mac driver, `prebuilt/winemac`) | [CodeWeavers](https://media.codeweavers.com/pub/crossover/source/crossover-sources-24.0.7.tar.gz) | `56749e926df9f0437dbcea259cf0bff6657a43871af50182887fe15a84fc2e4e` |
 
 ## Credits and licenses
 
@@ -391,6 +423,10 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
   sources, built by [Sikarugir](https://github.com/Sikarugir-App), with the libraries of
   Sikarugir's wrapper template; the engine and its libraries are downloaded from Sikarugir's
   releases at install time, not redistributed.
+- Wine's Mac driver (`winemac.so`, LGPL-2.1-or-later), built from CodeWeavers' CrossOver
+  24.0.7 sources with SWTOR on Mac's patch for *Game keys by keyboard position*
+  ([`patches/winemac-physical-keys.patch`](patches/winemac-physical-keys.patch), by Jan Drlý):
+  bundled in the app, with Wine's license and the patch under `Resources/Licenses/winemac`.
 - [Sparkle](https://sparkle-project.org) for app updates (MIT, with bsdiff and other notices;
   in the app under `Resources/Licenses/sparkle`).
 - Built after the example of [SWGL on Mac](https://github.com/jdrly/swgl-on-mac).
@@ -400,6 +436,8 @@ What the app bundles and what it downloads at install time, with their licenses:
 
 ## License
 
-The code in this repository is under the [zlib license](LICENSE). The files in `prebuilt/` and
-everything the build or the installer downloads keep their own licenses (see above; d9mt's are
-in `prebuilt/d9mt`).
+The code in this repository is under the [zlib license](LICENSE), except
+`patches/winemac-physical-keys.patch`, a change to Wine and so under Wine's
+LGPL-2.1-or-later. The files in `prebuilt/` and everything the build or the installer downloads
+keep their own licenses (see above; d9mt's are in `prebuilt/d9mt`, the Mac driver's in
+`prebuilt/winemac`).

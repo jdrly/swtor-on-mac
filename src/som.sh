@@ -5,12 +5,13 @@
 #   som.sh install     install or update; idempotent, safe to run again
 #   som.sh uninstall   revert everything (the official install goes back to stock)
 #   som.sh settings    KEY=VALUE lines: the settings (Settings window) and whether they can change
-#   som.sh set K V     change one setting (retina, hud, gamemode, vsync, debug: on/off; memory:
-#                      auto/low/medium/high/ultra/unlimited; updates: on/off)
+#   som.sh set K V     change one setting (retina, hud, gamemode, vsync, debug, physkeys: on/off;
+#                      memory: auto/low/medium/high/ultra/unlimited; updates: on/off)
 #   som.sh watch       the launchd job (cz.jandrly.swtoronmac.watch): Broadsword's Wine/bin
 #                      changed; hook the wrapper back in if a launcher update replaced it
 #   som.sh end-leftovers  end leftover Wine processes of the engine (only if no launcher,
-#                      game or Wine session runs); install, uninstall and set retina do it too
+#                      game or Wine session runs); install, uninstall and set retina/physkeys do
+#                      it too
 #
 # Environment:
 #   SWTOR_ON_MAC_ROOT=/abs/dir  sandbox for tests: the official install, the app's own files,
@@ -50,6 +51,9 @@ ENGINE_SHA256=203f9e9fd6c2cc77e6525d798a434ced326145db34a356355e05659d3445fd1c
 # two of its files, checked after unpacking (the known-good engine)
 ENGINE_PRELOADER_SHA256=e2d7662ccb7e81ebb2d3f9ed8d76a73e75bb24caec41aa8016c168bfb8e48ec4
 ENGINE_NTDLL_SHA256=81f81cf1bb70069e94fa89d53fb7327cfb52fb9629c5b84134c851e681a20235
+# its Mac driver (lib/wine/x86_64-unix/winemac.so): the app's patched build
+# (Resources/wine/winemac.so, scripts/build-winemac.sh) replaces only this one
+ENGINE_WINEMAC_SHA256=b8a0d3211182f2de2161ad5d08c9804ded76f7a92faa96cf911e54e9295e51ed
 # The libraries that engine is built against (FreeType, GnuTLS, SDL, GStreamer, ...): the
 # Contents/Frameworks folder of Sikarugir's wrapper template, used via
 # DYLD_FALLBACK_LIBRARY_PATH. Its renderer/ folder (D3DMetal, DXVK, DXMT) is not needed.
@@ -290,19 +294,22 @@ status() {
 }
 
 # --- Settings (the app's Settings window): $SETTINGS holds them as key=value; the env file,
-# dxvk.conf and the prefix's RetinaMode are made from it. They survive a reinstall.
-SETTING_KEYS="retina hud gamemode vsync debug memory updates"
+# dxvk.conf, the prefix's RetinaMode and PhysicalKeyboard and the engine's Mac driver are made
+# from it. They survive a reinstall.
+#   physkeys  "Game keys by keyboard position": the engine's Mac driver is the app's patched
+#             build (Resources/wine/winemac.so) and swtor.exe gets PhysicalKeyboard=y
+SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys"
 setting_default() {
   case "$1" in
     retina|gamemode|vsync|updates) echo on ;;
-    hud|debug) echo off ;;
+    hud|debug|physkeys) echo off ;;
     memory) echo auto ;;
   esac
 }
 setting_valid() { # <key> <value>
   case "$1:$2" in
     retina:on|retina:off|hud:on|hud:off|gamemode:on|gamemode:off|vsync:on|vsync:off) return 0 ;;
-    debug:on|debug:off|updates:on|updates:off) return 0 ;;
+    debug:on|debug:off|updates:on|updates:off|physkeys:on|physkeys:off) return 0 ;;
     memory:auto|memory:low|memory:medium|memory:high|memory:ultra|memory:unlimited) return 0 ;;
   esac
   return 1
@@ -332,23 +339,24 @@ settings() {
   for k in $SETTING_KEYS; do echo "$k=$(setting "$k")"; done
 }
 
-# set_retina <y|n>: RetinaMode of Wine's Mac driver, written straight into the prefix's
-# user.reg (Wine reads it when its wineserver starts; none may run now, see cmd_set)
-set_retina() {
+# set_reg <key> <name> <value>: a REG_SZ value in HKCU, written straight into the prefix's
+# user.reg (Wine reads it when its wineserver starts; none may run now, see cmd_set). <key> as
+# in user.reg's section headers, with doubled backslashes: Software\\Wine\\Mac Driver
+set_reg() {
   local reg="$SOM/prefix/user.reg"
   [ -f "$reg" ] || die "The Wine prefix is missing ($reg). Reinstall SWTOR on Mac."
-  if [ -n "$DRY" ]; then echo "[dry-run] RetinaMode=$1 in $reg"; return; fi
-  log "+ RetinaMode=$1 in $reg"
-  # the section header in user.reg is [Software\\Wine\\Mac Driver] <time>
-  K='[Software\\Wine\\Mac Driver]' V="$1" T="$(date +%s)" awk '
-    BEGIN { k = ENVIRON["K"]; line = "\"RetinaMode\"=\"" ENVIRON["V"] "\"" }
+  if [ -n "$DRY" ]; then echo "[dry-run] $2=$3 under $1 in $reg"; return; fi
+  log "+ $2=$3 under $1 in $reg"
+  # the section header in user.reg is [<key>] <time>
+  K="[$1]" N="\"$2\"=" V="$3" T="$(date +%s)" awk '
+    BEGIN { k = ENVIRON["K"]; n = ENVIRON["N"]; line = n "\"" ENVIRON["V"] "\"" }
     index($0, "[") == 1 {
       if (pending) { print line; pending = 0 }
       insec = (substr($0, 1, length(k)) == k && substr($0, length(k) + 1, 1) == " ")
       if (insec) { found = 1; pending = 1 }
       print; next
     }
-    insec && index($0, "\"RetinaMode\"=") == 1 { next }
+    insec && index($0, n) == 1 { next }
     pending && index($0, "#time=") == 1 { print; next }
     pending { print line; pending = 0 }
     { print }
@@ -365,14 +373,20 @@ cmd_set() {
   [ -f "$MANIFEST" ] || die "SWTOR on Mac is not installed."
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
   log "---- set $key=$value"
-  if [ "$key" = retina ]; then
-    # Wine keeps the registry in its wineserver and writes it back on exit
-    end_leftovers
-    ! running_now || die "Quit the SWTOR launcher and the game to change Retina mode."
-  fi
+  case "$key" in
+    retina|physkeys)
+      # Wine keeps the registry in its wineserver and writes it back on exit
+      end_leftovers
+      ! running_now || die "Quit the SWTOR launcher and the game to change $([ "$key" = retina ] && echo "Retina mode" || echo "this setting")." ;;
+  esac
   lock
   trap 'rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
-  if [ "$key" = retina ]; then set_retina "$([ "$value" = on ] && echo y || echo n)"; fi
+  case "$key" in
+    retina) set_reg 'Software\\Wine\\Mac Driver' RetinaMode "$([ "$value" = on ] && echo y || echo n)" ;;
+    physkeys)
+      install_winemac "$value"
+      set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' PhysicalKeyboard "$([ "$value" = on ] && echo y || echo n)" ;;
+  esac
   write_settings "$key" "$value"
   write_env >/dev/null
   write_dxvk_conf
@@ -502,6 +516,38 @@ install_engine() {
   say "Installing the d9mt bridge (winemetal) into the engine"
   copy_atomic "$RES/d9mt/winemetal.so" "$w/x86_64-unix/winemetal.so" 755
   copy_atomic "$RES/d9mt/winemetal.dll" "$w/x86_64-windows/winemetal.dll" 644
+  install_winemac "$(setting physkeys)"
+}
+
+# install_winemac <on|off>: the engine's Mac driver (lib/wine/x86_64-unix/winemac.so). On
+# ("Game keys by keyboard position"): the app's build of it with the PhysicalKeyboard option
+# (Resources/wine/winemac.so, patches/winemac-physical-keys.patch in the repository); off: the
+# engine's own, kept next to it as winemac.so.stock. Only over the engine build the patched
+# one was made from (ENGINE_WINEMAC_SHA256), so another engine never gets a mismatched driver.
+install_winemac() {
+  local u="$SOM/engine/lib/wine/x86_64-unix" src
+  if [ -n "$DRY" ]; then echo "[dry-run] engine's Mac driver: $([ "$1" = on ] && echo "the app's (PhysicalKeyboard)" || echo "the engine's own")"; return; fi
+  if [ ! -f "$u/winemac.so.stock" ]; then
+    [ "$(sha256 "$u/winemac.so")" = "$ENGINE_WINEMAC_SHA256" ] ||
+      die "The Wine engine's Mac driver (winemac.so) is not the expected build. Uninstall SWTOR on Mac and install it again."
+    run cp -p "$u/winemac.so" "$u/winemac.so.stock"
+  fi
+  [ "$(sha256 "$u/winemac.so.stock")" = "$ENGINE_WINEMAC_SHA256" ] ||
+    die "The Wine engine's copy of its Mac driver (winemac.so.stock) is damaged. Uninstall SWTOR on Mac and install it again."
+  if [ "$1" = on ]; then
+    src="$RES/wine/winemac.so"
+    [ -f "$src" ] || die "This app has no Mac driver build ($src)."
+    say "Installing the Mac driver with game keys by keyboard position (winemac.so) into the engine"
+  else
+    src="$u/winemac.so.stock"
+    say "Using the engine's own Mac driver (winemac.so)"
+  fi
+  cmp -s "$src" "$u/winemac.so" || copy_atomic "$src" "$u/winemac.so" 755
+  # the manifest says which (written by install; a settings change updates it)
+  if [ -f "$MANIFEST" ]; then
+    plutil -replace winemac -string "$([ "$1" = on ] && echo physical-keys || echo stock)" "$MANIFEST"
+    plutil -replace winemac_sha256 -string "$(sha256 "$u/winemac.so")" "$MANIFEST"
+  fi
 }
 
 install_frameworks() {
@@ -573,9 +619,10 @@ install_prefix() {
   fi
   say "Updating the prefix for the new engine (wineboot, about a minute)"
   wine_do wineboot -u || { stop_wine; die "Wine could not set up the prefix (details in $LOGS/install.log)."; }
-  say "Setting Wine options: Retina mode, mouse-look fix, d9mt for swtor.exe"
+  say "Setting Wine options: Retina mode, mouse-look fix, game keys by position, d9mt for swtor.exe"
   wine_do reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d "$([ "$(setting retina)" = on ] && echo y || echo n)" /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\X11 Driver' /v GrabPointer /t REG_SZ /d n /f &&
+    wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v PhysicalKeyboard /t REG_SZ /d "$([ "$(setting physkeys)" = on ] && echo y || echo n)" /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\DllOverrides' /v d3d9 /t REG_SZ /d native,builtin /f ||
     { stop_wine; die "Wine could not write the settings (details in $LOGS/install.log)."; }
   stop_wine
@@ -777,6 +824,8 @@ write_manifest() {
   "d9mt": "$D9MT_VERSION",
   "engine": "$ENGINE_NAME",
   "engine_sha256": "$ENGINE_SHA256",
+  "winemac": "$([ "$(setting physkeys)" = on ] && echo physical-keys || echo stock)",
+  "winemac_sha256": "$([ -n "$DRY" ] || sha256 "$SOM/engine/lib/wine/x86_64-unix/winemac.so")",
   "frameworks": "$FW_NAME",
   "frameworks_sha256": "$FW_SHA256",
   "broadsword_wine": "$BS_WINE",

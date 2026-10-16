@@ -8,9 +8,12 @@
 #   Contents/Resources/wine-wrapper.sh the wrapper template installed into Broadsword's Wine
 #   Contents/Resources/helpers/        hold-launcher, setsid-exec (universal)
 #   Contents/Resources/d9mt/           prebuilt d9mt (scripts/build-d9mt.sh)
+#   Contents/Resources/wine/winemac.so Wine's Mac driver with the PhysicalKeyboard option
+#                                      (scripts/build-winemac.sh, patches/), for the engine
 #   Contents/Resources/Licenses/       licenses of the app and the bundled components
 # The Wine engine and its libraries are not bundled: som.sh downloads them at install time
-# from Sikarugir's official releases (pinned URL + sha256 in src/som.sh).
+# from Sikarugir's official releases (pinned URL + sha256 in src/som.sh). Only the engine's
+# Mac driver comes in a patched build of its own (Resources/wine).
 #
 # Built with the macOS 27 SDK (Xcode 27; the design follows the SDK the app links against)
 # for macOS 26.0 and later.
@@ -25,7 +28,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # SWTOR_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.0.3}
+APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.0.4}
 APP_AUTHOR="Jan Drlý"
 GITHUB_URL=https://github.com/jdrly
 REPO_URL=https://github.com/jdrly/swtor-on-mac
@@ -58,6 +61,10 @@ case "$sdk" in 2[7-9]*|[3-9]*) ;; *) echo "Needs the macOS 27 SDK (Xcode 27); fo
 D9=prebuilt/d9mt
 for f in d3d9.dll winemetal.dll winemetal.so VERSION LICENSE THIRD_PARTY_NOTICES.md bridge/COPYING.LIB; do
   [ -f "$D9/$f" ] || { echo "Missing $D9/$f; run scripts/build-d9mt.sh" >&2; exit 1; }
+done
+WM=prebuilt/winemac
+for f in winemac.so VERSION COPYING.LIB LICENSE; do
+  [ -f "$WM/$f" ] || { echo "Missing $WM/$f; run scripts/build-winemac.sh" >&2; exit 1; }
 done
 
 # Sparkle (app updates, as in SWGL on Mac): the framework goes into the app, its tools
@@ -109,6 +116,11 @@ install -m 644 "$D9/winemetal.dll" "$R/d9mt/winemetal.dll"
 install -m 755 "$D9/winemetal.so" "$R/d9mt/winemetal.so"
 install -m 644 "$D9/VERSION" "$R/d9mt/VERSION"
 
+# Wine's Mac driver with the PhysicalKeyboard option; the installer puts it into its engine
+# copy while "Game keys by keyboard position" is on
+mkdir -p "$R/wine"
+install -m 755 "$WM/winemac.so" "$R/wine/winemac.so"
+
 # Licenses: the app's own (zlib), the overview of what is bundled and what is downloaded
 # (THIRD_PARTY_NOTICES.md), d9mt's (zlib; its bridge LGPL-2.1-or-later; third parties), Sparkle's
 L="$R/Licenses"
@@ -119,6 +131,8 @@ cp -R "$D9/LICENSE" "$D9/LICENSES" "$D9/THIRD_PARTY_NOTICES.md" "$L/d9mt/"
 cp "$D9/bridge/LICENSE" "$D9/bridge/COPYING.LIB" "$L/d9mt/bridge/"
 mkdir -p "$L/sparkle"
 cp "$SPARKLE/LICENSE" "$L/sparkle/LICENSE"
+mkdir -p "$L/winemac"
+cp "$WM/COPYING.LIB" "$WM/LICENSE" "$WM/VERSION" patches/winemac-physical-keys.patch "$L/winemac/"
 cat >"$L/README.txt" <<EOF
 SWTOR on Mac $APP_VERSION - licenses
 
@@ -135,6 +149,15 @@ licenses: d9mt/THIRD_PARTY_NOTICES.md and d9mt/LICENSES/.
 Sparkle $SPARKLE_VERSION (app updates), https://sparkle-project.org: MIT-style license, see
 sparkle/LICENSE.
 
+wine/winemac.so: Wine's Mac driver (dlls/winemac.drv, x86_64 unix side) from CodeWeavers'
+CrossOver 24.0.7 sources, with SWTOR on Mac's patch for the PhysicalKeyboard option ("Game keys
+by keyboard position"): LGPL-2.1-or-later, see winemac/COPYING.LIB and winemac/LICENSE. The
+patch is winemac/winemac-physical-keys.patch (also
+$REPO_URL/blob/v$APP_VERSION/patches/winemac-physical-keys.patch); the
+sources it applies to: https://media.codeweavers.com/pub/crossover/source/crossover-sources-24.0.7.tar.gz
+(https://www.codeweavers.com/crossover/source); build script:
+$REPO_URL/blob/v$APP_VERSION/scripts/build-winemac.sh.
+
 Not included in this app: the Wine engine (CrossOver 24.0.7 sources by CodeWeavers, built by
 Sikarugir, LGPL-2.1-or-later) and its libraries are downloaded at install time from
 https://github.com/Sikarugir-App (Engines and Template releases).
@@ -143,8 +166,9 @@ EOF
 # feed: Sparkle's feed, also read by the Wine wrapper's daily update check (via som.sh)
 printf 'version=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s\n' "$APP_VERSION" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" \
   "$(plutil -extract SUFeedURL raw src/Info.plist)" >"$R/app.properties"
-printf 'app %s\nd9mt %s\nengine %s\nframeworks %s\nsparkle %s\nsdk %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
-  "$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)" "$(sed -n 's/^FW_NAME=//p' src/som.sh)" "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
+printf 'app %s\nd9mt %s\nengine %s\nframeworks %s\nwinemac %s\nsparkle %s\nsdk %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
+  "$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)" "$(sed -n 's/^FW_NAME=//p' src/som.sh)" \
+  "physical-keys patch $(shasum -a 256 patches/winemac-physical-keys.patch | cut -c1-12)" "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
 
 iconset="$CACHE/AppIcon.iconset"
 rm -rf "$iconset"

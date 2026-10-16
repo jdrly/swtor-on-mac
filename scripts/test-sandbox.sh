@@ -271,6 +271,13 @@ sys="$SOM/prefix/drive_c/windows/system32"
 check "install: d9mt d3d9.dll" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
 check "install: Wine's d3d9 kept" test "$(dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=12 2>/dev/null)" = "Wine builtin"
 check "install: RetinaMode=y" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
+WM="$SOM/engine/lib/wine/x86_64-unix"
+WM_STOCK=$(sed -n 's/^ENGINE_WINEMAC_SHA256=//p' "$SOMSH")
+wm_sha() { shasum -a 256 "$WM/winemac.so" | cut -d" " -f1; }
+check "install: engine's own Mac driver (game keys by position off)" test "$(wm_sha)" = "$WM_STOCK"
+check "install: Mac driver kept as winemac.so.stock" cmp -s "$WM/winemac.so" "$WM/winemac.so.stock"
+check "install: PhysicalKeyboard=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="n"'
+check "install: manifest winemac stock" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = stock
 check "install: GrabPointer=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\X11 Driver' '"GrabPointer"="n"'
 check "install: d3d9 override" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\DllOverrides' '"d3d9"="native,builtin"'
 check "install: gamemode exe = engine preloader" cmp -s "$SOM/engine/bin/wine-preloader" "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe"
@@ -335,6 +342,57 @@ check "play: shows the launcher while it runs ($(play_target))" test "$(play_tar
 check "set hud: allowed while the launcher runs" eval 'som set hud off >/dev/null'
 kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true; rm -f "$BS_APP/Contents/MacOS/test-sleep2"
 som set retina on >/dev/null && check "set retina on again" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
+check "settings: physkeys off by default" test "$(som settings | sed -n 's/^physkeys=//p')" = off
+som set physkeys on >/dev/null && check "set physkeys on: the app's Mac driver" cmp -s "$APP/Contents/Resources/wine/winemac.so" "$WM/winemac.so"
+check "set physkeys on: PhysicalKeyboard=y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="y"'
+check "set physkeys on: manifest" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = physical-keys
+check "set physkeys on: manifest sha" test "$(plutil -extract winemac_sha256 raw -o - "$SOM/install-manifest.json")" = "$(wm_sha)"
+check "set physkeys on: RetinaMode kept" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
+out=$(env -u WINEPREFIX WINEPREFIX="$SOM/prefix" WINEDEBUG=-all DYLD_FALLBACK_LIBRARY_PATH="$SOM/frameworks:/usr/lib" \
+  "$SOM/engine/bin/wine" reg query 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v PhysicalKeyboard 2>/dev/null | tr -d '\r' || true)
+cleanup_wine
+check "set physkeys on: Wine reads y ($(echo "$out" | awk '/PhysicalKeyboard/ { print $NF }'))" test "$(echo "$out" | awk '/PhysicalKeyboard/ { print $NF }')" = y
+clang -o "$BS_APP/Contents/MacOS/test-sleep2" "$SANDBOX/sleep2.c" && { "$BS_APP/Contents/MacOS/test-sleep2" & sleeper=$!; sleep 0.5; }
+check "set physkeys: refused while the launcher runs" eval '! som set physkeys off >/dev/null 2>&1'
+check "set physkeys: driver unchanged while refused" cmp -s "$APP/Contents/Resources/wine/winemac.so" "$WM/winemac.so"
+kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true; rm -f "$BS_APP/Contents/MacOS/test-sleep2"
+
+echo "== 4c. game keys by keyboard position: what the game sees (a probe program as swtor.exe)"
+if command -v x86_64-w64-mingw32-gcc >/dev/null; then
+  mkdir -p "$SANDBOX/probe"
+  x86_64-w64-mingw32-gcc -O2 -o "$SANDBOX/probe/swtor.exe" scripts/kbprobe.c
+  # probe <input source ID>: the driver reads that keyboard layout (WINEMAC_TEST_KEYBOARD_LAYOUT,
+  # the patch's test hook), not the Mac's current one; the input source is never changed
+  probe() {
+    WINEMAC_TEST_KEYBOARD_LAYOUT="$1" WINEPREFIX="$SOM/prefix" WINEDEBUG=-all \
+      DYLD_FALLBACK_LIBRARY_PATH="$SOM/frameworks:/usr/lib" "$SOM/engine/bin/wine" "$SANDBOX/probe/swtor.exe" 2>/dev/null | tr -d '\r'
+  }
+  line() { sed -n "s/^$1: //p" <<<"$2"; }
+  cz=$(probe com.apple.keylayout.Czech); de=$(probe com.apple.keylayout.German); us=$(probe com.apple.keylayout.US)
+  cur=$(probe "")   # the Mac's current keyboard layout
+  echo "  Czech, on:  names $(line numrow-name "$cz") | typed $(line numrow-plain "$cz") | Shift $(line numrow-shift "$cz")"
+  check "keys on, Czech: number row named 1-0" test "$(line numrow-name "$cz")" = "1 2 3 4 5 6 7 8 9 0"
+  check "keys on, Czech: number row is VK_1-VK_0" test "$(line numrow-vk "$cz")" = "1 2 3 4 5 6 7 8 9 0"
+  check "keys on, Czech: types + ě š č ř ž ý á í é" test "$(line numrow-plain "$cz")" = "+ ě š č ř ž ý á í é"
+  check "keys on, Czech: Shift types 1-0" test "$(line numrow-shift "$cz")" = "1 2 3 4 5 6 7 8 9 0"
+  check "keys on, Czech: dead key ´ + e = é" grep -q "^0x0d .*(dead)+e=é" <<<"$cz"
+  check "keys on, German: key at US Y is VK_Y named Y, types z" test "$(line key-0x15 "$de")" = "vk Y name Y plain z"
+  check "keys on, US: number row" test "$(line numrow-name "$us")/$(line numrow-plain "$us")" = "1 2 3 4 5 6 7 8 9 0/1 2 3 4 5 6 7 8 9 0"
+  check "keys on, current layout: number row named 1-0" test "$(line numrow-name "$cur")" = "1 2 3 4 5 6 7 8 9 0"
+  som set physkeys off >/dev/null && check "set physkeys off: the engine's own Mac driver" test "$(wm_sha)" = "$WM_STOCK"
+  check "set physkeys off: PhysicalKeyboard=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="n"'
+  # the engine's own driver has no test hook: the Mac's current layout only
+  cur_off=$(probe "")
+  echo "  current layout, off: names $(line numrow-name "$cur_off") | typed $(line numrow-plain "$cur_off") | Shift $(line numrow-shift "$cur_off")"
+  echo "  current layout, on:  names $(line numrow-name "$cur") | typed $(line numrow-plain "$cur") | Shift $(line numrow-shift "$cur")"
+  check "keys off: number row named by what the layout types (Wine's own)" test "$(line numrow-name "$cur_off")" = "$(line numrow-plain "$cur_off")"
+  check "keys off and on: the same text" test "$(line numrow-plain "$cur_off")/$(line numrow-shift "$cur_off")" = "$(line numrow-plain "$cur")/$(line numrow-shift "$cur")"
+  cleanup_wine
+  check "keyboard probe: no Wine left running" test -z "$(sandbox_wine)"
+  som set physkeys on >/dev/null
+else
+  echo "  (skipped: no x86_64-w64-mingw32-gcc for the probe program)"
+fi
 
 echo "== 5. the wrapper hands Wine calls to the app's engine"
 out=$("$BS_WINE/bin/wine64-preloader" "$BS_WINE/bin/wine64" --version 2>&1 || true)
@@ -352,6 +410,10 @@ check "reinstall: no Wine left running" test -z "$(sandbox_wine)"
 check "reinstall: settings kept" eval 'grep -qx memory=high "$SOM/settings.conf" && grep -qx D9MT_MEMORY_PROFILE=high "$SOM/env" && grep -qx DXVK_LOG_LEVEL=info "$SOM/env"'
 check "reinstall: vsync stays off" eval '! grep -q "^d3d9.presentInterval" "$SOM/dxvk.conf"'
 check "reinstall: Retina stays on" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
+check "reinstall: the app's Mac driver stays" cmp -s "$APP/Contents/Resources/wine/winemac.so" "$WM/winemac.so"
+check "reinstall: PhysicalKeyboard stays y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="y"'
+check "reinstall: manifest winemac physical-keys" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = physical-keys
+som set physkeys off >/dev/null && check "set physkeys off again: stock driver" test "$(wm_sha)" = "$WM_STOCK"
 som set vsync on >/dev/null; som set debug off >/dev/null; som set memory auto >/dev/null
 som set gamemode on >/dev/null; som set updates on >/dev/null
 check "settings: back to the defaults" test "$(som settings | sed -n 's/^debug=//p')" = off
