@@ -1,0 +1,99 @@
+# Builds, signs and notarizes SWTOR on Mac on GitHub's macOS runners.
+#   Push a tag v<version>: creates the draft release v<version> with the notarized DMG;
+#   publishing the draft releases it.
+#   Run it by hand (Actions -> Release -> Run workflow): the same build, signing and
+#   notarization without a release; the DMG is kept as an artifact for a day.
+#
+# Secrets live in the `release` environment, which only runs for v* tags and after Jan
+# approves the run:
+#   DEVELOPER_ID_P12         the Developer ID Application certificate and key, base64 .p12
+#   DEVELOPER_ID_P12_PASSWORD
+#   NOTARY_KEY_P8            App Store Connect API key for notarytool, base64 .p8
+#   NOTARY_KEY_ID, NOTARY_ISSUER
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # gh release create
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-27
+    environment: release
+    timeout-minutes: 240
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the version
+        run: |
+          # shellcheck disable=SC2016 # ${SWTOR_ON_MAC_VERSION:-…} is text for sed to match
+          version="$(sed -n 's/^APP_VERSION=\${SWTOR_ON_MAC_VERSION:-\(.*\)}$/\1/p' build.sh)"
+          echo "build.sh version: $version"
+          if [ "$DRY_RUN" = false ]; then
+            [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "Tag $GITHUB_REF_NAME does not match build.sh ($version)"; exit 1; }
+            [ -f "release-notes/$version.md" ] || { echo "Missing release-notes/$version.md"; exit 1; }
+          fi
+
+      - name: Import the signing certificate
+        env:
+          P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          kc_password="$(openssl rand -hex 24)"
+          printf '%s' "$P12" | base64 -D >"$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$kc_password" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kc_password" "$kc"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kc_password" "$kc" >/dev/null
+          keychains=()
+          while IFS= read -r k; do keychains+=("$k"); done < <(security list-keychains -d user | sed 's/^ *"//; s/"$//')
+          security list-keychains -d user -s "$kc" "${keychains[@]}"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$kc"
+
+      - name: Write the notary key
+        env:
+          P8: ${{ secrets.NOTARY_KEY_P8 }}
+        run: |
+          umask 077
+          printf '%s' "$P8" | base64 -D >"$RUNNER_TEMP/notary.p8"
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Sign, package and notarize
+        env:
+          NOTARY_KEY: ${{ runner.temp }}/notary.p8
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$DRY_RUN" = true ]; then scripts/release.sh --ci-dry-run; else scripts/release.sh --ci; fi
+
+      - name: Keep the DMG (dry run)
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dmg
+          path: release/*/SWTOR-on-Mac-*.dmg
+          retention-days: 1
+
+      - name: Remove the keychain and key
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/cert.p12"

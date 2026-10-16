@@ -47,6 +47,8 @@ DRY="${SWTOR_ON_MAC_DRY_RUN:-}"
 FORCE="${SWTOR_ON_MAC_FORCE:-}"
 if [ -n "$ROOT" ]; then
   case "$ROOT" in /*) ;; *) echo "@error SWTOR_ON_MAC_ROOT must be an absolute path"; exit 2 ;; esac
+  # the real path (/tmp is /private/tmp): process paths are matched against it
+  if [ -d "$ROOT" ]; then ROOT="$(cd "$ROOT" && pwd -P)"; fi
   H="$ROOT/home"
   APPS="$ROOT/Applications"
   USER_TMP="$ROOT/usertmp/"
@@ -329,8 +331,10 @@ wine_do() {
 stop_wine() {
   [ -n "$DRY" ] && { echo "[dry-run] wineserver -k"; return; }
   [ -x "$SOM/engine/bin/wineserver" ] || return 0
-  WINEPREFIX="$SOM/prefix" "$SOM/engine/bin/wineserver" -k >>"$LOGFILE" 2>&1 || true
-  WINEPREFIX="$SOM/prefix" "$SOM/engine/bin/wineserver" -w >>"$LOGFILE" 2>&1 || true
+  # (wineserver needs the engine libraries too: libinotify)
+  local fb="$SOM/frameworks:/usr/lib"
+  WINEPREFIX="$SOM/prefix" DYLD_FALLBACK_LIBRARY_PATH="$fb" "$SOM/engine/bin/wineserver" -k >>"$LOGFILE" 2>&1 || true
+  WINEPREFIX="$SOM/prefix" DYLD_FALLBACK_LIBRARY_PATH="$fb" "$SOM/engine/bin/wineserver" -w >>"$LOGFILE" 2>&1 || true
   local left
   for _ in 1 2 3 4 5; do
     left=$(ps -axww -o pid=,comm= | awk -v e="$SOM/engine/" -v t="$(winetemp_tag)" \

@@ -528,9 +528,12 @@ struct ActionBar: View {
       HStack(spacing: 12) {
         if installer.isBusy {
           Spacer()
-          Button("Cancel") { installer.cancel() }
-            .buttonStyle(.glass)
-            .keyboardShortcut(.cancelAction)
+          // An install rolls back when cancelled; an uninstall is quick and runs to the end.
+          if installer.phase == .working(.install) {
+            Button("Cancel") { installer.cancel() }
+              .buttonStyle(.glass)
+              .keyboardShortcut(.cancelAction)
+          }
         } else {
           if installer.canUninstall {
             Button("Uninstall…", role: .destructive, action: uninstall)

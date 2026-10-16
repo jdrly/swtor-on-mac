@@ -98,7 +98,7 @@ cat >"$L/README.txt" <<EOF
 SWTOR on Mac $APP_VERSION - licenses
 
 SWTOR on Mac's own code (the app, som.sh, the Wine wrapper, hold-launcher, setsid-exec):
-MIT, see SWTOR-on-Mac-LICENSE.txt.
+zlib license, see SWTOR-on-Mac-LICENSE.txt.
 
 d9mt ($(cat "$D9/VERSION")), https://github.com/jdrly/d9mt (based on neo773/d9mt-v2):
 d3d9.dll is zlib/libpng (d9mt/LICENSE); the winemetal bridge (winemetal.so, winemetal.dll)
