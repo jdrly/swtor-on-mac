@@ -109,10 +109,12 @@ install -m 644 "$D9/winemetal.dll" "$R/d9mt/winemetal.dll"
 install -m 755 "$D9/winemetal.so" "$R/d9mt/winemetal.so"
 install -m 644 "$D9/VERSION" "$R/d9mt/VERSION"
 
-# Licenses: the app's own (MIT) and d9mt's (zlib; its bridge LGPL-2.1-or-later; third parties)
+# Licenses: the app's own (zlib), the overview of what is bundled and what is downloaded
+# (THIRD_PARTY_NOTICES.md), d9mt's (zlib; its bridge LGPL-2.1-or-later; third parties), Sparkle's
 L="$R/Licenses"
 mkdir -p "$L/d9mt/bridge"
 cp LICENSE "$L/SWTOR-on-Mac-LICENSE.txt"
+cp THIRD_PARTY_NOTICES.md "$L/THIRD_PARTY_NOTICES.md"
 cp -R "$D9/LICENSE" "$D9/LICENSES" "$D9/THIRD_PARTY_NOTICES.md" "$L/d9mt/"
 cp "$D9/bridge/LICENSE" "$D9/bridge/COPYING.LIB" "$L/d9mt/bridge/"
 mkdir -p "$L/sparkle"
@@ -121,7 +123,8 @@ cat >"$L/README.txt" <<EOF
 SWTOR on Mac $APP_VERSION - licenses
 
 SWTOR on Mac's own code (the app, som.sh, the Wine wrapper, hold-launcher, setsid-exec):
-zlib license, see SWTOR-on-Mac-LICENSE.txt.
+zlib license, see SWTOR-on-Mac-LICENSE.txt. What the app bundles and what it downloads at
+install time: THIRD_PARTY_NOTICES.md.
 
 d9mt ($(cat "$D9/VERSION")), https://github.com/jdrly/d9mt (based on neo773/d9mt-v2):
 d3d9.dll is zlib/libpng (d9mt/LICENSE); the winemetal bridge (winemetal.so, winemetal.dll)

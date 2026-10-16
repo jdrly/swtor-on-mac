@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting
+    url: https://github.com/jdrly/swtor-on-mac#troubleshooting
+    about: Common problems and what to do about them.
+  - name: Problems with SWTOR itself (not caused by SWTOR on Mac)
+    url: https://www.swtor.com
+    about: If it also happens after Uninstall (with the official app alone), it is a question for Broadsword. Please don't mention SWTOR on Mac to them.

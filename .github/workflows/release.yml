@@ -6,8 +6,10 @@
 #   Run it by hand (Actions -> Release -> Run workflow): the same build, signing and
 #   notarization without a release; the DMG is kept as an artifact for a day.
 #
-# Secrets live in the `release` environment, which only runs for v* tags and after Jan
-# approves the run:
+# Runs on xcode-27 (macOS 27 with Xcode 27, a public preview image; see checks.yml).
+#
+# Secrets live in the `release` environment, which only runs for v* tags and main (the manual
+# dry run) and after Jan approves the run (a required reviewer on the environment):
 #   DEVELOPER_ID_P12         the Developer ID Application certificate and key, base64 .p12
 #   DEVELOPER_ID_P12_PASSWORD
 #   NOTARY_KEY_P8            App Store Connect API key for notarytool, base64 .p8
@@ -28,7 +30,7 @@ concurrency:
 
 jobs:
   release:
-    runs-on: macos-27
+    runs-on: xcode-27
     environment: release
     timeout-minutes: 240
     env:

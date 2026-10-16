@@ -39,7 +39,11 @@ jobs:
           "$RUNNER_TEMP/actionlint" -color
 
   build:
-    runs-on: macos-27
+    # build.sh needs the macOS 27 SDK. GitHub has no macos-27 label; its macOS 27 image with
+    # Xcode 27 (the default /Applications/Xcode.app) is xcode-27, a public preview
+    # (actions/runner-images#14404; .github/actionlint.yaml lists it). macos-26 has only
+    # Xcode 26.
+    runs-on: xcode-27
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -61,7 +65,8 @@ jobs:
                    Contents/Resources/helpers/hold-launcher Contents/Resources/helpers/setsid-exec \
                    Contents/Resources/d9mt/d3d9.dll Contents/Resources/d9mt/winemetal.so \
                    Contents/Resources/collect-logs.sh Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle \
-                   Contents/Resources/Licenses/d9mt/bridge/COPYING.LIB Contents/Resources/Licenses/sparkle/LICENSE; do
+                   Contents/Resources/Licenses/d9mt/bridge/COPYING.LIB Contents/Resources/Licenses/sparkle/LICENSE \
+                   Contents/Resources/Licenses/SWTOR-on-Mac-LICENSE.txt Contents/Resources/Licenses/THIRD_PARTY_NOTICES.md; do
             [ -e "$app/$f" ] || { echo "missing: $f"; exit 1; }
           done
           for h in "$app/Contents/Resources/helpers/"*; do

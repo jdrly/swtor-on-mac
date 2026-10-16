@@ -1,0 +1,11 @@
+name: Idea or request
+description: Suggest an improvement to SWTOR on Mac.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: What you'd like SWTOR on Mac to do, and why it would help you.
+    validations:
+      required: true

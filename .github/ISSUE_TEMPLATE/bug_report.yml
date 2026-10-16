@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in SWTOR on Mac does not work (install, the game, updates, uninstall).
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! SWTOR on Mac is an unofficial project: please report problems
+        here or to Pharaphobia on Discord, never to Broadsword or SWTOR customer support.
+
+        **Please attach the Collect Logs zip:** in SWTOR on Mac choose
+        **SWTOR on Mac > Collect Logs…**; it saves `SWTOR-on-Mac-logs-<date>.zip` to your
+        Desktop. Account names, e-mail addresses and your user name are already removed from
+        it. Never post your password or the launcher's command line.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. When did it happen (time, in the launcher or in game, which area)?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Collect Logs zip
+      description: Drag the SWTOR-on-Mac-logs-<date>.zip file here.
+      placeholder: Drop the zip here
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: SWTOR on Mac version
+      description: SWTOR on Mac > About SWTOR on Mac.
+      placeholder: "0.0.1"
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac and macOS
+      placeholder: "MacBook Pro M3 Pro, 18 GB, macOS 26.4"
+    validations:
+      required: true
+  - type: dropdown
+    id: official
+    attributes:
+      label: Does the same happen with the official app alone?
+      description: After Uninstall, the official app runs exactly as Broadsword ships it.
+      options:
+        - I haven't tried
+        - "No, only with SWTOR on Mac"
+        - "Yes, also without SWTOR on Mac"
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, display setup (external monitor, refresh rate), settings you changed.
