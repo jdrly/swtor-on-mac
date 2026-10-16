@@ -1067,7 +1067,7 @@ cmd_install() {
   install_agent || warn "The launcher-update guard (a launchd job) could not be set up; after a launcher update, open SWTOR on Mac and click Reinstall."
   [ -n "$DRY" ] || rm -rf "$CACHE/downloads"
   log "install complete"
-  echo "@done SWTOR on Mac $VERSION is installed. Start SWTOR from the official app as usual."
+  echo "@done SWTOR on Mac $VERSION is installed. Press Play SWTOR, or start SWTOR from the official app as usual."
 }
 
 cmd_uninstall() {

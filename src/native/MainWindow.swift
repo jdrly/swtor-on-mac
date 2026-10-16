@@ -1,7 +1,8 @@
 // The main window (SwiftUI, macOS 27 design): a hero with an animated deep-space background,
-// status tiles in glass, and the install panel with one big action and a timeline of the steps
-// (src/som.sh announces them with "@phase <n>"). The notice must be accepted, in a sheet,
-// before anything can be installed; afterwards a badge in the hero shows it again.
+// status tiles in glass, and the install panel with one big action (Install; once installed,
+// Play SWTOR) and a timeline of the steps (src/som.sh announces them with "@phase <n>"). The
+// notice must be accepted, in a sheet, before anything can be installed; afterwards a badge in
+// the hero shows it again.
 //
 // Resizable both ways: two columns when wide (nothing scrolls), one column when narrow (that
 // column is the only scroll area). The install log is a sheet (Show Log).
@@ -132,7 +133,7 @@ struct MainView: View {
   }
 
   private var actions: PanelActions {
-    PanelActions(install: askInstall, uninstall: askUninstall,
+    PanelActions(play: play, install: askInstall, uninstall: askUninstall,
                  review: { showNotice = true }, showLog: { showLogSheet = true },
                  settings: { settings.reload(); openWindow(id: "settings") },
                  endLeftovers: endLeftovers)
@@ -179,6 +180,12 @@ struct MainView: View {
     }
   }
 
+  private func play() {
+    installer.play { error in
+      if let error { blocked = Blocked(title: "Can't open SWTOR", message: error) }
+    }
+  }
+
   private func endLeftovers() {
     installer.endLeftovers { error in
       if let error { blocked = Blocked(title: "Could not end the leftover Wine processes", message: error) }
@@ -191,6 +198,7 @@ struct MainView: View {
 }
 
 struct PanelActions {
+  let play: () -> Void
   let install: () -> Void
   let uninstall: () -> Void
   let review: () -> Void
@@ -574,7 +582,8 @@ struct LeftoversNote: View {
   }
 }
 
-// The one big action, and the secondary ones once installed.
+// The one big action (Install; once installed, Play SWTOR), and the secondary ones once
+// installed.
 struct PrimaryAction: View {
   @Bindable var installer: Installer
   let actions: PanelActions
@@ -651,33 +660,24 @@ struct PrimaryAction: View {
     }
   }
 
+  // Installed: Play SWTOR (or Repair/Update first, Play then among the secondary actions),
+  // a line with the version or why Play can't go ahead, and Reinstall, Settings, Uninstall.
   private var installed: some View {
     VStack(alignment: .leading, spacing: 10) {
       let repair = installer.wrapper == "replaced"
-      if repair || installer.installedOtherVersion {
+      let fixFirst = repair || installer.installedOtherVersion
+      if fixFirst {
         big(repair ? "Repair the Launcher Hook" : "Update to \(installer.appVersion)",
             symbol: repair ? "wrench.and.screwdriver.fill" : "arrow.triangle.2.circlepath", action: actions.install)
           .disabled(!installer.canInstall)
       } else {
-        HStack(spacing: 12) {
-          Image(systemName: "checkmark.seal.fill")
-            .font(.title2)
-            .foregroundStyle(.green)
-            .symbolEffect(.bounce, value: installer.installed)
-          VStack(alignment: .leading, spacing: 1) {
-            Text("Installed").font(.title3.weight(.semibold))
-            Text("Version \(installer.status["installed_version"] ?? "?")").font(.caption).foregroundStyle(.secondary)
-          }
-          Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .glassEffect(.regular.tint(.green.opacity(0.18)), in: .capsule)
-        .accessibilityElement(children: .combine)
+        PlayButton(installer: installer, action: actions.play, prominent: true)
       }
+      installedLine
       HStack(spacing: 10) {
-        if !repair && !installer.installedOtherVersion {
+        if fixFirst {
+          PlayButton(installer: installer, action: actions.play, prominent: false)
+        } else {
           Button(action: actions.install) { Label("Reinstall", systemImage: "arrow.clockwise") }
             .disabled(!installer.canInstall)
         }
@@ -692,6 +692,87 @@ struct PrimaryAction: View {
       .tint(nil)
       .controlSize(.large)
       .pointerStyle(.link)
+    }
+  }
+
+  // "Installed · Version 0.0.3", or why Play can't go ahead
+  @ViewBuilder private var installedLine: some View {
+    if case .unavailable(let reason) = installer.playAction, installer.loaded {
+      Label(reason, systemImage: "exclamationmark.circle.fill")
+        .font(.callout)
+        .foregroundStyle(.orange)
+        .fixedSize(horizontal: false, vertical: true)
+    } else {
+      Label {
+        Text("Installed · Version \(installer.status["installed_version"] ?? "?")")
+      } icon: {
+        Image(systemName: "checkmark.seal.fill")
+          .foregroundStyle(.green)
+          .symbolEffect(.bounce, value: installer.installed)
+      }
+      .font(.callout)
+      .foregroundStyle(.secondary)
+      .accessibilityElement(children: .combine)
+    }
+  }
+}
+
+// Play SWTOR: opens the official app; Show SWTOR Launcher (or Show SWTOR, the game) if it
+// already runs; disabled with the reason when it can't (Play.swift).
+struct PlayButton: View {
+  let installer: Installer
+  let action: () -> Void
+  let prominent: Bool
+
+  var body: some View {
+    let play = installer.playAction
+    let button = Button(action: action) {
+      Group {
+        if installer.launching {
+          HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Opening SWTOR…") }
+        } else {
+          Label(title(play), systemImage: symbol(play))
+        }
+      }
+      .font(prominent ? .title3.weight(.semibold) : nil)
+      .frame(maxWidth: prominent ? .infinity : nil)
+      .padding(.vertical, prominent ? 4 : 0)
+    }
+    .disabled(!enabled(play) || installer.launching)
+    .accessibilityLabel(installer.launching ? "Opening SWTOR" : title(play))
+    .accessibilityHint(hint(play))
+    .help(hint(play))
+    .pointerStyle(.link)
+    if prominent {
+      button
+        .buttonStyle(.glassProminent)
+        .controlSize(.extraLarge)
+        .keyboardShortcut(.defaultAction)
+    } else {
+      button
+    }
+  }
+
+  private func enabled(_ play: PlayAction) -> Bool {
+    if case .unavailable = play { false } else { true }
+  }
+
+  private func title(_ play: PlayAction) -> String {
+    switch play {
+    case .show(let game): game ? "Show SWTOR" : "Show SWTOR Launcher"
+    default: "Play SWTOR"
+    }
+  }
+
+  private func symbol(_ play: PlayAction) -> String {
+    if case .show = play { "macwindow" } else { "play.fill" }
+  }
+
+  private func hint(_ play: PlayAction) -> String {
+    switch play {
+    case .launch: "Opens the official SWTOR app; the game runs on SWTOR on Mac's engine."
+    case .show(let game): game ? "Brings the game to the front." : "Brings the SWTOR launcher to the front."
+    case .unavailable(let reason): reason
     }
   }
 }
@@ -912,7 +993,8 @@ struct Outcome: View {
 struct ReadyNote: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Label("Start SWTOR from the official app as usual: the game runs on SWTOR on Mac's engine.",
+      Label("Press Play SWTOR, or start the official SWTOR app as usual: the game runs on SWTOR on "
+            + "Mac's engine.",
             systemImage: "play.circle.fill")
         .font(.callout)
       Label(firstRunNote, systemImage: "info.circle")

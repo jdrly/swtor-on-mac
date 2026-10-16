@@ -1,7 +1,8 @@
 // The Settings window (SWTOR on Mac > Settings…, ⌘,), only while SWTOR on Mac is installed.
 // Reads and changes the settings through Resources/som.sh (`settings`, `set <key> <value>`),
 // which keeps them in settings.conf and writes the env file, dxvk.conf and the prefix's
-// RetinaMode from it. They take effect the next time the game starts.
+// RetinaMode from it. They take effect the next time the game starts. "Quit SWTOR on Mac after
+// launching" is the app's own (UserDefaults).
 
 import AppKit
 import SwiftUI
@@ -72,6 +73,8 @@ final class GameSettings {
 
 struct SettingsView: View {
   @Bindable var settings: GameSettings
+  // the app's own preference (UserDefaults, not settings.conf; Play.swift)
+  @AppStorage(Installer.quitAfterLaunchKey) private var quitAfterLaunch = false
 
   var body: some View {
     Form {
@@ -108,6 +111,14 @@ struct SettingsView: View {
           Text("Show Metal HUD")
           Text("Apple's overlay with the frame rate and frame times, over the game. Turn it on here "
                + "before starting the game: it can't be switched with a key while the game runs.")
+        }
+      }
+
+      Section("Play Button") {
+        Toggle(isOn: $quitAfterLaunch) {
+          Text("Quit SWTOR on Mac after launching")
+          Text("Play SWTOR opens the official SWTOR app, then SWTOR on Mac quits. It doesn't need "
+               + "to stay open while you play.")
         }
       }
 

@@ -86,4 +86,9 @@ jobs:
           out="$(SWTOR_ON_MAC_ROOT="$RUNNER_TEMP/sandbox" "dist/SWTOR on Mac.app/Contents/Resources/som.sh" status)"
           echo "$out"
           grep -qx 'official_app=no' <<<"$out"
-          ! SWTOR_ON_MAC_ROOT="$RUNNER_TEMP/sandbox" "dist/SWTOR on Mac.app/Contents/Resources/som.sh" install
+          # (refuses: no official install)
+          if SWTOR_ON_MAC_ROOT="$RUNNER_TEMP/sandbox" "dist/SWTOR on Mac.app/Contents/Resources/som.sh" install; then exit 1; fi
+          # the Play button: never the real app, in a sandbox without an official app
+          play="$(SWTOR_ON_MAC_ROOT="$RUNNER_TEMP/sandbox" "dist/SWTOR on Mac.app/Contents/MacOS/SWTORonMac" --play-target)"
+          echo "$play"
+          grep -q '^unavailable The official SWTOR app was not found' <<<"$play"

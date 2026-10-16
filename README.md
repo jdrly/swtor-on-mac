@@ -4,7 +4,7 @@ A small macOS app that makes the official [Star Wars: The Old Republic](https://
 Mac app run faster on Apple Silicon. It installs a performance setup on top of your existing
 official install: the game's Direct3D 9 goes straight to Metal with
 [d9mt](https://github.com/jdrly/d9mt), on a newer Wine (CrossOver 24.0.7), with macOS Game
-Mode. You keep starting the game from the official app, as usual.
+Mode. You start the game with **Play SWTOR** in its window, or from the official app as usual.
 
 > **SWTOR on Mac is an unofficial community project.** It is not made, endorsed or supported
 > by Broadsword Games, Electronic Arts, Lucasfilm or Disney. Broadsword doesn't support
@@ -62,8 +62,8 @@ window).
 3. Open **SWTOR on Mac**, click **Review the Notice…**, read it, tick *I understand, and I use
    SWTOR on Mac at my own risk* and click **Continue**, then **Install SWTOR on Mac**. It takes
    a minute or two; the window shows each step.
-4. Start SWTOR from the official app as usual. The launcher looks and works the same; the game
-   runs on SWTOR on Mac's engine.
+4. Click **Play SWTOR** (or start SWTOR from the official app as usual). The launcher looks and
+   works the same; the game runs on SWTOR on Mac's engine.
 
 The app is signed and notarized by Apple. It checks for updates once a day and offers new
 versions with a click (see [Updates](#updates)).
@@ -80,9 +80,16 @@ settings and SWTOR on Mac's settings.
 
 - **SWTOR on Mac menu:** *About SWTOR on Mac*, *Check for Updates…*, *Settings…* (⌘,) and
   *Collect Logs…* (see [Reporting problems](#reporting-problems)).
+- **Play SWTOR**, the big button once SWTOR on Mac is installed (and at the end of an install),
+  opens the official SWTOR app; log in and press Play in its launcher as usual. If the launcher
+  or the game already runs, the button says **Show SWTOR Launcher** (or *Show SWTOR*) and
+  brings it to the front. It is off, with the reason under it, while the official app is
+  missing, the launcher hook is not active (*Repair the Launcher Hook* comes first then) or an
+  install runs. Turn on *Quit SWTOR on Mac after launching* in Settings to have the app quit
+  once the official app is open.
 - **The window** shows the state of this Mac (the official app, Rosetta, SWTOR on Mac, the
   launcher hook, d9mt and the engine) and offers Reinstall, Settings and Uninstall. It looks
-  again whenever it becomes active and when the launcher or the game quits.
+  again whenever it becomes active and when the launcher or the game starts or quits.
 - SWTOR on Mac does not need to be open to play: the official app starts the game on SWTOR on
   Mac's engine by itself.
 
@@ -100,9 +107,11 @@ next time the game starts.
 | Show Metal HUD | off | `MTL_HUD_ENABLED=1` in `env`. It can't be toggled with a key in the game; turn it on here before starting the game |
 | Check for updates automatically | on | Sparkle's automatic checks and the daily check at the game's start |
 | Debug Logging | off | `DXVK_LOG_LEVEL=info`, `D9MT_PROFILE=1`, `D9MT_MEMSTATS=1` (else `DXVK_LOG_LEVEL=warn`) |
+| Quit SWTOR on Mac after launching | off | The app quits once **Play SWTOR** has opened the official app (the app's own preference) |
 
 They are kept in `~/Library/Application Support/SWTOR on Mac/settings.conf`; `env` and
-`dxvk.conf` are made from it (`som.sh settings`, `som.sh set <key> <value>`).
+`dxvk.conf` are made from it (`som.sh settings`, `som.sh set <key> <value>`). *Quit SWTOR on
+Mac after launching* is kept in the app's preferences instead.
 
 ## Updates
 
@@ -306,14 +315,15 @@ it says so and leaves it alone unless you confirm; it then keeps a copy in `back
 `som.sh` takes `SWTOR_ON_MAC_ROOT=/abs/dir` (every path, official install included, under that
 directory) and `SWTOR_ON_MAC_DRY_RUN=1` (print the changes, make none). The app passes both on,
 so `SWTOR_ON_MAC_ROOT=/tmp/x "SWTOR on Mac.app/Contents/MacOS/SWTORonMac"` shows the window for
-a sandbox. In a sandbox the launchd job is written but not loaded, and notifications go to
-`notifications.log`. `scripts/test-sandbox.sh` builds a sandbox from APFS clones of this Mac's
+a sandbox. In a sandbox the launchd job is written but not loaded, notifications go to
+`notifications.log`, and Play SWTOR opens only the sandbox's official app
+(`SWTORonMac --play-target` prints what the button would do, without opening anything). `scripts/test-sandbox.sh` builds a sandbox from APFS clones of this Mac's
 official install and runs install, the settings, reinstall, the wrapper's update check (with a
 stub engine and a local feed), a simulated launcher update and the launchd job's repair (run as
 launchd would), leftover Wine processes (dummy programs under the sandbox engine: what
 `status` reports, that only they end, from `end-leftovers`, install, uninstall, the wrapper and
 `hold-launcher` after a fake launcher and game, and never while a wineserver runs), a failed
-install, Collect Logs, the conflict cases and uninstall end to end, checking that uninstall
+install, Collect Logs, what Play SWTOR would open, the conflict cases and uninstall end to end, checking that uninstall
 restores Broadsword's folder byte for byte, copies the game settings back and that no Wine
 process is left behind. `scripts/test-update.sh` tests app updates with two Developer ID builds
 and a local feed, as in SWGL on Mac.

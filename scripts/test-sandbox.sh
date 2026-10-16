@@ -31,6 +31,8 @@ bad() { echo "  FAIL $*"; fail=$((fail + 1)); }
 check() { local what=$1; shift; if "$@"; then ok "$what"; else bad "$what"; fi; }
 som() { "$SOMSH" "$@"; }
 st() { som status | sed -n "s/^$1=//p"; }
+# what the window's Play button would do (the app's own resolution; nothing is opened)
+play_target() { "$APP/Contents/MacOS/SWTORonMac" --play-target 2>/dev/null; }
 is_macho() { file -b "$1" | grep -q '^Mach-O'; }
 # reg_has <key as in user.reg, with \\> <value line>: the value is set under that key
 reg_has() {
@@ -113,6 +115,7 @@ like_stock() {
 check "fake official install is stock" test "$(st wrapper)" = stock
 check "status: official app found" test "$(st official_app)" = yes
 check "status: not installed" test "$(st installed)" = no
+check "play: unavailable before install ($(play_target))" test "$(play_target)" = "unavailable Install SWTOR on Mac first."
 
 echo "== 1. dry run changes nothing"
 SWTOR_ON_MAC_DRY_RUN=1 som install >"$SANDBOX/dry-run.txt" 2>&1 || { cat "$SANDBOX/dry-run.txt"; bad "dry run exit"; }
@@ -293,9 +296,16 @@ check "install: launchd job not at load" test "$(plutil -extract RunAtLoad raw -
 check "install: launchd job throttled" test "$(plutil -extract ThrottleInterval raw -o - "$AGENT_PLIST")" = 30
 check "install: launchd job runs the agent copy" test "$(plutil -extract ProgramArguments.1 raw -o - "$AGENT_PLIST")" = "$SOM/agent/som.sh"
 check "install: agent copy" test -f "$SOM/agent/som.sh" -a -f "$SOM/agent/wine-wrapper.sh" -a -x "$SOM/agent/helpers/hold-launcher"
-check "install: launchd job not loaded (sandbox)" eval '! launchctl print "gui/$(id -u)/cz.jandrly.swtoronmac.watch" >/dev/null 2>&1'
+# (a real install's job may be loaded: it must not be the sandbox's)
+check "install: launchd job not loaded (sandbox)" eval '! launchctl print "gui/$(id -u)/cz.jandrly.swtoronmac.watch" 2>/dev/null | grep -qF "$SOM/"'
 check "install: status watch_agent" test "$(st watch_agent)" = yes
 check "install: manifest settings user" test -n "$(plutil -extract settings_user raw -o - "$SOM/install-manifest.json")"
+check "play: opens the sandbox's official app ($(play_target))" test "$(play_target)" = "launch $BS_APP"
+# without it the button is off: never the real app in /Applications (Launch Services' lookup
+# by bundle id is only for the real system)
+mv "$BS_APP" "$SANDBOX/official-app-away"
+check "play: sandbox app gone, not the real one ($(play_target))" eval 'play_target | grep -q "^unavailable The official SWTOR app was not found"'
+mv "$SANDBOX/official-app-away" "$BS_APP"
 
 echo "== 4b. settings"
 check "settings: listed" test "$(som settings | sed -n 's/^vsync=//p')" = on
@@ -321,6 +331,7 @@ printf '#include <unistd.h>\nint main(void) { sleep(30); return 0; }\n' >"$SANDB
 clang -o "$BS_APP/Contents/MacOS/test-sleep2" "$SANDBOX/sleep2.c"
 "$BS_APP/Contents/MacOS/test-sleep2" & sleeper=$!; sleep 0.5
 check "set retina: refused while the launcher runs" eval '! som set retina on >/dev/null 2>&1'
+check "play: shows the launcher while it runs ($(play_target))" test "$(play_target)" = "show launcher"
 check "set hud: allowed while the launcher runs" eval 'som set hud off >/dev/null'
 kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true; rm -f "$BS_APP/Contents/MacOS/test-sleep2"
 som set retina on >/dev/null && check "set retina on again" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
@@ -467,6 +478,7 @@ launcher_update() {
 }
 launcher_update
 check "update: status replaced" test "$(st wrapper)" = replaced
+check "play: off until the hook is repaired" eval 'play_target | grep -q "^unavailable A launcher update removed the hook"'
 som install >"$SANDBOX/reinstall2.txt" 2>&1 || bad "reinstall after update"
 check "update: wrapper back" test "$(st wrapper)" = ours
 echo "== 7b. ...and the launchd job puts it back by itself"
@@ -520,6 +532,7 @@ check "uninstall: the leftover is gone" all_gone "$l8"
 check "uninstall: @done" grep -q '^@done' "$SANDBOX/uninstall.txt"
 check "uninstall: official install identical to stock" like_stock uninstall
 check "uninstall: status stock" test "$(st wrapper)" = stock
+check "play: unavailable after uninstall" test "$(play_target)" = "unavailable Install SWTOR on Mac first."
 for c in engine frameworks prefix gamemode env dxvk.conf install-manifest.json; do
   check "uninstall: $c removed" test ! -e "$SOM/$c"
 done

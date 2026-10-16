@@ -103,6 +103,12 @@ final class Installer {
   var leftovers: Bool { busy == "leftovers" }
   // ending them (End Leftover Wine Processes)
   var endingLeftovers = false
+  // the launcher or the game runs (NSWorkspace; the Play button brings it to the front), and
+  // the Play button is opening the official app (Play.swift)
+  var runningLauncher = false
+  var runningGame = false
+  var launching = false
+  var launchID = 0
   var wrapper: String { status["wrapper"] ?? "" }
   // a wrapper (or its leftovers) that is not ours: install/uninstall ask before going ahead
   var otherWrapper: Bool { wrapper == "personal" || wrapper == "foreign" || (wrapper == "replaced" && !installed) }
@@ -154,13 +160,12 @@ final class Installer {
   func refresh(then: (() -> Void)? = nil) {
     guard !isBusy else { then?(); return }
     Task {
-      var values: [String: String] = [:]
-      let output = await Installer.capture(script: script, arguments: ["status"])
-      for line in output.split(separator: "\n") {
-        guard let eq = line.firstIndex(of: "=") else { continue }
-        values[String(line[..<eq])] = String(line[line.index(after: eq)...])
-      }
+      let values = Installer.parseStatus(await Installer.capture(script: script, arguments: ["status"]))
       status = values
+      let running = Installer.runningSWTOR(values)
+      runningLauncher = running.launcher != nil
+      runningGame = running.game != nil
+      if launching && (runningLauncher || runningGame) { launchEnded(nil, error: nil) }
       if let version = values["update_available"], !version.isEmpty, let dir = values["app_dir"] {
         // once: the file goes, the app's own updater takes it from here
         try? FileManager.default.removeItem(atPath: dir + "/update-available")
@@ -197,8 +202,8 @@ final class Installer {
   private var appsObserver: NSKeyValueObservation?
   private var recheck: DispatchWorkItem?
 
-  // Re-check when the user comes back to the app, and when the launcher or the game quits:
-  // NSWorkspace's runningApplications (KVO; its didTerminate notification leaves out
+  // Re-check when the user comes back to the app, and when the launcher or the game starts or
+  // quits: NSWorkspace's runningApplications (KVO; its didTerminate notification leaves out
   // LSUIElement apps, and the game runs from the Game Mode bundle, which is one).
   func observe() {
     guard activeObserver == nil else { return }
@@ -208,10 +213,14 @@ final class Installer {
     }
     let swtorPids = PidSet()
     appsObserver = NSWorkspace.shared.observe(\.runningApplications, options: [.initial, .old, .new]) { [weak self] _, change in
-      for app in change.newValue ?? [] where Installer.isSWTOR(app) { swtorPids.insert(app.processIdentifier) }
+      var started = false
+      for app in change.newValue ?? [] where Installer.isSWTOR(app) {
+        swtorPids.insert(app.processIdentifier)
+        started = true
+      }
       let quit = (change.oldValue ?? []).contains { swtorPids.remove($0.processIdentifier) || Installer.isSWTOR($0) }
-      guard quit else { return }
-      DispatchQueue.main.async { MainActor.assumeIsolated { self?.swtorQuit() } }
+      guard quit || started else { return }
+      DispatchQueue.main.async { MainActor.assumeIsolated { if quit { self?.swtorQuit() } else { self?.refresh() } } }
     }
   }
 
@@ -366,6 +375,16 @@ final class Installer {
         continuation.resume(returning: String(decoding: data, as: UTF8.self))
       }
     }
+  }
+
+  // som.sh status: KEY=VALUE lines
+  nonisolated static func parseStatus(_ output: String) -> [String: String] {
+    var values: [String: String] = [:]
+    for line in output.split(separator: "\n") {
+      guard let eq = line.firstIndex(of: "=") else { continue }
+      values[String(line[..<eq])] = String(line[line.index(after: eq)...])
+    }
+    return values
   }
 
   // Resources/app.properties (written by build.sh): version, author, github, repo, feed.
@@ -586,6 +605,14 @@ struct SWTORonMacApp: App {
   private let updates = Updates()
   private let settings = GameSettings()
   private let logs = LogCollector()
+
+  init() {
+    // what the Play button would do, for tests (Play.swift)
+    if CommandLine.arguments.contains("--play-target") {
+      Installer.printPlayTarget()
+      exit(0)
+    }
+  }
 
   var body: some Scene {
     Window("SWTOR on Mac", id: "main") {
