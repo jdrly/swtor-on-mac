@@ -22,6 +22,34 @@ LOG_DIR="${SWTOR_LOG_DIR:-$HOME/Library/Logs/SWTOR on Mac}"
 # a missing engine (SWTOR on Mac half removed): run Broadsword's Wine instead
 [ -n "$SWTOR_ENGINE" ] && [ ! -x "$SWTOR_ENGINE/bin/wine" ] && SWTOR_ENGINE=
 
+# The daily update check (run detached, see below): one look at the app's Sparkle feed with
+# a 2 s timeout; if it names a newer version than the installed one, a notification (the app
+# then offers the update) and $SWTOR_APP_DIR/update-available for the app.
+update_check() {
+  stamp="$SWTOR_APP_DIR/last-update-check"
+  now=$(date +%s)
+  last=$(stat -f %m "$stamp" 2>/dev/null || echo 0)
+  [ $((now - last)) -ge 86400 ] || return 0
+  touch "$stamp" || return 0
+  feed=$(/usr/bin/curl -fsL --max-time 2 "$SWTOR_UPDATE_FEED") || return 0
+  latest=$(printf '%s\n' "$feed" | sed -n 's|.*<sparkle:shortVersionString>\([^<]*\)</sparkle:shortVersionString>.*|\1|p' | head -1)
+  [ -n "$latest" ] || latest=$(printf '%s\n' "$feed" | sed -n 's|.*<sparkle:version>\([^<]*\)</sparkle:version>.*|\1|p' | head -1)
+  [ -n "$latest" ] || return 0
+  # newer: compare the dotted numbers
+  awk -v a="$latest" -v b="$SWTOR_ON_MAC_VERSION" 'BEGIN {
+    n = split(a, x, "."); m = split(b, y, "."); if (m > n) n = m
+    for (i = 1; i <= n; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 }
+    exit 1 }' || return 0
+  echo "$latest" >"$SWTOR_APP_DIR/update-available"
+  msg="SWTOR on Mac update available ($latest) — open the app to update."
+  if [ -n "$SWTOR_NOTIFY_LOG" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $msg" >>"$SWTOR_NOTIFY_LOG"
+  else
+    /usr/bin/osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "SWTOR on Mac"' \
+      -e 'end run' "$msg"
+  fi
+}
+
 case " $* " in
   *swtor.exe*)
     mkdir -p "$LOG_DIR"
@@ -47,7 +75,12 @@ if [ -n "$SWTOR_ENGINE" ]; then
   ( setsid_exec "$SWTOR_ENGINE/bin/wineserver" -p 10 ) </dev/null >/dev/null 2>>"$LOG_DIR/wineserver.log"
   case " $* " in
     *swtor.exe*)
-      { date; env | grep -E '^(WINE|DYLD_|SWTOR_|DXVK_|MTL_)' | sort; } > "$LOG_DIR/effective-env.txt"
+      { date; env | grep -E '^(WINE|DYLD_|SWTOR_|DXVK_|MTL_|D9MT_)' | sort; } > "$LOG_DIR/effective-env.txt"
+      # Is there a newer SWTOR on Mac? At most once a day, in a detached process (the game
+      # does not wait for it; offline it just fails).
+      if [ "$SWTOR_UPDATE_CHECK" = 1 ] && [ -n "$SWTOR_UPDATE_FEED" ] && [ -d "$SWTOR_APP_DIR" ]; then
+        ( update_check & ) </dev/null >/dev/null 2>&1
+      fi
       # The game's stdout/stderr go to a file instead of the launcher's pipe: the held
       # (stopped) launcher does not drain that pipe, so a full pipe would block the game,
       # and once the launcher has quit, writes to it raise SIGPIPE and kill the game.

@@ -4,6 +4,11 @@
 #   som.sh status      KEY=VALUE lines describing this Mac (what the window shows)
 #   som.sh install     install or update; idempotent, safe to run again
 #   som.sh uninstall   revert everything (the official install goes back to stock)
+#   som.sh settings    KEY=VALUE lines: the settings (Settings window) and whether they can change
+#   som.sh set K V     change one setting (retina, hud, gamemode, vsync, debug: on/off; memory:
+#                      auto/low/medium/high/ultra/unlimited; updates: on/off)
+#   som.sh watch       the launchd job (cz.jandrly.swtoronmac.watch): Broadsword's Wine/bin
+#                      changed; hook the wrapper back in if a launcher update replaced it
 #
 # Environment:
 #   SWTOR_ON_MAC_ROOT=/abs/dir  sandbox for tests: the official install, the app's own files,
@@ -13,15 +18,25 @@
 #                               no Wine, no log file)
 #   SWTOR_ON_MAC_FORCE=1        go ahead although Broadsword's Wine folder holds a Wine
 #                               wrapper that is not SWTOR on Mac's (the app asks first)
+#   SWTOR_ON_MAC_SETTLE=<s>     watch: how long Broadsword's Wine/bin must have been quiet
+#                               before the wrapper is put back (default 20)
 #
-# Lines for the app start with "@": "@step <text>", "@progress <label> <bytes> <total>",
-# "@warn <text>", "@error <text>", "@done <text>". Everything else is plain log text.
+# In a sandbox (SWTOR_ON_MAC_ROOT) the launchd job is written but not loaded, and
+# notifications go to <logs>/notifications.log instead of Notification Center.
+#
+# Lines for the app start with "@": "@phase <n>" (the app's timeline: install 1 download,
+# 2 game files, 3 d9mt, 4 launcher hook; uninstall 1 restore, 2 game settings, 3 remove),
+# "@step <text>", "@progress <label> <bytes> <total>", "@warn <text>", "@error <text>",
+# "@done <text>". Everything else is plain log text.
 # Runs under macOS's /bin/bash 3.2.
 set -euo pipefail
 RES="$(cd "$(dirname "$0")" && pwd)"
 VERSION="$(sed -n 's/^version=//p' "$RES/app.properties" 2>/dev/null || true)"
 VERSION="${VERSION:-dev}"
 D9MT_VERSION="$(cat "$RES/d9mt/VERSION" 2>/dev/null || echo unknown)"
+# Sparkle's feed (the app's SUFeedURL, via app.properties): the wrapper's daily update check
+FEED_URL="$(sed -n 's/^feed=//p' "$RES/app.properties" 2>/dev/null || true)"
+FEED_URL="${FEED_URL:-https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml}"
 
 # --- Components: downloaded at install time from their official sources (never bundled).
 # Bump name, URL, size and sha256 together.
@@ -64,14 +79,23 @@ SOM="$H/Library/Application Support/SWTOR on Mac"
 LOGS="$H/Library/Logs/SWTOR on Mac"
 CACHE="$H/Library/Caches/SWTOR on Mac"
 MANIFEST="$SOM/install-manifest.json"
+SETTINGS="$SOM/settings.conf"
 PRELOADERS="wine-preloader wine64-preloader"
 HELPERS="setsid-exec hold-launcher"
+# The launchd job that puts the wrapper back after a launcher update (cmd_watch). It runs a
+# copy of this script in $AGENT_DIR, so updating or moving the app does not break it.
+AGENT_LABEL=cz.jandrly.swtoronmac.watch
+AGENT_PLIST="$H/Library/LaunchAgents/$AGENT_LABEL.plist"
+AGENT_DIR="$SOM/agent"
+# What SWTOR on Mac keeps in $SOM (removed by uninstall; backup/ stays)
+APP_FILES="engine frameworks prefix gamemode dxvk.conf env settings.conf agent last-update-check update-available"
 LOGFILE=/dev/null
 
 # --- Output and logging
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOGFILE"; }
 say() { echo "$*"; log "$*"; }
 step() { echo "@step $*"; log "== $*"; }
+phase() { echo "@phase $1"; }
 warn() { echo "@warn $*"; log "WARNING: $*"; }
 die() { echo "@error $*"; log "ERROR: $*"; exit 1; }
 
@@ -100,6 +124,20 @@ put() {
 
 # copy_atomic <src> <dst> <mode>
 copy_atomic() { run cp "$1" "$2.new.$$"; run chmod "$3" "$2.new.$$"; run mv -f "$2.new.$$" "$2"; }
+
+# notify <text>: a macOS notification (one-shot osascript); in a sandbox, a line in
+# notifications.log instead
+notify() {
+  log "notification: $*"
+  if [ -n "$DRY" ]; then echo "[dry-run] notify: $*"; return; fi
+  if [ -n "$ROOT" ]; then
+    mkdir -p "$LOGS"
+    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOGS/notifications.log"
+  else
+    /usr/bin/osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "SWTOR on Mac"' \
+      -e 'end run' "$*" >/dev/null 2>&1 || true
+  fi
+}
 
 sha256() { shasum -a 256 "$1" | cut -d' ' -f1; }
 is_macho() { [ -f "$1" ] && file -b "$1" 2>/dev/null | grep -q '^Mach-O'; }
@@ -156,6 +194,7 @@ status() {
   local s
   echo "version=$VERSION"
   echo "d9mt=$D9MT_VERSION"
+  echo "engine=$ENGINE_NAME"
   echo "root=${ROOT:-/}"
   echo "official_app=$([ -d "$BS_APP" ] && echo yes || echo no)"
   echo "official_app_path=$BS_APP"
@@ -170,12 +209,105 @@ status() {
     echo "installed=yes"
     echo "installed_version=$(json_get "$MANIFEST" version)"
     echo "installed_d9mt=$(json_get "$MANIFEST" d9mt)"
+    echo "watch_agent=$([ -f "$AGENT_PLIST" ] && [ -f "$AGENT_DIR/som.sh" ] && echo yes || echo no)"
+    # a newer version the wrapper's daily check found (the app then offers it through Sparkle)
+    echo "update_available=$(head -1 "$SOM/update-available" 2>/dev/null || true)"
   else
     echo "installed=no"
   fi
   if [ -n "$(running_list)" ]; then echo "running=yes"; else echo "running=no"; fi
   echo "app_dir=$SOM"
   echo "log_dir=$LOGS"
+}
+
+# --- Settings (the app's Settings window): $SETTINGS holds them as key=value; the env file,
+# dxvk.conf and the prefix's RetinaMode are made from it. They survive a reinstall.
+SETTING_KEYS="retina hud gamemode vsync debug memory updates"
+setting_default() {
+  case "$1" in
+    retina|gamemode|vsync|updates) echo on ;;
+    hud|debug) echo off ;;
+    memory) echo auto ;;
+  esac
+}
+setting_valid() { # <key> <value>
+  case "$1:$2" in
+    retina:on|retina:off|hud:on|hud:off|gamemode:on|gamemode:off|vsync:on|vsync:off) return 0 ;;
+    debug:on|debug:off|updates:on|updates:off) return 0 ;;
+    memory:auto|memory:low|memory:medium|memory:high|memory:ultra|memory:unlimited) return 0 ;;
+  esac
+  return 1
+}
+setting() { # <key>: its value, or the default
+  local v
+  v=$(sed -n "s/^$1=//p" "$SETTINGS" 2>/dev/null | tail -1)
+  if setting_valid "$1" "$v"; then echo "$v"; else setting_default "$1"; fi
+}
+
+write_settings() { # [<key> <value>]: settings.conf with every key, one of them changed
+  local k v
+  for k in $SETTING_KEYS; do
+    v=$(setting "$k")
+    if [ "$k" = "${1:-}" ]; then v=$2; fi
+    echo "$k=$v"
+  done | {
+    echo "# SWTOR on Mac settings (change them in the app: SWTOR on Mac > Settings…)"
+    cat
+  } | put "$SETTINGS" 644
+}
+
+settings() {
+  local k
+  echo "installed=$([ -f "$MANIFEST" ] && echo yes || echo no)"
+  if [ -n "$(running_list)" ]; then echo "running=yes"; else echo "running=no"; fi
+  for k in $SETTING_KEYS; do echo "$k=$(setting "$k")"; done
+}
+
+# set_retina <y|n>: RetinaMode of Wine's Mac driver, written straight into the prefix's
+# user.reg (Wine reads it when its wineserver starts; none may run now, see cmd_set)
+set_retina() {
+  local reg="$SOM/prefix/user.reg"
+  [ -f "$reg" ] || die "The Wine prefix is missing ($reg). Reinstall SWTOR on Mac."
+  if [ -n "$DRY" ]; then echo "[dry-run] RetinaMode=$1 in $reg"; return; fi
+  log "+ RetinaMode=$1 in $reg"
+  # the section header in user.reg is [Software\\Wine\\Mac Driver] <time>
+  K='[Software\\Wine\\Mac Driver]' V="$1" T="$(date +%s)" awk '
+    BEGIN { k = ENVIRON["K"]; line = "\"RetinaMode\"=\"" ENVIRON["V"] "\"" }
+    index($0, "[") == 1 {
+      if (pending) { print line; pending = 0 }
+      insec = (substr($0, 1, length(k)) == k && substr($0, length(k) + 1, 1) == " ")
+      if (insec) { found = 1; pending = 1 }
+      print; next
+    }
+    insec && index($0, "\"RetinaMode\"=") == 1 { next }
+    pending && index($0, "#time=") == 1 { print; next }
+    pending { print line; pending = 0 }
+    { print }
+    END {
+      if (pending) print line
+      if (!found) { print ""; print k " " ENVIRON["T"]; print line }
+    }' "$reg" >"$reg.new.$$"
+  mv -f "$reg.new.$$" "$reg"
+}
+
+cmd_set() {
+  local key="${1:-}" value="${2:-}" r
+  setting_valid "$key" "$value" || { echo "@error Unknown setting: $key=$value"; exit 2; }
+  [ -f "$MANIFEST" ] || die "SWTOR on Mac is not installed."
+  if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
+  log "---- set $key=$value"
+  if [ "$key" = retina ]; then
+    # Wine keeps the registry in its wineserver and writes it back on exit
+    r=$(running_list)
+    [ -z "$r" ] || die "Quit the SWTOR launcher and the game to change Retina mode."
+  fi
+  lock
+  trap 'rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
+  if [ "$key" = retina ]; then set_retina "$([ "$value" = on ] && echo y || echo n)"; fi
+  write_settings "$key" "$value"
+  write_env >/dev/null
+  write_dxvk_conf
+  echo "@done $key=$value. It takes effect the next time the game starts."
 }
 
 # --- Install steps
@@ -365,7 +497,7 @@ install_prefix() {
   say "Updating the prefix for the new engine (wineboot, about a minute)"
   wine_do wineboot -u || { stop_wine; die "Wine could not set up the prefix (details in $LOGS/install.log)."; }
   say "Setting Wine options: Retina mode, mouse-look fix, d9mt for swtor.exe"
-  wine_do reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d y /f &&
+  wine_do reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d "$([ "$(setting retina)" = on ] && echo y || echo n)" /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\X11 Driver' /v GrabPointer /t REG_SZ /d n /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\DllOverrides' /v d3d9 /t REG_SZ /d native,builtin /f ||
     { stop_wine; die "Wine could not write the settings (details in $LOGS/install.log)."; }
@@ -378,6 +510,7 @@ install_prefix() {
       case "${u##*/}" in Public|crossover) continue ;; esac
       if [ -d "$u/AppData/Local/SWTOR" ]; then
         say "Taking over the game settings of Wine user ${u##*/}"
+        SETTINGS_USER=${u##*/}
         run mkdir -p "$p/drive_c/users/crossover/AppData/Local"
         run cp -c -R -p "$u/AppData/Local/SWTOR" "$p/drive_c/users/crossover/AppData/Local/"
         break
@@ -386,6 +519,7 @@ install_prefix() {
   fi
 
   sys="$p/drive_c/windows/system32"
+  phase 3
   say "Installing d9mt ($D9MT_VERSION) as the game's Direct3D 9"
   if [ -z "$DRY" ] && [ ! -e "$sys/d3d9.dll.wine" ]; then
     [ -f "$sys/d3d9.dll" ] || die "Wine's d3d9.dll is missing in the prefix."
@@ -396,7 +530,6 @@ install_prefix() {
     fi
   fi
   copy_atomic "$RES/d9mt/d3d9.dll" "$sys/d3d9.dll" 644
-  copy_atomic "$RES/dxvk.conf" "$SOM/dxvk.conf" 644
 }
 
 install_gamemode() {
@@ -433,10 +566,29 @@ EOF
 }
 
 write_env() {
+  local gm hud dbg upd notify_log=""
   say "Writing the settings file $SOM/env"
+  gm="SWTOR_GAMEMODE_APP=\"$SOM/gamemode/SWTOR.app\""
+  [ "$(setting gamemode)" = on ] || gm="#$gm   (Game Mode is off in Settings)"
+  hud="MTL_HUD_ENABLED=1"
+  [ "$(setting hud)" = on ] || hud="#$hud   (off in Settings)"
+  if [ "$(setting debug)" = on ]; then
+    dbg="# Debug logging is on in Settings: d9mt's info messages, per-frame timing (HITCH, PSOBUILD)
+# and memory statistics (DIAG MEM) in wine.log. Costs some performance.
+DXVK_LOG_LEVEL=info
+D9MT_PROFILE=1
+D9MT_MEMSTATS=1"
+  else
+    dbg="# d9mt's own warnings and errors only (cheap); Debug logging in Settings adds more
+DXVK_LOG_LEVEL=warn"
+  fi
+  upd=$([ "$(setting updates)" = on ] && echo 1 || echo 0)
+  # in a sandbox, the update check's notification goes to a file
+  [ -z "$ROOT" ] || notify_log="SWTOR_NOTIFY_LOG=\"$LOGS/notifications.log\""
   put "$SOM/env" 644 <<EOF
 # SWTOR on Mac $VERSION: settings the Wine wrapper in Broadsword's Wine folder reads at every
-# Wine start. Written by the installer; reinstalling overwrites this file.
+# Wine start. Made from settings.conf by the installer and the app's Settings window, which
+# overwrite this file: change the settings there.
 
 # Faster Wine thread sync, no Wine debug output
 WINEMSYNC=1
@@ -447,19 +599,40 @@ SWTOR_ENGINE="$SOM/engine"
 SWTOR_PREFIX="$SOM/prefix"
 SWTOR_FRAMEWORKS="$SOM/frameworks"
 # macOS Game Mode: the game runs from a bundle copy of the engine's preloader
-SWTOR_GAMEMODE_APP="$SOM/gamemode/SWTOR.app"
+$gm
 SWTOR_LOG_DIR="$LOGS"
+SWTOR_LOG_FILTER=.
 
 # d9mt: Direct3D 9 straight to Metal (d3d9.dll in the prefix, winemetal bridge in the engine)
 WINEDLLOVERRIDES="d3d9=n,b"
 DXVK_CONFIG_FILE="$SOM/dxvk.conf"
-# d9mt's own warnings and errors only (cheap), kept in $LOGS/wine.log
-DXVK_LOG_LEVEL=warn
-SWTOR_LOG_FILTER=.
+# how much video memory d9mt keeps in use: auto (by the Mac's memory), low, medium, high,
+# ultra, unlimited
+D9MT_MEMORY_PROFILE=$(setting memory)
+$dbg
 
-# Apple's Metal HUD (FPS, frame times): remove the # to turn it on
-#MTL_HUD_ENABLED=1
+# Apple's Metal HUD (FPS, frame times)
+$hud
+
+# At most once a day, when the game starts: look for a newer SWTOR on Mac (a notification
+# if there is one; the app updates itself)
+SWTOR_ON_MAC_VERSION=$VERSION
+SWTOR_APP_DIR="$SOM"
+SWTOR_UPDATE_FEED="$FEED_URL"
+SWTOR_UPDATE_CHECK=$upd
+$notify_log
 EOF
+}
+
+# d9mt's options: Resources/dxvk.conf, with vsync (d3d9.presentInterval = 1) unless it is
+# off in Settings
+write_dxvk_conf() {
+  if [ "$(setting vsync)" = on ]; then
+    put "$SOM/dxvk.conf" 644 <"$RES/dxvk.conf"
+  else
+    sed 's/^d3d9\.presentInterval = 1$/# d3d9.presentInterval = 1   (vsync is off in Settings)/' "$RES/dxvk.conf" |
+      put "$SOM/dxvk.conf" 644
+  fi
 }
 
 # Puts the wrapper in place of Broadsword's preloaders; the real ones go to bin-real.
@@ -507,7 +680,11 @@ rollback_wrapper() {
 }
 
 write_manifest() {
-  local b sha pre="" first=1
+  local b sha pre="" first=1 user
+  # the Wine user in Broadsword's prefix whose game settings were taken over (Uninstall
+  # copies them back there); kept from an earlier install
+  user=${SETTINGS_USER:-$(json_get "$MANIFEST" settings_user)}
+  user=${user:-$(bs_settings_user)}
   for b in $PRELOADERS; do
     sha=$(echo "$ORIG_SHAS" | tr ' ' '\n' | sed -n "s/^$b=//p")
     [ $first = 1 ] || pre="$pre,"
@@ -528,12 +705,212 @@ write_manifest() {
   "broadsword_wine": "$BS_WINE",
   "previous_wrapper": "$WRAPPER_STATE",
   "bin_real_created": $([ "$BIN_REAL_EXISTED" = false ] && echo true || echo false),
+  "settings_user": "$user",
   "original_preloaders_sha256": {$pre
   },
   "helpers": ["setsid-exec", "hold-launcher"],
-  "app_files": ["engine", "frameworks", "prefix", "gamemode", "dxvk.conf", "env"]
+  "app_files": ["$(echo $APP_FILES | sed 's/ /", "/g')"],
+  "launch_agent": "$AGENT_PLIST"
 }
 EOF
+}
+
+# --- Game settings (graphics options, UI layouts, key bindings): a new prefix starts with a
+# clone of those in Broadsword's prefix (install_prefix); Uninstall copies them back.
+GAME_SETTINGS_REL="AppData/Local/SWTOR/swtor/settings"
+
+# The Wine user in Broadsword's prefix that has SWTOR's settings (Broadsword's Wine names it
+# after the Mac user)
+bs_settings_user() {
+  local u
+  for u in "$BS_WINE"/drive_c/users/*; do
+    case "${u##*/}" in Public|crossover|\*) continue ;; esac
+    if [ -d "$u/AppData/Local/SWTOR" ]; then echo "${u##*/}"; return; fi
+  done
+}
+
+# Copies the game settings of SWTOR on Mac's prefix (Wine user crossover) back to
+# Broadsword's prefix, so changes made while using SWTOR on Mac stay. Broadsword's previous
+# folder is kept as settings-backup-<time> next to it (an APFS clone); files only it has stay.
+# ContextError.ini (the game's last error) is not copied. Nothing happens if they are equal.
+restore_game_settings() {
+  local src="$SOM/prefix/drive_c/users/crossover/$GAME_SETTINGS_REL" user dst bak item changed=""
+  if [ ! -d "$src" ]; then say "No game settings in SWTOR on Mac's prefix to copy back"; return 0; fi
+  user=$(json_get "$MANIFEST" settings_user)
+  user=${user:-$(bs_settings_user)}
+  user=${user:-$(id -un)}
+  case "$user" in */*|.|..|"") warn "Game settings not copied back (no Wine user in Broadsword's prefix)"; return 0 ;; esac
+  [ -d "$BS_WINE/drive_c/users" ] ||
+    { warn "Game settings not copied back: Broadsword's prefix has no drive_c/users"; return 0; }
+  dst="$BS_WINE/drive_c/users/$user/$GAME_SETTINGS_REL"
+  # anything to copy? (ContextError.ini aside)
+  for item in "$src"/* "$src"/.[!.]*; do
+    [ -e "$item" ] || continue
+    [ "${item##*/}" = ContextError.ini ] && continue
+    if ! diff -r -q "$item" "$dst/${item##*/}" >/dev/null 2>&1; then changed=1; break; fi
+  done
+  if [ -z "$changed" ]; then say "Game settings are the same in both prefixes"; return 0; fi
+  say "Copying your game settings back to Broadsword's prefix (Wine user $user)"
+  if [ -d "$dst" ]; then
+    bak="$dst-backup-$(date +%Y%m%d-%H%M%S)"
+    run cp -c -R -p "$dst" "$bak"
+    say "Broadsword's previous game settings: ${bak#"$BS_WINE/"}"
+  fi
+  run mkdir -p "$dst"
+  for item in "$src"/* "$src"/.[!.]*; do
+    [ -e "$item" ] || continue
+    [ "${item##*/}" = ContextError.ini ] && continue
+    if [ -d "$item" ]; then
+      run mkdir -p "$dst/${item##*/}"
+      run cp -c -R -p "$item/." "$dst/${item##*/}/"
+    else
+      run cp -c -p "$item" "$dst/"
+    fi
+  done
+}
+
+# --- The launcher-update guard: a launchd job, started by launchd only when Broadsword's
+# Wine/bin changes (WatchPaths; nothing runs in between), that puts the wrapper back if a
+# launcher update replaced it (cmd_watch).
+xml_escape() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+
+install_agent() {
+  local f env=""
+  say "Setting up the launcher-update guard (a launchd job that only runs when Broadsword's Wine changes)"
+  run rm -rf "$AGENT_DIR.new"
+  run mkdir -p "$AGENT_DIR.new/helpers" "$AGENT_DIR.new/d9mt"
+  # a copy of this script and what it needs, so app updates and moves do not break the job
+  for f in som.sh wine-wrapper.sh dxvk.conf app.properties; do run cp -p "$RES/$f" "$AGENT_DIR.new/$f"; done
+  for f in $HELPERS; do run cp -p "$RES/helpers/$f" "$AGENT_DIR.new/helpers/$f"; done
+  run cp -p "$RES/d9mt/VERSION" "$AGENT_DIR.new/d9mt/VERSION"
+  run rm -rf "$AGENT_DIR"
+  run mv "$AGENT_DIR.new" "$AGENT_DIR"
+  [ -z "$ROOT" ] || env="
+	<key>EnvironmentVariables</key>
+	<dict><key>SWTOR_ON_MAC_ROOT</key><string>$(xml_escape "$ROOT")</string></dict>"
+  run mkdir -p "${AGENT_PLIST%/*}"
+  put "$AGENT_PLIST" 644 <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- SWTOR on Mac: puts its Wine wrapper back after an official launcher update replaced it.
+     launchd starts it only when Broadsword's Wine/bin changes; it does its check and exits.
+     Removed by SWTOR on Mac's Uninstall. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>$AGENT_LABEL</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>$(xml_escape "$AGENT_DIR/som.sh")</string>
+		<string>watch</string>
+	</array>
+	<key>WatchPaths</key>
+	<array>
+		<string>$(xml_escape "$BS_WINE/bin")</string>
+	</array>
+	<key>RunAtLoad</key><false/>
+	<key>ThrottleInterval</key><integer>30</integer>
+	<key>ProcessType</key><string>Background</string>
+	<key>LowPriorityIO</key><true/>
+	<key>StandardOutPath</key><string>/dev/null</string>
+	<key>StandardErrorPath</key><string>$(xml_escape "$LOGS/watch.log")</string>$env
+</dict>
+</plist>
+EOF
+  [ -n "$DRY" ] || plutil -lint -s "$AGENT_PLIST"
+  if [ -n "$ROOT" ]; then
+    say "Sandbox: the launchd job is written ($AGENT_PLIST) but not loaded"
+    return 0
+  fi
+  run launchctl bootout "gui/$(id -u)/$AGENT_LABEL" 2>/dev/null || true
+  run launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST"
+}
+
+remove_agent() {
+  if [ -z "$ROOT" ] && launchctl print "gui/$(id -u)/$AGENT_LABEL" >/dev/null 2>&1; then
+    run launchctl bootout "gui/$(id -u)/$AGENT_LABEL" || warn "Could not unload the launchd job $AGENT_LABEL"
+  fi
+  if [ -f "$AGENT_PLIST" ]; then run rm -f "$AGENT_PLIST"; say "Removed the launchd job $AGENT_PLIST"; fi
+  if [ -d "$AGENT_DIR" ]; then run rm -rf "$AGENT_DIR"; fi
+}
+
+# Waits (bounded) until nothing in Broadsword's Wine/bin changed for $SETTLE seconds: a
+# launcher update may still be writing. Fails if it keeps changing.
+settle() {
+  local newest age
+  for _ in 1 2 3; do
+    newest=$(find "$BS_WINE/bin" -maxdepth 1 -exec stat -f %m {} + 2>/dev/null | sort -n | tail -1)
+    age=$(( $(date +%s) - ${newest:-0} ))
+    [ "$age" -lt "$SETTLE" ] || return 0
+    log "Wine/bin changed ${age}s ago; waiting"
+    sleep $((SETTLE - age + 1))
+  done
+  return 1
+}
+
+on_watch_exit() {
+  local st=$?
+  if [ $st -ne 0 ] && [ -z "$DRY" ]; then
+    [ -n "${WRAPPER_PHASE:-}" ] && rollback_wrapper
+    log "watch failed (status $st)"
+    notify "SWTOR's launcher updated its Wine and SWTOR on Mac could not hook itself back in. Open SWTOR on Mac and click Reinstall."
+  fi
+  if [ -n "${WATCH_LOCKED:-}" ]; then rmdir "$SOM/.lock" 2>/dev/null || true; fi
+}
+
+# The launchd job: Broadsword's Wine/bin changed. Idempotent: if the wrapper is still in
+# place it only makes sure the helpers are; if a launcher update replaced the preloaders, it
+# hooks the wrapper back in (as Install does) and says so. Leaves everything alone while an
+# install or uninstall runs, if another wrapper is there, or if the folder looks half-updated
+# (then it only notifies).
+cmd_watch() {
+  local b st states="" real="$BS_WINE/bin-real" h redo="" odd=""
+  SETTLE="${SWTOR_ON_MAC_SETTLE:-20}"
+  if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/watch.log"; fi
+  log "---- watch $VERSION: $BS_WINE/bin changed"
+  [ -f "$MANIFEST" ] || { log "SWTOR on Mac is not installed; nothing to do"; return 0; }
+  [ ! -d "$SOM/.lock" ] || { log "an install, uninstall or settings change is running; leaving it alone"; return 0; }
+  settle || { log "Wine/bin keeps changing (a launcher update?); the next change starts this again"; return 0; }
+  for b in $PRELOADERS; do
+    st=$(wrapper_state_of "$b")
+    states="$states $b=$st"
+    case "$st" in
+      ours) ;;
+      stock|replaced) redo=1 ;;
+      personal|foreign) log "state:$states; another Wine wrapper is installed: not ours to change"; return 0 ;;
+      missing) odd=1 ;;
+    esac
+  done
+  log "state:$states"
+  if [ -n "$redo" ] && ! is_macho "$BS_WINE/bin/wine64"; then odd=1; fi
+  if [ -n "$odd" ]; then
+    notify "SWTOR's launcher is changing its Wine. If the game then starts without SWTOR on Mac, open SWTOR on Mac and click Reinstall."
+    return 0
+  fi
+  if [ -z "$redo" ]; then
+    # still hooked in; a launcher update may have removed the helpers next to the real preloaders
+    for h in $HELPERS; do
+      if [ ! -x "$real/$h" ]; then
+        log "restoring the missing helper $h"
+        run mkdir -p "$real"
+        copy_atomic "$RES/helpers/$h" "$real/$h" 755
+      fi
+    done
+    log "the wrapper is in place"
+    return 0
+  fi
+  mkdir "$SOM/.lock" 2>/dev/null || { log "an install or uninstall just started; leaving it alone"; return 0; }
+  WATCH_LOCKED=1 MOVED="" WRAPPER_PHASE="" WRAPPER_STATE=replaced
+  trap on_watch_exit EXIT
+  install_wrapper
+  if [ -z "$DRY" ]; then
+    for b in $PRELOADERS; do
+      plutil -replace "original_preloaders_sha256.$b" -string "$(echo "$ORIG_SHAS" | tr ' ' '\n' | sed -n "s/^$b=//p")" "$MANIFEST"
+    done
+    plutil -replace rewrapped -string "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$MANIFEST"
+  fi
+  log "the wrapper is back in place"
+  notify "SWTOR's launcher updated its Wine; SWTOR on Mac has hooked itself back in. Start the game as usual."
 }
 
 on_install_exit() {
@@ -544,7 +921,7 @@ on_install_exit() {
     [ -n "${WRAPPER_PHASE:-}" ] && rollback_wrapper
     # all or nothing: what this run created goes again (a previous install stays)
     local c
-    [ -n "${FIRST_INSTALL:-}" ] && CREATED="engine frameworks prefix gamemode dxvk.conf env"
+    [ -n "${FIRST_INSTALL:-}" ] && CREATED="engine frameworks prefix gamemode dxvk.conf env settings.conf"
     for c in $CREATED; do
       if [ -e "$SOM/$c" ]; then rm -rf "${SOM:?}/$c"; log "removed $c (install failed)"; fi
     done
@@ -561,10 +938,11 @@ lock() {
 }
 
 cmd_install() {
-  CREATED="" MOVED="" WRAPPER_PHASE="" NEW_PREFIX="" WRAPPER_STATE="" FIRST_INSTALL=""
+  CREATED="" MOVED="" WRAPPER_PHASE="" NEW_PREFIX="" WRAPPER_STATE="" FIRST_INSTALL="" SETTINGS_USER=""
   [ -f "$MANIFEST" ] || FIRST_INSTALL=1
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
   log "---- install $VERSION (d9mt $D9MT_VERSION) root=${ROOT:-/} dry=${DRY:-0} force=${FORCE:-0}"
+  phase 1
   step "Checking your Mac"
   preflight
   check_wrapper install
@@ -579,15 +957,21 @@ cmd_install() {
   install_engine
   step "Engine libraries"
   install_frameworks
+  phase 2
   step "Wine prefix and d9mt"
   install_prefix
+  step "Settings"
+  write_settings
+  write_env
+  write_dxvk_conf
+  phase 4
   step "Game Mode"
   install_gamemode
-  step "Settings"
-  write_env
   step "Hooking into the official launcher"
   install_wrapper
   write_manifest
+  # not part of the all-or-nothing install: without it, everything else still works
+  install_agent || warn "The launcher-update guard (a launchd job) could not be set up; after a launcher update, open SWTOR on Mac and click Reinstall."
   [ -n "$DRY" ] || rm -rf "$CACHE/downloads"
   log "install complete"
   echo "@done SWTOR on Mac $VERSION is installed. Start SWTOR from the official app as usual."
@@ -597,6 +981,7 @@ cmd_uninstall() {
   MOVED="" WRAPPER_STATE=""
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
   log "---- uninstall $VERSION root=${ROOT:-/} dry=${DRY:-0} force=${FORCE:-0}"
+  phase 1
   step "Checking your Mac"
   local r bin="$BS_WINE/bin" real="$BS_WINE/bin-real" b h want got left c
   r=$(running_list)
@@ -615,6 +1000,7 @@ cmd_uninstall() {
   trap 'rmdir "$SOM/.lock" "$SOM" 2>/dev/null || true' EXIT
 
   step "Restoring the official launcher's Wine"
+  remove_agent
   if [ -d "$real" ]; then
     for b in $PRELOADERS; do
       [ -e "$real/$b" ] || continue
@@ -641,10 +1027,15 @@ cmd_uninstall() {
     say "Nothing to restore in Broadsword's Wine folder"
   fi
 
+  phase 2
+  step "Game settings"
+  [ -n "$DRY" ] || stop_wine
+  restore_game_settings
+
+  phase 3
   step "Removing SWTOR on Mac's files"
   remove_gamemode_link
-  [ -n "$DRY" ] || stop_wine
-  for c in engine frameworks prefix gamemode dxvk.conf env engine.new frameworks.new prefix.new; do
+  for c in $APP_FILES engine.new frameworks.new prefix.new agent.new; do
     if [ -e "$SOM/$c" ]; then run rm -rf "${SOM:?}/$c"; fi
   done
   if [ -d "$CACHE" ]; then run rm -rf "$CACHE"; fi
@@ -672,5 +1063,8 @@ case "${1:-}" in
   status) status ;;
   install) cmd_install ;;
   uninstall) cmd_uninstall ;;
-  *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  settings) settings ;;
+  set) shift; cmd_set "$@" ;;
+  watch) cmd_watch ;;
+  *) sed -n '2,/^# Environment/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac

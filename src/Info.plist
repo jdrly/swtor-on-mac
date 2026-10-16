@@ -30,12 +30,28 @@
 	</array>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Collect Logs saves its zip file to your Desktop.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Unofficial. Not made, endorsed or supported by Broadsword Games, EA, Lucasfilm or Disney.</string>
-	<!-- Sparkle (planned for 0.0.2, see README "Roadmap"): SUFeedURL
-	     https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml and
-	     SUPublicEDKey go here, as in SWGL on Mac. -->
+	<!-- Sparkle (src/native/Updates.swift), as in SWGL on Mac and with the same EdDSA key
+	     (Sparkle's generate_keys, in Jan's login keychain). SUEnableAutomaticChecks here turns
+	     automatic checks on for everyone without Sparkle's permission prompt (Settings window
+	     toggle); installing always takes a click. The Wine wrapper's daily check reads the
+	     same feed. -->
+	<key>SUFeedURL</key>
+	<string>https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>yfxY4ORQfPcQWUMIenGgR0JIBYcL3+Osi3BP4KmPAH8=</string>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<false/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
 </dict>
 </plist>

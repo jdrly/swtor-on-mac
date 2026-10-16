@@ -1,12 +1,19 @@
-// SWTOR on Mac: the app's only window (SwiftUI). Shows the notice and the state of this Mac,
+// SWTOR on Mac: the app's main window (SwiftUI). Shows the notice and the state of this Mac,
 // and runs Resources/som.sh (status, install, uninstall), which does the actual work and
 // streams its progress back as "@" lines (see the header of src/som.sh).
+// Also here: the app menu (About, Check for Updates…, Settings…, Collect Logs…, Quit), with
+// Settings.swift (the Settings window) and Updates.swift (Sparkle).
+//
+// The window is resizable in both directions. Wide (the default), it has two columns: the
+// notice on the left; this Mac's state, the progress and the buttons on the right; the only
+// scrolling part is the install log. Narrow, it is one column that scrolls as a whole (the log
+// then shows its last lines without a scroll area of its own). Buttons and footer stay put.
 //
 // Built against the macOS 27 SDK, so the standard controls and Liquid Glass styles used here
 // take the macOS 27 design; runs on macOS 26 too (same APIs, 26 look).
 //
 // SWTOR_ON_MAC_ROOT and SWTOR_ON_MAC_DRY_RUN in the app's environment are passed on to
-// som.sh, so the window can be tried against a sandbox:
+// som.sh (and collect-logs.sh), so the window can be tried against a sandbox:
 //   SWTOR_ON_MAC_ROOT=/tmp/som-sandbox "SWTOR on Mac.app/Contents/MacOS/SWTORonMac"
 
 import AppKit
@@ -20,9 +27,34 @@ final class Installer {
   enum Phase: Equatable {
     case idle
     case working(Operation)
-    case succeeded(String)
-    case failed(String)
+    case succeeded(Operation, String)
+    case failed(Operation, String)
   }
+  // The timeline of an operation: som.sh announces each step with "@phase <n>"
+  struct Step: Identifiable, Equatable {
+    let id: Int
+    let title: String
+    let detail: String
+    let symbol: String
+  }
+  static let installSteps = [
+    Step(id: 1, title: "Download the Wine engine",
+         detail: "CrossOver 24.0.7 and its libraries (about 270 MB)", symbol: "arrow.down"),
+    Step(id: 2, title: "Prepare the game files",
+         detail: "A Wine prefix of SWTOR on Mac's own, with your game settings", symbol: "folder.fill"),
+    Step(id: 3, title: "Install the d9mt graphics driver",
+         detail: "The game's Direct3D 9, straight to Metal", symbol: "cpu.fill"),
+    Step(id: 4, title: "Hook into the SWTOR launcher",
+         detail: "Plus Game Mode, and a repair after launcher updates", symbol: "link"),
+  ]
+  static let uninstallSteps = [
+    Step(id: 1, title: "Restore the launcher's own Wine",
+         detail: "Broadsword's files go back where they were", symbol: "arrow.uturn.backward"),
+    Step(id: 2, title: "Copy your game settings back",
+         detail: "With a backup of the official app's previous ones", symbol: "folder.fill"),
+    Step(id: 3, title: "Remove SWTOR on Mac's files",
+         detail: "Engine, prefix and settings; the logs stay", symbol: "trash.fill"),
+  ]
   struct Progress: Equatable { var label: String; var done: Int64; var total: Int64 }
 
   var status: [String: String] = [:]
@@ -31,9 +63,19 @@ final class Installer {
   var progress: Progress?
   var log: [String] = []
   var warnings: [String] = []
-  var understood = false
+  // the notice was read and accepted (kept across launches)
+  var understood = UserDefaults.standard.bool(forKey: "acceptedNotice") {
+    didSet { UserDefaults.standard.set(understood, forKey: "acceptedNotice") }
+  }
   var showLog = false
+  // the operation shown in the step list, and how far it got
+  var operation: Operation = .install
+  var stepIndex: Int?
   let credits: [String: String]
+  // an install or uninstall has ended (a held app update may go ahead)
+  var onIdle: (() -> Void)?
+  // the wrapper's daily check found a newer version (status update_available)
+  var onUpdateAvailable: ((String) -> Void)?
 
   private var process: Process?
   private let script = Bundle.main.resourceURL!.appendingPathComponent("som.sh")
@@ -54,6 +96,21 @@ final class Installer {
   var otherWrapper: Bool { wrapper == "personal" || wrapper == "foreign" || (wrapper == "replaced" && !installed) }
   var appleSilicon: Bool { status["arch"].map { $0 == "arm64" } ?? true }
   var loaded: Bool { !status.isEmpty }
+  var appVersion: String { credits["version"] ?? "?" }
+  // installed by an older (or newer) version of the app: Reinstall brings it in line
+  var installedOtherVersion: Bool {
+    installed && (status["installed_version"] ?? appVersion) != appVersion
+  }
+
+  var steps: [Step] { operation == .install ? Installer.installSteps : Installer.uninstallSteps }
+
+  // 0...1 across the steps, a download counting by its bytes
+  var fraction: Double {
+    guard let i = stepIndex else { return 0 }
+    var part = 0.0
+    if let p = progress, p.total > 0 { part = min(1, Double(p.done) / Double(p.total)) }
+    return min(1, (Double(i) + part) / Double(steps.count))
+  }
 
   var canInstall: Bool {
     loaded && !isBusy && officialPresent && rosetta && appleSilicon && !running && (installed || understood)
@@ -74,12 +131,19 @@ final class Installer {
         values[String(line[..<eq])] = String(line[line.index(after: eq)...])
       }
       status = values
+      if let version = values["update_available"], !version.isEmpty, let dir = values["app_dir"] {
+        // once: the file goes, the app's own updater takes it from here
+        try? FileManager.default.removeItem(atPath: dir + "/update-available")
+        if Installer.isNewer(version, than: appVersion) { onUpdateAvailable?(version) }
+      }
     }
   }
 
   func start(_ operation: Operation, force: Bool = false) {
     guard !isBusy else { return }
     phase = .working(operation)
+    self.operation = operation
+    stepIndex = nil
     step = operation == .install ? "Starting…" : "Removing…"
     progress = nil
     log = []
@@ -111,14 +175,14 @@ final class Installer {
       let status = p.terminationStatus
       // let the reader drain what is left before the result is shown
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-        MainActor.assumeIsolated { self?.finished(status) }
+        MainActor.assumeIsolated { self?.finished(operation, status) }
       }
     }
     do {
       try process.run()
       self.process = process
     } catch {
-      phase = .failed("Could not start the installer: \(error.localizedDescription)")
+      phase = .failed(operation, "Could not start the installer: \(error.localizedDescription)")
     }
   }
 
@@ -134,6 +198,8 @@ final class Installer {
       step = String(line.dropFirst(6))
       progress = nil
       log.append("▸ " + step)
+    } else if line.hasPrefix("@phase ") {
+      if let n = Int(line.dropFirst(7)), n >= 1, n <= steps.count { stepIndex = n - 1; progress = nil }
     } else if line.hasPrefix("@progress ") {
       let parts = line.split(separator: " ")
       if parts.count >= 4, let done = Int64(parts[parts.count - 2]), let total = Int64(parts[parts.count - 1]) {
@@ -154,23 +220,33 @@ final class Installer {
     }
   }
 
-  private func finished(_ status: Int32) {
+  private func finished(_ operation: Operation, _ status: Int32) {
     process = nil
     progress = nil
     if status == 0 {
-      phase = .succeeded(doneMessage ?? "Done.")
+      phase = .succeeded(operation, doneMessage ?? "Done.")
     } else {
-      phase = .failed(lastError ?? "Something went wrong (status \(status)). Details are in the log.")
-      showLog = true
+      phase = .failed(operation, lastError ?? "Something went wrong (status \(status)). Details are in the log.")
     }
     lastError = nil
     doneMessage = nil
     refresh()
+    onIdle?()
   }
 
   // MARK: Helpers
 
-  private static func capture(script: URL, arguments: [String]) async -> String {
+  // dotted version numbers: a > b
+  static func isNewer(_ a: String, than b: String) -> Bool {
+    let x = a.split(separator: ".").map { Int($0) ?? 0 }, y = b.split(separator: ".").map { Int($0) ?? 0 }
+    for i in 0..<max(x.count, y.count) {
+      let p = i < x.count ? x[i] : 0, q = i < y.count ? y[i] : 0
+      if p != q { return p > q }
+    }
+    return false
+  }
+
+  static func capture(script: URL, arguments: [String]) async -> String {
     await withCheckedContinuation { continuation in
       let process = Process()
       process.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -193,8 +269,8 @@ final class Installer {
     }
   }
 
-  // Resources/app.properties (written by build.sh): version, author, github, repo.
-  private static func readProperties(_ url: URL) -> [String: String] {
+  // Resources/app.properties (written by build.sh): version, author, github, repo, feed.
+  static func readProperties(_ url: URL) -> [String: String] {
     guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [:] }
     var values: [String: String] = [:]
     for line in text.split(separator: "\n") {
@@ -234,359 +310,145 @@ final class LineReader: @unchecked Sendable {
   }
 }
 
-// MARK: - Views
+// MARK: - App menu actions
 
-struct MainView: View {
-  @Bindable var installer: Installer
-  @State private var confirmUninstall = false
-  @State private var confirmReplace: Installer.Operation?
-
-  var body: some View {
-    VStack(spacing: 0) {
-      Header(installer: installer)
-        .padding(.horizontal, 28)
-        .padding(.top, 30)
-        .padding(.bottom, 4)
-
-      ScrollViewReader { proxy in
-        Form {
-          NoticeSection(installer: installer)
-          StatusSection(installer: installer)
-          if installer.phase != .idle {
-            ProgressSection(installer: installer)
-              .id("progress")
-          }
-        }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        // bring the progress into view when an install or uninstall starts or ends
-        .onChange(of: installer.phase) { _, _ in
-          withAnimation(.smooth) { proxy.scrollTo("progress", anchor: .bottom) }
-        }
-      }
-
-      ActionBar(installer: installer, uninstall: askUninstall, install: askInstall)
-        .padding(.horizontal, 28)
-        .padding(.bottom, 18)
-
-      Footer(credits: installer.credits)
+@MainActor
+enum AppActions {
+  // The standard About panel with the credits and component versions.
+  static func showAbout(credits: [String: String]) {
+    let centered = NSMutableParagraphStyle()
+    centered.alignment = .center
+    let body: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+      .foregroundColor: NSColor.labelColor, .paragraphStyle: centered]
+    let text = NSMutableAttributedString(string:
+      "Runs the official SWTOR Mac app on d9mt (Direct3D 9 on Metal)\n"
+      + "Developed by \(credits["author"] ?? "Jan Drlý")\n\n"
+      + "Unofficial: not made, endorsed or supported by Broadsword Games, EA, Lucasfilm or Disney.\n"
+      + "For help: Pharaphobia on Discord or a GitHub issue.\n", attributes: body)
+    for key in ["repo", "github"] {
+      guard let url = credits[key], !url.isEmpty, let link = URL(string: url) else { continue }
+      var attributes = body
+      attributes[.link] = link
+      text.append(NSAttributedString(string: "\n", attributes: body))
+      text.append(NSAttributedString(string: url.replacingOccurrences(of: "https://", with: ""), attributes: attributes))
     }
-    .frame(width: 600)
-    .frame(minHeight: 620, idealHeight: 840)
-    .animation(.smooth, value: installer.phase)
-    .animation(.smooth, value: installer.status)
-    .alert("Uninstall SWTOR on Mac?", isPresented: $confirmUninstall) {
-      Button("Uninstall", role: .destructive) { uninstall() }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text("The official SWTOR app goes back to how Broadsword ships it. SWTOR on Mac's Wine engine "
-           + "and prefix are deleted, including the game settings stored in that prefix (graphics "
-           + "options, UI layouts and key bindings saved on this Mac). Your characters and the game "
-           + "itself are not affected. Logs are kept.")
+    var small = body
+    small[.font] = NSFont.systemFont(ofSize: NSFont.labelFontSize - 1)
+    small[.foregroundColor] = NSColor.secondaryLabelColor
+    text.append(NSAttributedString(string: "\n\n" + componentVersions(), attributes: small))
+    NSApp.activate()
+    NSApp.orderFrontStandardAboutPanel(options: [
+      .applicationName: "SWTOR on Mac",
+      .applicationVersion: credits["version"] ?? "?",
+      .version: "",
+      .credits: text,
+    ])
+  }
+
+  // "d9mt 159bec7 · Wine WS12WineCX24.0.7_7" from Resources/VERSIONS.
+  static func componentVersions() -> String {
+    let url = Bundle.main.resourceURL!.appendingPathComponent("VERSIONS")
+    guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
+    var parts: [String] = []
+    for line in text.split(separator: "\n") {
+      let f = line.split(separator: " ")
+      guard f.count >= 2 else { continue }
+      if f[0] == "d9mt" { parts.append("d9mt \(f[1])") }
+      if f[0] == "engine" { parts.append("Wine \(f[1])") }
+      if f[0] == "sparkle" { parts.append("Sparkle \(f[1])") }
     }
-    .alert(replaceTitle, isPresented: Binding(get: { confirmReplace != nil }, set: { if !$0 { confirmReplace = nil } })) {
-      Button(confirmReplace == .install ? "Replace It" : "Restore Stock Wine", role: .destructive) {
-        if let op = confirmReplace { installer.start(op, force: true) }
-        confirmReplace = nil
-      }
-      Button("Cancel", role: .cancel) { confirmReplace = nil }
-    } message: {
-      Text(replaceMessage)
-    }
-  }
-
-  private var replaceTitle: String {
-    installer.wrapper == "personal" ? "The developer setup is installed" : "A different Wine wrapper is installed"
-  }
-
-  private var replaceMessage: String {
-    let what = installer.wrapper == "personal"
-      ? "Broadsword's Wine folder has the developer setup from swtor-mac-proper installed (it reads ~/.config/swtor-mac/env)."
-      : "Broadsword's Wine folder has a Wine wrapper installed that is not SWTOR on Mac's."
-    let action = confirmReplace == .install
-      ? "Installing replaces it with SWTOR on Mac's wrapper."
-      : "Uninstalling removes it and restores Broadsword's own Wine."
-    return "\(what) \(action) A copy of it is kept in ~/Library/Application Support/SWTOR on Mac/backup."
-  }
-
-  private func askInstall() {
-    if installer.otherWrapper { confirmReplace = .install } else { installer.start(.install) }
-  }
-
-  private func askUninstall() { confirmUninstall = true }
-
-  private func uninstall() {
-    if installer.otherWrapper { confirmReplace = .uninstall } else { installer.start(.uninstall) }
+    return parts.joined(separator: " · ")
   }
 }
 
-struct Header: View {
-  let installer: Installer
+// Collect Logs…: Resources/collect-logs.sh zips the logs for a bug report (a few seconds: off
+// the main thread) and prints the zip's path; then say where it is and show it in Finder.
+@MainActor @Observable
+final class LogCollector {
+  var busy = false
 
-  var body: some View {
-    HStack(spacing: 16) {
-      Image(nsImage: NSApp.applicationIconImage)
-        .resizable()
-        .frame(width: 72, height: 72)
-      VStack(alignment: .leading, spacing: 4) {
-        Text("SWTOR on Mac")
-          .font(.largeTitle.weight(.semibold))
-        Text("Runs the official SWTOR Mac app on a faster graphics layer: Direct3D 9 straight to "
-             + "Metal with d9mt, on a newer Wine.")
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      Spacer(minLength: 0)
-    }
-  }
-}
-
-// Broadsword's position on third-party tools, and where support for this app comes from.
-struct NoticeSection: View {
-  @Bindable var installer: Installer
-
-  var body: some View {
-    Section {
-      VStack(alignment: .leading, spacing: 8) {
-        Text("SWTOR on Mac is an unofficial community project, not made, endorsed or supported by "
-             + "Broadsword Games, Electronic Arts, Lucasfilm or Disney. Broadsword doesn't support "
-             + "third-party modifications, so you use it at your own risk.")
-        Text("It doesn't modify the game's files. It only changes the graphics layer the official "
-             + "Mac app already uses (Wine, plus d9mt for Direct3D 9 on Metal), and Uninstall puts "
-             + "that back the way Broadsword ships it.")
-        Text("For help, contact Pharaphobia on Discord or open a GitHub issue. Please don't send "
-             + "logs or bug reports about SWTOR on Mac to Broadsword or SWTOR customer support.")
-        Text("Star Wars: The Old Republic and SWTOR are trademarks of their respective owners.")
-          .font(.caption)
-          .foregroundStyle(.tertiary)
-      }
-      .fixedSize(horizontal: false, vertical: true)
-      .foregroundStyle(.secondary)
-      if !installer.installed {
-        Toggle("I understand, and I use SWTOR on Mac at my own risk", isOn: $installer.understood)
-          .toggleStyle(.checkbox)
-          .disabled(installer.isBusy)
-      }
-    } header: {
-      Label("Unofficial community project", systemImage: "exclamationmark.shield.fill")
-        .foregroundStyle(.orange)
-    }
-  }
-}
-
-struct StatusSection: View {
-  let installer: Installer
-  private var installed: Bool { installer.installed }
-
-  var body: some View {
-    Section("This Mac") {
-      if !installer.loaded {
-        HStack { ProgressView().controlSize(.small); Text("Checking…").foregroundStyle(.secondary) }
-      } else {
-        row("Official SWTOR app", ok: installer.officialPresent,
-            detail: installer.officialPresent ? "Installed" : "Not found")
-        if !installer.officialPresent {
-          VStack(alignment: .leading, spacing: 6) {
-            Text("Install SWTOR from the official website first and start it once, so it sets up "
-                 + "the game. SWTOR on Mac never downloads the launcher or the game.")
-              .foregroundStyle(.secondary)
-              .fixedSize(horizontal: false, vertical: true)
-            Link("Get SWTOR at swtor.com", destination: URL(string: "https://www.swtor.com")!)
-              .pointerStyle(.link)
-          }
-        }
-        if !installer.appleSilicon {
-          row("Apple Silicon", ok: false, detail: "Required")
-        }
-        row("Rosetta", ok: installer.rosetta, detail: installer.rosetta ? "Installed" : "Not installed")
-        row("SWTOR on Mac", ok: installer.installed,
-            detail: installer.installed ? "Version \(installer.status["installed_version"] ?? "?")" : "Not installed",
-            neutral: !installer.installed)
-        wrapperRow
-        if installer.running {
-          Label("Quit the SWTOR launcher and the game to install or uninstall.", systemImage: "pause.circle.fill")
-            .foregroundStyle(.orange)
-        }
-      }
-    }
-  }
-
-  @ViewBuilder private var wrapperRow: some View {
-    switch installer.wrapper {
-    case "personal":
-      row("Wine wrapper", ok: false, detail: "Developer setup (swtor-mac-proper)", warning: true)
-      Text("A different setup is hooked into Broadsword's Wine folder. SWTOR on Mac leaves it alone "
-           + "and asks before replacing it.")
-        .font(.callout).foregroundStyle(.secondary)
-    case "foreign":
-      row("Wine wrapper", ok: false, detail: "Not SWTOR on Mac's", warning: true)
-      Text("Something else is hooked into Broadsword's Wine folder. SWTOR on Mac leaves it alone and "
-           + "asks before replacing it.")
-        .font(.callout).foregroundStyle(.secondary)
-    case "replaced" where !installed:
-      row("Wine wrapper", ok: false, detail: "Leftovers of another setup", warning: true)
-      Text("Broadsword's Wine folder has a bin-real folder SWTOR on Mac did not make. SWTOR on Mac "
-           + "asks before taking it over.")
-        .font(.callout).foregroundStyle(.secondary)
-    case "replaced":
-      row("Wine wrapper", ok: false, detail: "Removed by a launcher update", warning: true)
-      Text("The official launcher updated its Wine and dropped SWTOR on Mac's hook. Reinstall to put it back.")
-        .font(.callout).foregroundStyle(.secondary)
-    case "ours":
-      row("Wine wrapper", ok: true, detail: "SWTOR on Mac")
-    case "stock":
-      row("Wine wrapper", ok: true, detail: "Broadsword's own", neutral: true)
-    default:
-      EmptyView()
-    }
-  }
-
-  private func row(_ title: String, ok: Bool, detail: String, neutral: Bool = false, warning: Bool = false) -> some View {
-    LabeledContent(title) {
-      HStack(spacing: 6) {
-        Text(detail).foregroundStyle(.secondary)
-        Image(systemName: neutral ? "circle.dashed" : ok ? "checkmark.circle.fill"
-              : warning ? "exclamationmark.triangle.fill" : "xmark.circle.fill")
-          .foregroundStyle(neutral ? Color.secondary : ok ? Color.green : warning ? Color.orange : Color.red)
-      }
-    }
-  }
-}
-
-struct ProgressSection: View {
-  @Bindable var installer: Installer
-
-  var body: some View {
-    Section {
-      switch installer.phase {
-      case .working(let op):
-        VStack(alignment: .leading, spacing: 8) {
-          if let p = installer.progress, p.total > 0 {
-            ProgressView(value: Double(min(p.done, p.total)), total: Double(p.total))
-            Text("Downloading \(p.label): \(mb(p.done)) of \(mb(p.total))")
-          } else {
-            ProgressView().progressViewStyle(.linear)
-            Text(installer.step)
-          }
-        }
-        .foregroundStyle(.secondary)
-        .accessibilityLabel(op == .install ? "Installing" : "Uninstalling")
-      case .succeeded(let message):
-        Label(message, systemImage: "checkmark.circle.fill")
-          .foregroundStyle(.green)
-          .fixedSize(horizontal: false, vertical: true)
-        ForEach(installer.warnings, id: \.self) { w in
-          Label(w, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-      case .failed(let message):
-        Label(message, systemImage: "exclamationmark.triangle.fill")
-          .foregroundStyle(.red)
-          .fixedSize(horizontal: false, vertical: true)
-      case .idle:
-        EmptyView()
-      }
-      DisclosureGroup("Details", isExpanded: $installer.showLog) {
-        LogView(lines: installer.log)
-      }
-    } header: {
-      Text(installer.phase == .working(.uninstall) ? "Uninstalling" : "Progress")
-    } footer: {
-      if let dir = installer.status["log_dir"] {
-        Text("Full log: \((dir as NSString).abbreviatingWithTildeInPath)/install.log")
-          .font(.caption).foregroundStyle(.tertiary)
-      }
-    }
-  }
-
-  private func mb(_ bytes: Int64) -> String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
-}
-
-struct LogView: View {
-  let lines: [String]
-
-  var body: some View {
-    ScrollViewReader { proxy in
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 2) {
-          ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
-            Text(line).id(i)
-          }
-        }
-        .font(.system(.caption, design: .monospaced))
-        .foregroundStyle(.secondary)
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading)
-      }
-      .frame(height: 150)
-      .onChange(of: lines.count) { _, n in
-        if n > 0 { proxy.scrollTo(n - 1, anchor: .bottom) }
-      }
-    }
-  }
-}
-
-struct ActionBar: View {
-  let installer: Installer
-  let uninstall: () -> Void
-  let install: () -> Void
-
-  var body: some View {
-    GlassEffectContainer(spacing: 12) {
-      HStack(spacing: 12) {
-        if installer.isBusy {
-          Spacer()
-          // An install rolls back when cancelled; an uninstall is quick and runs to the end.
-          if installer.phase == .working(.install) {
-            Button("Cancel") { installer.cancel() }
-              .buttonStyle(.glass)
-              .keyboardShortcut(.cancelAction)
-          }
+  func collect() {
+    guard !busy else { return }
+    busy = true
+    let script = Bundle.main.resourceURL!.appendingPathComponent("collect-logs.sh")
+    DispatchQueue.global(qos: .userInitiated).async {
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/bin/bash")
+      process.arguments = [script.path]
+      process.standardInput = FileHandle.nullDevice
+      let output = Pipe(), errors = Pipe()
+      process.standardOutput = output
+      process.standardError = errors
+      var zip: String?, problem: String?
+      do {
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let errorData = errors.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let path = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+          .components(separatedBy: "\n").last ?? ""
+        if process.terminationStatus == 0, !path.isEmpty, FileManager.default.fileExists(atPath: path) {
+          zip = path
         } else {
-          if installer.canUninstall {
-            Button("Uninstall…", role: .destructive, action: uninstall)
-              .buttonStyle(.glass)
-          }
-          Spacer()
-          Button(installer.installed ? "Reinstall" : "Install", action: install)
-            .buttonStyle(.glassProminent)
-            .keyboardShortcut(.defaultAction)
-            .disabled(!installer.canInstall)
+          problem = String(decoding: errorData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         }
+      } catch {
+        problem = error.localizedDescription
       }
-      .controlSize(.large)
-      .pointerStyle(.link)
+      DispatchQueue.main.async { [zip, problem] in
+        MainActor.assumeIsolated { self.finished(zip: zip, problem: problem) }
+      }
     }
+  }
+
+  private func finished(zip: String?, problem: String?) {
+    busy = false
+    let alert = NSAlert()
+    if let zip {
+      let folder = FileManager.default.displayName(atPath: (zip as NSString).deletingLastPathComponent)
+      alert.messageText = "Logs collected"
+      alert.informativeText = "\((zip as NSString).lastPathComponent) is in your \(folder) folder. Send it with a "
+        + "short description of the problem to Pharaphobia on Discord or attach it to a GitHub issue, "
+        + "not to Broadsword or SWTOR customer support. It contains no account names or passwords."
+      alert.addButton(withTitle: "Show in Finder")
+    } else {
+      alert.alertStyle = .warning
+      alert.messageText = "Could not collect the logs"
+      alert.informativeText = "\(problem?.isEmpty == false ? problem! : "collect-logs.sh failed.")\n\n"
+        + "The logs are in ~/Library/Logs/SWTOR on Mac."
+    }
+    NSApp.activate()
+    alert.runModal()
+    if let zip { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: zip)]) }
   }
 }
 
-struct Footer: View {
-  let credits: [String: String]
+struct AppCommands: Commands {
+  let installer: Installer
+  let updates: Updates
+  let settings: GameSettings
+  let logs: LogCollector
+  @Environment(\.openSettings) private var openSettings
 
-  var body: some View {
-    VStack(spacing: 4) {
-      Text("Unofficial. Not made, endorsed or supported by Broadsword Games, EA, Lucasfilm or Disney.")
-      HStack(spacing: 6) {
-        Text("Developed by \(credits["author"] ?? "Jan Drlý")")
-        if let link {
-          Text("·")
-          Link(link.absoluteString.replacingOccurrences(of: "https://", with: ""), destination: link)
-            .foregroundStyle(.link)
-            .pointerStyle(.link)
-        }
-      }
+  var body: some Commands {
+    CommandGroup(replacing: .appInfo) {
+      Button("About SWTOR on Mac") { AppActions.showAbout(credits: installer.credits) }
+      Button("Check for Updates…") { updates.checkForUpdates() }
+        .disabled(!updates.available)
     }
-    .font(.caption)
-    .foregroundStyle(.tertiary)
-    .frame(maxWidth: .infinity)
-    .padding(.vertical, 12)
-    .background(.bar)
-    .overlay(alignment: .top) { Divider() }
-  }
-
-  private var link: URL? {
-    let repo = credits["repo"] ?? "", github = credits["github"] ?? ""
-    return URL(string: repo.isEmpty ? github : repo).flatMap { $0.host == nil ? nil : $0 }
+    CommandGroup(replacing: .appSettings) {
+      // only with SWTOR on Mac installed: the settings live in its folder
+      Button("Settings…") {
+        settings.reload()
+        openSettings()
+      }
+      .keyboardShortcut(",")
+      .disabled(!installer.installed)
+      Button("Collect Logs…") { logs.collect() }
+        .disabled(logs.busy)
+    }
+    CommandGroup(replacing: .newItem) {}
   }
 }
 
@@ -612,14 +474,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct SWTORonMacApp: App {
   @NSApplicationDelegateAdaptor private var delegate: AppDelegate
   private let installer = Installer()
+  private let updates = Updates()
+  private let settings = GameSettings()
+  private let logs = LogCollector()
 
   var body: some Scene {
     Window("SWTOR on Mac", id: "main") {
-      MainView(installer: installer)
+      MainView(installer: installer, settings: settings)
         .onAppear {
           delegate.installer = installer
+          settings.updates = updates
+          if !updates.available {
+            updates.isBusy = { [installer] in installer.isBusy }
+            installer.onIdle = { [updates] in updates.installerIdle() }
+            installer.onUpdateAvailable = { [updates] _ in updates.checkForUpdates() }
+            updates.start()
+          }
           installer.refresh()
-          NSApp.activate()
+          // (not for the UI test script, which drives the window in the background)
+          switch ProcessInfo.processInfo.environment["SWTOR_ON_MAC_UI_TEST"] {
+          case nil: NSApp.activate()
+          case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+          default: break
+          }
         }
         // Re-check when the user comes back (e.g. after quitting the launcher): no polling.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -627,10 +504,14 @@ struct SWTORonMacApp: App {
         }
     }
     .windowStyle(.hiddenTitleBar)
-    .windowResizability(.contentSize)
-    .defaultSize(width: 600, height: 840)
+    .windowResizability(.contentMinSize)
+    .defaultSize(width: 960, height: 680)
     .defaultLaunchBehavior(.presented)
     .restorationBehavior(.disabled)
-    .commands { CommandGroup(replacing: .newItem) {} }
+    .commands { AppCommands(installer: installer, updates: updates, settings: settings, logs: logs) }
+
+    Settings {
+      SettingsView(settings: settings)
+    }
   }
 }

@@ -1,8 +1,10 @@
 #!/bin/bash
 # Builds "dist/SWTOR on Mac.app": a small SwiftUI app that installs SWTOR on Mac on top of the
 # official SWTOR Mac app (see README.md). The app bundles only its own pieces:
-#   Contents/MacOS/SWTORonMac          the window (src/native/App.swift), arm64
-#   Contents/Resources/som.sh          install/uninstall/status logic (src/som.sh)
+#   Contents/MacOS/SWTORonMac          the window, menus, Settings and updates (src/native), arm64
+#   Contents/Frameworks/Sparkle.framework  app updates (Sparkle 2, pinned below)
+#   Contents/Resources/som.sh          install/uninstall/status/settings logic (src/som.sh)
+#   Contents/Resources/collect-logs.sh "Collect Logs…" (src/collect-logs.sh)
 #   Contents/Resources/wine-wrapper.sh the wrapper template installed into Broadsword's Wine
 #   Contents/Resources/helpers/        hold-launcher, setsid-exec (universal)
 #   Contents/Resources/d9mt/           prebuilt d9mt (scripts/build-d9mt.sh)
@@ -32,9 +34,11 @@ CACHE="$ROOT/.cache"
 APP="$ROOT/dist/SWTOR on Mac.app"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 
-# Sparkle (app updates) is planned for 0.0.2; it comes in like in SWGL on Mac: a pinned
-# download here (fetch <url> <sha256>), the framework in Contents/Frameworks, SUFeedURL and
-# SUPublicEDKey in src/Info.plist, and the feed built by scripts/release.sh.
+# Pinned dependencies. Bump the version and sha256 together.
+SPARKLE_VERSION=2.10.0
+SPARKLE_URL=https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz
+SPARKLE_SHA256=c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c
+
 fetch() { # url sha256 -> prints path of the verified download
   local url=$1 sha=$2 dir="$CACHE/$2" file
   file="$dir/$(basename "$url")"
@@ -56,6 +60,16 @@ for f in d3d9.dll winemetal.dll winemetal.so VERSION LICENSE THIRD_PARTY_NOTICES
   [ -f "$D9/$f" ] || { echo "Missing $D9/$f; run scripts/build-d9mt.sh" >&2; exit 1; }
 done
 
+# Sparkle (app updates, as in SWGL on Mac): the framework goes into the app, its tools
+# (generate_appcast, BinaryDelta, generate_keys) are used from here by scripts/release.sh.
+SPARKLE="$CACHE/sparkle-$SPARKLE_VERSION"
+if [ ! -d "$SPARKLE/Sparkle.framework" ]; then
+  sparkle_txz=$(fetch "$SPARKLE_URL" "$SPARKLE_SHA256")
+  rm -rf "$SPARKLE.part" && mkdir -p "$SPARKLE.part"
+  tar -xJf "$sparkle_txz" -C "$SPARKLE.part"
+  rm -rf "$SPARKLE" && mv "$SPARKLE.part" "$SPARKLE"
+fi
+
 echo "Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -66,10 +80,17 @@ printf 'APPL????' >"$APP/Contents/PkgInfo"
 
 NB="$CACHE/native-build"
 rm -rf "$NB" && mkdir -p "$NB"
-swiftc -parse-as-library -O -target "arm64-apple-macos$MACOS_MIN" \
-  -o "$APP/Contents/MacOS/SWTORonMac" src/native/App.swift
+swiftc -parse-as-library -O -target "arm64-apple-macos$MACOS_MIN" -F "$SPARKLE" -framework Sparkle \
+  -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
+  -o "$APP/Contents/MacOS/SWTORonMac" src/native/*.swift
+# Sparkle without its XPC services (they are only for sandboxed apps); its license ships with it.
+mkdir -p "$APP/Contents/Frameworks"
+ditto "$SPARKLE/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+rm -rf "$APP/Contents/Frameworks/Sparkle.framework/XPCServices" \
+  "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
 
 install -m 755 src/som.sh "$R/som.sh"
+install -m 755 src/collect-logs.sh "$R/collect-logs.sh"
 install -m 644 src/wine-wrapper.sh "$R/wine-wrapper.sh"
 install -m 644 src/dxvk.conf "$R/dxvk.conf"
 
@@ -94,6 +115,8 @@ mkdir -p "$L/d9mt/bridge"
 cp LICENSE "$L/SWTOR-on-Mac-LICENSE.txt"
 cp -R "$D9/LICENSE" "$D9/LICENSES" "$D9/THIRD_PARTY_NOTICES.md" "$L/d9mt/"
 cp "$D9/bridge/LICENSE" "$D9/bridge/COPYING.LIB" "$L/d9mt/bridge/"
+mkdir -p "$L/sparkle"
+cp "$SPARKLE/LICENSE" "$L/sparkle/LICENSE"
 cat >"$L/README.txt" <<EOF
 SWTOR on Mac $APP_VERSION - licenses
 
@@ -106,14 +129,19 @@ is derived from DXMT and licensed LGPL-2.1-or-later (d9mt/bridge/). Its complete
 https://github.com/jdrly/d9mt/tree/$(cat "$D9/VERSION")/bridge. Other components and their
 licenses: d9mt/THIRD_PARTY_NOTICES.md and d9mt/LICENSES/.
 
+Sparkle $SPARKLE_VERSION (app updates), https://sparkle-project.org: MIT-style license, see
+sparkle/LICENSE.
+
 Not included in this app: the Wine engine (CrossOver 24.0.7 sources by CodeWeavers, built by
 Sikarugir, LGPL-2.1-or-later) and its libraries are downloaded at install time from
 https://github.com/Sikarugir-App (Engines and Template releases).
 EOF
 
-printf 'version=%s\nauthor=%s\ngithub=%s\nrepo=%s\n' "$APP_VERSION" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" >"$R/app.properties"
-printf 'app %s\nd9mt %s\nengine %s\nframeworks %s\nsdk %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
-  "$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)" "$(sed -n 's/^FW_NAME=//p' src/som.sh)" "$sdk" >"$R/VERSIONS"
+# feed: Sparkle's feed, also read by the Wine wrapper's daily update check (via som.sh)
+printf 'version=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s\n' "$APP_VERSION" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" \
+  "$(plutil -extract SUFeedURL raw src/Info.plist)" >"$R/app.properties"
+printf 'app %s\nd9mt %s\nengine %s\nframeworks %s\nsparkle %s\nsdk %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
+  "$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)" "$(sed -n 's/^FW_NAME=//p' src/som.sh)" "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
 
 iconset="$CACHE/AppIcon.iconset"
 rm -rf "$iconset"
@@ -124,6 +152,10 @@ xattr -cr "$APP"
 # Ad-hoc signatures (Developer ID: scripts/release.sh). The helpers keep their own signature
 # when the installer copies them into Broadsword's Wine folder.
 for h in "$R/helpers/"*; do codesign --force --sign - "$h"; done
+# Sparkle without its XPC services no longer matches its own signature (release.sh signs it
+# for real, in the same order).
+fw="$APP/Contents/Frameworks/Sparkle.framework"
+for f in "$fw/Versions/B/Autoupdate" "$fw/Versions/B/Updater.app" "$fw"; do codesign --force --sign - "$f"; done
 codesign --force --sign - "$APP"
 codesign --verify --strict "$APP"
 echo "Built $APP ($(du -sh "$APP" | cut -f1))"
