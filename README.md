@@ -139,6 +139,36 @@ Reinstall.
 - After an app update, click **Update to &lt;version&gt;** in the window: it brings the
   installed setup (wrapper, d9mt) up to the app's version.
 
+### Development builds
+
+Versions like `0.0.6-dev.1` are test builds of the next version. They are published only as
+GitHub **pre-releases** (DMG only, no `appcast.xml`), so the feed above never offers them, and
+they differ from releases in three ways:
+
+- A **Development build** badge next to the title, and in About.
+- **Debug Logging is on by default.** The first install or Reinstall of each dev version turns
+  it on, so every test session logs the `STATS`/`HITCH`/`DIAG MEM` lines the session report
+  reads. Turned off in Settings, it stays off until the next dev version.
+- **No automatic update checks**, neither Sparkle's nor the wrapper's at game start; the
+  setting is shown off. **Check for Updates…** still works. A dev build's `CFBundleVersion`
+  (what Sparkle compares) sorts between the previous release and its own:
+  `0.0.6-dev.N` is `0.0.5.(1000+N)`. So the feed's 0.0.5 is never offered as an update, and the
+  public 0.0.6 is offered once it is out. `CFBundleShortVersionString` stays `0.0.6-dev.N`.
+
+**Session report.** `"/Applications/SWTOR on Mac.app/Contents/Resources/session-report.sh"`
+(`scripts/session-report.sh`) sums up the last game session from
+`~/Library/Logs/SWTOR on Mac/wine.log`:
+- duration, median and 1%-low fps, the seconds below 58 fps;
+- frames over 33 ms and 50 ms;
+- hitches, split into d9mt's and the game's, and d9mt's top causes;
+- compile waits and the memory peak;
+- render passes and the attachment traffic d9mt saved.
+
+`wine.log` starts afresh at every game start, so `--keep` saves a copy to `sessions/`.
+`--compare A.log B.log` puts two sessions side by side. `--skip <s>` leaves out the first
+seconds (loading). Collect Logs adds the report as `session-report.txt`. Logs from 0.0.5 have
+no `STATS` lines: hitches, compile waits and memory still compare.
+
 ### Launcher updates (the launchd job)
 
 The official launcher sometimes updates its own Wine and puts Broadsword's preloaders back in
@@ -400,6 +430,12 @@ Sparkle's EdDSA key never leaves Jan's Mac, so a release comes in two halves:
    `https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml` names the new
    version.
 
+Development builds (`APP_VERSION` `X.Y.Z-dev.N`, on the `dev` branch) don't go through CI:
+`./build.sh && scripts/release.sh --dev`. It signs, notarizes and staples the DMG, then
+creates the GitHub pre-release `v<version>` with the DMG and
+`release-notes/<version>.md`, and no feed. The tag starts the Release workflow, which stops
+at its version check; cancel the run. The other modes and the workflow refuse dev versions.
+
 For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, then
 `scripts/release.sh --feed 0.0.1` (no deltas: there is no older version). Without CI,
 `./build.sh && scripts/release.sh` does everything on the Mac (sign, notarize, feed, draft).
@@ -411,7 +447,7 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 | Wine engine `WS12WineCX24.0.7_7` (CrossOver 24.0.7, Wine 9.0, x86_64) | [Sikarugir-App/Engines v1.0](https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS12WineCX24.0.7_7.tar.xz) | `203f9e9fd6c2cc77e6525d798a434ced326145db34a356355e05659d3445fd1c` |
 | Engine libraries (`Template-1.0.21.app/Contents/Frameworks`, without `renderer/`) | [Sikarugir-App/Template v1.0](https://github.com/Sikarugir-App/Template/releases/download/v1.0/Template-1.0.21.tar.xz) | `bbe996e4e4375318485953d0c7818b7b4b0a4dc1f13303bcc584f99f7602f78d` |
 | Sparkle 2.10.0 (bundled) | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
-| d9mt `c2a819d` (bundled, `prebuilt/d9mt`) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/c2a819d14355723c2425d0cef0d29ea9b4b9e4b7) | see `prebuilt/d9mt` |
+| d9mt `7975e2e` (bundled, `prebuilt/d9mt`) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/7975e2ea6a90493b2c565c75e4fd92bf73f986c6) | see `prebuilt/d9mt` |
 | CrossOver 24.0.7 sources (for the Mac driver, `prebuilt/winemac`) | [CodeWeavers](https://media.codeweavers.com/pub/crossover/source/crossover-sources-24.0.7.tar.gz) | `56749e926df9f0437dbcea259cf0bff6657a43871af50182887fe15a84fc2e4e` |
 
 ## Credits and licenses

@@ -345,13 +345,16 @@ final class Installer {
   // MARK: Helpers
 
   // dotted version numbers: a > b
+  // Dotted numbers; a prerelease (0.0.6-dev.1) is older than its release (0.0.6).
   static func isNewer(_ a: String, than b: String) -> Bool {
-    let x = a.split(separator: ".").map { Int($0) ?? 0 }, y = b.split(separator: ".").map { Int($0) ?? 0 }
+    let ca = a.split(separator: "-", maxSplits: 1), cb = b.split(separator: "-", maxSplits: 1)
+    let x = (ca.first ?? "").split(separator: ".").map { Int($0) ?? 0 }
+    let y = (cb.first ?? "").split(separator: ".").map { Int($0) ?? 0 }
     for i in 0..<max(x.count, y.count) {
       let p = i < x.count ? x[i] : 0, q = i < y.count ? y[i] : 0
       if p != q { return p > q }
     }
-    return false
+    return cb.count > 1 && ca.count == 1
   }
 
   static func capture(script: URL, arguments: [String]) async -> String {
@@ -460,6 +463,13 @@ enum AppActions {
       text.append(NSAttributedString(string: "\n", attributes: body))
       text.append(NSAttributedString(string: url.replacingOccurrences(of: "https://", with: ""), attributes: attributes))
     }
+    if Updates.isDevBuild {
+      var dev = body
+      dev[.font] = NSFont.boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+      dev[.foregroundColor] = NSColor.systemPurple
+      text.insert(NSAttributedString(string: "Development build: for testing, not a release. "
+        + "Debug Logging is on by default; no automatic update checks.\n\n", attributes: dev), at: 0)
+    }
     var small = body
     small[.font] = NSFont.systemFont(ofSize: NSFont.labelFontSize - 1)
     small[.foregroundColor] = NSColor.secondaryLabelColor
@@ -467,13 +477,13 @@ enum AppActions {
     NSApp.activate()
     NSApp.orderFrontStandardAboutPanel(options: [
       .applicationName: "SWTOR on Mac",
-      .applicationVersion: credits["version"] ?? "?",
+      .applicationVersion: (credits["version"] ?? "?") + (Updates.isDevBuild ? " (development build)" : ""),
       .version: "",
       .credits: text,
     ])
   }
 
-  // "d9mt c2a819d · Wine WS12WineCX24.0.7_7" from Resources/VERSIONS.
+  // "d9mt 7975e2e · Wine WS12WineCX24.0.7_7" from Resources/VERSIONS.
   static func componentVersions() -> String {
     let url = Bundle.main.resourceURL!.appendingPathComponent("VERSIONS")
     guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }

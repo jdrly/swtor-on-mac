@@ -26,6 +26,11 @@
 #                                    GitHub release (local dry runs and update tests)
 #   scripts/release.sh --no-release  sign, notarize, staple and build the feed, without a GitHub
 #                                    release (before the repository exists, or to look first)
+#   scripts/release.sh --dev         development builds (version X.Y.Z-dev.N, build.sh): sign,
+#                                    notarize and staple the DMG, then a GitHub pre-release with
+#                                    the DMG only. No feed: releases/latest (the appcast every
+#                                    install reads) stays on the last release.
+#   scripts/release.sh --dev --no-release   the same without the pre-release
 #
 # Releases from GitHub Actions (.github/workflows/release.yml) come in two halves, so
 # Sparkle's EdDSA key never leaves Jan's Mac:
@@ -45,8 +50,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 MODE="${1:-}"
+DEV_NO_RELEASE=""
+if [ "$MODE" = --dev ] && [ "${2:-}" = --no-release ]; then DEV_NO_RELEASE=1; fi
 case "$MODE" in
-  ""|--sign-only|--no-notarize|--no-release|--ci|--ci-dry-run) ;;
+  ""|--sign-only|--no-notarize|--no-release|--ci|--ci-dry-run|--dev) ;;
   --feed) [ -n "${2:-}" ] || { echo "usage: $0 --feed <version>" >&2; exit 2; } ;;
   *) echo "unknown option: $MODE" >&2; exit 2 ;;
 esac
@@ -60,6 +67,12 @@ if [ "$MODE" = --feed ]; then
 else
   VERSION="$(plutil -extract CFBundleShortVersionString raw "$SRC/Contents/Info.plist")"
 fi
+# Development builds never go into a feed or a regular release, and releases are never dev builds.
+case "$VERSION:$MODE" in
+  *-dev.*:--dev|*-dev.*:--sign-only) ;;
+  *-*:*) echo "$VERSION is a development build: use --dev (or --sign-only)" >&2; exit 1 ;;
+  *:--dev) echo "$VERSION is not a development build (X.Y.Z-dev.N)" >&2; exit 1 ;;
+esac
 RELEASE_DIR="${RELEASE_DIR:-release}"
 OUT="$RELEASE_DIR/$VERSION"
 UPDATES="$RELEASE_DIR/updates"
@@ -85,8 +98,8 @@ if [ "$MODE" != --sign-only ] && [ "$MODE" != --ci-dry-run ]; then
     echo "[release] note: no release notes ($NOTES)"
   fi
 fi
-case "$MODE" in
-  ""|--ci)
+case "$MODE$DEV_NO_RELEASE" in
+  ""|--ci|--dev)
     gh auth status >/dev/null 2>&1 || { echo "gh is not logged in" >&2; exit 1; }
     ! gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1 || { echo "Release v$VERSION already exists" >&2; exit 1; } ;;
   --feed)
@@ -197,6 +210,18 @@ fi
 case "$MODE" in
   --ci-dry-run)
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); no GitHub release (--ci-dry-run)"
+    exit 0 ;;
+  --dev)
+    if [ -n "$DEV_NO_RELEASE" ]; then
+      echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); no GitHub pre-release (--no-release)"
+      exit 0
+    fi
+    # A pre-release never becomes releases/latest. The tag also starts the Release workflow,
+    # which stops at its version check for dev versions (release.yml); cancel the run anyway.
+    echo "[release] creating the GitHub pre-release v$VERSION (DMG only, no feed)"
+    gh release create "v$VERSION" --repo "$REPO" --prerelease --title "SWTOR on Mac $VERSION (development build)" \
+      --notes-file "$NOTES" "$DMG"
+    echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); pre-release v$VERSION"
     exit 0 ;;
   --ci)
     echo "[release] creating the draft GitHub release v$VERSION (DMG only)"

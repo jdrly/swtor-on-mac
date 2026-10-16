@@ -5,7 +5,8 @@
 #   collect-logs.sh [folder]   write the zip into folder instead
 #
 # In the zip: SWTOR on Mac's logs (the end of large ones), its env, settings.conf, dxvk.conf
-# and install-manifest.json, the app's VERSIONS, a fresh system-info.txt (macOS, chip,
+# and install-manifest.json, the app's VERSIONS, session-report.txt (the last game session in
+# short, scripts/session-report.sh), a fresh system-info.txt (macOS, chip,
 # memory, displays, versions, the state of the install), and crash reports of the last 7 days
 # for the game, Wine and the app. Never the game's command line (the launcher passes the
 # account name and session on it), nor anything from the Wine prefixes.
@@ -142,6 +143,11 @@ for f in "$LOGS"/*; do
 done
 for f in env settings.conf dxvk.conf install-manifest.json; do add "$SOM/$f"; done
 add "$RES/VERSIONS"
+# the last game session in short (Resources/session-report.sh: frame rate, hitches, compile
+# waits, memory, d9mt's render-pass statistics)
+if [ -f "$LOGS/wine.log" ] && [ -x "$RES/session-report.sh" ]; then
+  "$RES/session-report.sh" "$LOGS/wine.log" 2>&1 | redact >"$out/session-report.txt"
+fi
 crash_reports | while IFS= read -r f; do add "$f" "crash-reports/${f##*/}"; done
 
 {

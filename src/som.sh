@@ -36,6 +36,11 @@ set -euo pipefail
 RES="$(cd "$(dirname "$0")" && pwd)"
 VERSION="$(sed -n 's/^version=//p' "$RES/app.properties" 2>/dev/null || true)"
 VERSION="${VERSION:-dev}"
+# release, or dev: a development build (X.Y.Z-dev.N, GitHub pre-releases only). Dev builds turn
+# Debug Logging on at their first install (dev_defaults) and never check for updates from the
+# game's start.
+CHANNEL="$(sed -n 's/^channel=//p' "$RES/app.properties" 2>/dev/null || true)"
+CHANNEL="${CHANNEL:-release}"
 D9MT_VERSION="$(cat "$RES/d9mt/VERSION" 2>/dev/null || echo unknown)"
 # Sparkle's feed (the app's SUFeedURL, via app.properties): the wrapper's daily update check
 FEED_URL="$(sed -n 's/^feed=//p' "$RES/app.properties" 2>/dev/null || true)"
@@ -94,7 +99,7 @@ AGENT_LABEL=cz.jandrly.swtoronmac.watch
 AGENT_PLIST="$H/Library/LaunchAgents/$AGENT_LABEL.plist"
 AGENT_DIR="$SOM/agent"
 # What SWTOR on Mac keeps in $SOM (removed by uninstall; backup/ stays)
-APP_FILES="engine frameworks prefix gamemode dxvk.conf env settings.conf agent last-update-check update-available"
+APP_FILES="engine frameworks prefix gamemode dxvk.conf env settings.conf agent last-update-check update-available dev-defaults"
 LOGFILE=/dev/null
 
 # --- Output and logging
@@ -302,7 +307,8 @@ SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys"
 setting_default() {
   case "$1" in
     retina|gamemode|vsync|updates) echo on ;;
-    hud|debug|physkeys) echo off ;;
+    debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
+    hud|physkeys) echo off ;;
     memory) echo auto ;;
   esac
 }
@@ -330,6 +336,20 @@ write_settings() { # [<key> <value>]: settings.conf with every key, one of them 
     echo "# SWTOR on Mac settings (change them in the app: SWTOR on Mac > Settings…)"
     cat
   } | put "$SETTINGS" 644
+}
+
+# A development build's first install (and Reinstall) turns Debug Logging on once per dev
+# version, so every test session logs STATS/HITCH/DIAG MEM; Settings can still turn it off,
+# and it stays off until the next dev version. Release builds keep the setting as it is.
+dev_defaults() {
+  local mark="$SOM/dev-defaults"
+  if [ "$CHANNEL" = dev ] && [ "$(sed -n 's/^debug-on=//p' "$mark" 2>/dev/null)" != "$VERSION" ]; then
+    say "Development build $VERSION: Debug Logging on (Settings can turn it off)"
+    write_settings debug on
+    [ -n "$DRY" ] || echo "debug-on=$VERSION" | put "$mark" 644
+  else
+    write_settings
+  fi
 }
 
 settings() {
@@ -707,6 +727,9 @@ D9MT_MEMSTATS=1"
 DXVK_LOG_LEVEL=warn"
   fi
   upd=$([ "$(setting updates)" = on ] && echo 1 || echo 0)
+  # development builds: no update check from the game's start (Updates.swift: no automatic
+  # Sparkle checks either; Check for Updates… still works)
+  [ "$CHANNEL" = release ] || upd=0
   # in a sandbox, the update check's notification goes to a file
   [ -z "$ROOT" ] || notify_log="SWTOR_NOTIFY_LOG=\"$LOGS/notifications.log\""
   put "$SOM/env" 644 <<EOF
@@ -1063,7 +1086,7 @@ on_install_exit() {
     [ -n "${WRAPPER_PHASE:-}" ] && rollback_wrapper
     # all or nothing: what this run created goes again (a previous install stays)
     local c
-    [ -n "${FIRST_INSTALL:-}" ] && CREATED="engine frameworks prefix gamemode dxvk.conf env settings.conf"
+    [ -n "${FIRST_INSTALL:-}" ] && CREATED="engine frameworks prefix gamemode dxvk.conf env settings.conf dev-defaults"
     for c in $CREATED; do
       if [ -e "$SOM/$c" ]; then rm -rf "${SOM:?}/$c"; log "removed $c (install failed)"; fi
     done
@@ -1103,7 +1126,7 @@ cmd_install() {
   step "Wine prefix and d9mt"
   install_prefix
   step "Settings"
-  write_settings
+  dev_defaults
   write_env
   write_dxvk_conf
   phase 4

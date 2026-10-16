@@ -5,6 +5,8 @@
 #   Contents/Frameworks/Sparkle.framework  app updates (Sparkle 2, pinned below)
 #   Contents/Resources/som.sh          install/uninstall/status/settings logic (src/som.sh)
 #   Contents/Resources/collect-logs.sh "Collect Logs…" (src/collect-logs.sh)
+#   Contents/Resources/session-report.sh  a game session in short (scripts/session-report.sh;
+#                                      in Collect Logs, and for Terminal)
 #   Contents/Resources/wine-wrapper.sh the wrapper template installed into Broadsword's Wine
 #   Contents/Resources/helpers/        hold-launcher, setsid-exec (universal)
 #   Contents/Resources/d9mt/           prebuilt d9mt (scripts/build-d9mt.sh)
@@ -28,7 +30,29 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # SWTOR_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.0.5}
+APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.0.6-dev.1}
+
+# Development builds: a version with a prerelease suffix, X.Y.Z-dev.N. They are published only
+# as GitHub pre-releases, never in the appcast. CFBundleShortVersionString is the version as is;
+# CFBundleVersion (what Sparkle compares) is numeric and sorts above the previous release and
+# below X.Y.Z: 0.0.6-dev.N -> 0.0.5.(1000+N). Sparkle's standard comparator orders
+# 0.0.5 < 0.0.5.1001 < 0.0.5.1002 < 0.0.6, so a dev build is never offered 0.0.5 again and
+# is offered the public 0.0.6 once that is out. Releases: CFBundleVersion = the version.
+bundle_version() {
+  local v=$1 core n x y z
+  case "$v" in
+    *-dev.*) core=${v%%-*}; n=${v##*-dev.} ;;
+    *-*) echo "Unsupported version $v (X.Y.Z or X.Y.Z-dev.N)" >&2; return 1 ;;
+    *) echo "$v"; return ;;
+  esac
+  IFS=. read -r x y z <<<"$core"
+  case "$x$y$z$n" in *[!0-9]*|'') echo "Unsupported version $v" >&2; return 1 ;; esac
+  if [ "$z" -gt 0 ]; then echo "$x.$y.$((z - 1)).$((1000 + n))"
+  elif [ "$y" -gt 0 ]; then echo "$x.$((y - 1)).9999.$((1000 + n))"
+  else echo "$((x - 1)).9999.9999.$((1000 + n))"; fi
+}
+BUNDLE_VERSION=$(bundle_version "$APP_VERSION")
+case "$APP_VERSION" in *-*) CHANNEL=dev ;; *) CHANNEL=release ;; esac
 APP_AUTHOR="Jan Drlý"
 GITHUB_URL=https://github.com/jdrly
 REPO_URL=https://github.com/jdrly/swtor-on-mac
@@ -81,7 +105,11 @@ echo "Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 R="$APP/Contents/Resources"
-sed "s/@VERSION@/$APP_VERSION/g" src/Info.plist >"$APP/Contents/Info.plist"
+sed -e "s/@VERSION@/$APP_VERSION/g" -e "s/@BUILD@/$BUNDLE_VERSION/g" -e "s/@CHANNEL@/$CHANNEL/g" \
+  src/Info.plist >"$APP/Contents/Info.plist"
+# Development builds: no automatic update checks (Sparkle's, and the wrapper's via som.sh);
+# SWTOR on Mac > Check for Updates… still works and offers only newer versions (see above).
+[ "$CHANNEL" = release ] || plutil -replace SUEnableAutomaticChecks -bool NO "$APP/Contents/Info.plist"
 plutil -lint -s "$APP/Contents/Info.plist"
 printf 'APPL????' >"$APP/Contents/PkgInfo"
 
@@ -98,6 +126,7 @@ rm -rf "$APP/Contents/Frameworks/Sparkle.framework/XPCServices" \
 
 install -m 755 src/som.sh "$R/som.sh"
 install -m 755 src/collect-logs.sh "$R/collect-logs.sh"
+install -m 755 scripts/session-report.sh "$R/session-report.sh"
 install -m 644 src/wine-wrapper.sh "$R/wine-wrapper.sh"
 install -m 644 src/dxvk.conf "$R/dxvk.conf"
 
@@ -164,8 +193,10 @@ https://github.com/Sikarugir-App (Engines and Template releases).
 EOF
 
 # feed: Sparkle's feed, also read by the Wine wrapper's daily update check (via som.sh)
-printf 'version=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s\n' "$APP_VERSION" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" \
-  "$(plutil -extract SUFeedURL raw src/Info.plist)" >"$R/app.properties"
+# channel: release, or dev (development build: Debug Logging on by default, no automatic
+# update checks; som.sh and the app read it)
+printf 'version=%s\nbuild=%s\nchannel=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s\n' "$APP_VERSION" "$BUNDLE_VERSION" \
+  "$CHANNEL" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" "$(plutil -extract SUFeedURL raw src/Info.plist)" >"$R/app.properties"
 printf 'app %s\nd9mt %s\nengine %s\nframeworks %s\nwinemac %s\nsparkle %s\nsdk %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
   "$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)" "$(sed -n 's/^FW_NAME=//p' src/som.sh)" \
   "physical-keys patch $(shasum -a 256 patches/winemac-physical-keys.patch | cut -c1-12)" "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"

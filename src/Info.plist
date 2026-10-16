@@ -21,7 +21,10 @@
 	<key>CFBundleShortVersionString</key>
 	<string>@VERSION@</string>
 	<key>CFBundleVersion</key>
-	<string>@VERSION@</string>
+	<string>@BUILD@</string>
+	<!-- release or dev (build.sh: development builds X.Y.Z-dev.N) -->
+	<key>SWTORChannel</key>
+	<string>@CHANNEL@</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSArchitecturePriority</key>

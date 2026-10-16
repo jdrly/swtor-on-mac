@@ -35,11 +35,12 @@ update_check() {
   latest=$(printf '%s\n' "$feed" | sed -n 's|.*<sparkle:shortVersionString>\([^<]*\)</sparkle:shortVersionString>.*|\1|p' | head -1)
   [ -n "$latest" ] || latest=$(printf '%s\n' "$feed" | sed -n 's|.*<sparkle:version>\([^<]*\)</sparkle:version>.*|\1|p' | head -1)
   [ -n "$latest" ] || return 0
-  # newer: compare the dotted numbers
+  # newer: compare the dotted numbers; a prerelease (0.0.6-dev.1) is older than its release
   awk -v a="$latest" -v b="$SWTOR_ON_MAC_VERSION" 'BEGIN {
+    pa = index(a, "-") > 0; pb = index(b, "-") > 0; sub(/-.*/, "", a); sub(/-.*/, "", b)
     n = split(a, x, "."); m = split(b, y, "."); if (m > n) n = m
     for (i = 1; i <= n; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 }
-    exit 1 }' || return 0
+    exit !(pb && !pa) }' || return 0
   echo "$latest" >"$SWTOR_APP_DIR/update-available"
   msg="SWTOR on Mac update available ($latest) — open the app to update."
   if [ -n "$SWTOR_NOTIFY_LOG" ]; then

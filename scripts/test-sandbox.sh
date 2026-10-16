@@ -292,7 +292,16 @@ check "install: log" test -s "$LOGS/install.log"
 check "install: no Wine left running" test -z "$(sandbox_wine)"
 check "install: settings.conf" grep -qx 'memory=auto' "$SOM/settings.conf"
 check "install: env memory profile" grep -qx 'D9MT_MEMORY_PROFILE=auto' "$SOM/env"
-check "install: env update check" grep -qx 'SWTOR_UPDATE_CHECK=1' "$SOM/env"
+CHANNEL=$(sed -n 's/^channel=//p' "$APP/Contents/Resources/app.properties")
+APPV=$(sed -n 's/^version=//p' "$APP/Contents/Resources/app.properties")
+if [ "$CHANNEL" = dev ]; then
+  check "install: env update check off (development build)" grep -qx 'SWTOR_UPDATE_CHECK=0' "$SOM/env"
+  check "install: Debug Logging on (development build)" eval 'grep -qx debug=on "$SOM/settings.conf" && grep -qx D9MT_PROFILE=1 "$SOM/env"'
+  check "install: development defaults recorded" grep -qx "debug-on=$APPV" "$SOM/dev-defaults"
+else
+  check "install: env update check" grep -qx 'SWTOR_UPDATE_CHECK=1' "$SOM/env"
+  check "install: Debug Logging off" grep -qx 'debug=off' "$SOM/settings.conf"
+fi
 check "install: env feed" grep -q '^SWTOR_UPDATE_FEED="https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml"$' "$SOM/env"
 check "install: env notifications to a file (sandbox)" grep -q '^SWTOR_NOTIFY_LOG=' "$SOM/env"
 check "install: env HUD off" grep -q '^#MTL_HUD_ENABLED=1' "$SOM/env"
@@ -456,6 +465,14 @@ n=$(wc -l <"$U/notifications.log"); feed 0.0.3; game
 check "update check: at most once a day" test "$(wc -l <"$U/notifications.log")" = "$n"
 touch -t 202001010000 "$U/app/last-update-check"; rm -f "$U/app/update-available"; feed 0.0.1; game
 check "update check: same version, no notification" test "$(wc -l <"$U/notifications.log")" = "$n"
+# a development build: the release before it is older, its own release newer
+sed -i '' 's|^SWTOR_ON_MAC_VERSION=.*|SWTOR_ON_MAC_VERSION=0.0.6-dev.1|' "$U/env"
+touch -t 202001010000 "$U/app/last-update-check"; feed 0.0.5; game
+check "update check: 0.0.5 is not newer than 0.0.6-dev.1" test "$(wc -l <"$U/notifications.log")" = "$n" -a ! -e "$U/app/update-available"
+touch -t 202001010000 "$U/app/last-update-check"; feed 0.0.6; game
+check "update check: 0.0.6 is newer than 0.0.6-dev.1" test "$(cat "$U/app/update-available" 2>/dev/null)" = 0.0.6
+sed -i '' 's|^SWTOR_ON_MAC_VERSION=.*|SWTOR_ON_MAC_VERSION=0.0.1|' "$U/env"
+n=$(wc -l <"$U/notifications.log"); rm -f "$U/app/update-available"
 touch -t 202001010000 "$U/app/last-update-check"; sed -i '' 's|^SWTOR_UPDATE_FEED=.*|SWTOR_UPDATE_FEED="http://127.0.0.1:9/appcast.xml"|' "$U/env"
 t0=$SECONDS; game
 check "update check: offline is silent" test "$(wc -l <"$U/notifications.log")" = "$n" -a ! -e "$U/app/update-available"

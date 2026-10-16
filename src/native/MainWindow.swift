@@ -225,8 +225,11 @@ struct Hero: View {
           .shadow(color: accent.opacity(0.55), radius: 18)
           .accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 6) {
-          Text("SWTOR on Mac")
-            .font(.system(size: 32, weight: .bold, design: .rounded))
+          HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("SWTOR on Mac")
+              .font(.system(size: 32, weight: .bold, design: .rounded))
+            if Updates.isDevBuild { DevBuildBadge() }
+          }
           Text("Faster graphics for the official SWTOR Mac app: Direct3D 9 straight to Metal, on a newer Wine.")
             .font(.title3)
             .foregroundStyle(.white.opacity(0.78))
@@ -266,6 +269,25 @@ struct Hero: View {
     }
     .background { HeroBackground() }
     .clipped()
+  }
+}
+
+// "Development build 0.0.6-dev.1" next to the title in development builds (build.sh).
+struct DevBuildBadge: View {
+  private var version: String {
+    Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+  }
+
+  var body: some View {
+    Label("Development build \(version)", systemImage: "hammer.fill")
+      .font(.callout.weight(.semibold))
+      .foregroundStyle(.white)
+      .padding(.horizontal, 10)
+      .padding(.vertical, 5)
+      .glassEffect(.regular.tint(.purple.opacity(0.45)), in: .capsule)
+      .help("A test build, published only as a GitHub pre-release: Debug Logging on by default, "
+            + "no automatic update checks")
+      .fixedSize()
   }
 }
 

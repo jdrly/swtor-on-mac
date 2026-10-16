@@ -45,6 +45,10 @@ jobs:
           # shellcheck disable=SC2016 # ${SWTOR_ON_MAC_VERSION:-…} is text for sed to match
           version="$(sed -n 's/^APP_VERSION=\${SWTOR_ON_MAC_VERSION:-\(.*\)}$/\1/p' build.sh)"
           echo "build.sh version: $version"
+          case "$version" in *-*)
+            echo "$version is a development build: those are published from the Mac with scripts/release.sh --dev (GitHub pre-release, no feed)"
+            exit 1 ;;
+          esac
           if [ "$DRY_RUN" = false ]; then
             [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "Tag $GITHUB_REF_NAME does not match build.sh ($version)"; exit 1; }
             [ -f "release-notes/$version.md" ] || { echo "Missing release-notes/$version.md"; exit 1; }

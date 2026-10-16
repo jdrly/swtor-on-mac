@@ -17,6 +17,11 @@
 //
 // For testing, `defaults write cz.jandrly.swtoronmac SWTORUpdateFeedURL <url>` replaces the
 // feed (Sparkle accepts http only on 127.0.0.1/localhost); scripts/test-update.sh does that.
+//
+// Development builds (SWTORChannel dev in Info.plist, version X.Y.Z-dev.N; build.sh) never
+// check automatically, whatever the setting says; Check for Updates… still works. Their
+// CFBundleVersion sorts between the previous release and X.Y.Z (0.0.6-dev.1 is 0.0.5.1001),
+// so the feed's 0.0.5 is never offered and the public 0.0.6 is.
 
 import AppKit
 import Sparkle
@@ -26,6 +31,7 @@ import SwiftUI
 final class Updates: NSObject, SPUUpdaterDelegate {
   static let appBundleID = "cz.jandrly.swtoronmac"
   static let feedOverrideKey = "SWTORUpdateFeedURL"
+  static let isDevBuild = (Bundle.main.object(forInfoDictionaryKey: "SWTORChannel") as? String) == "dev"
 
   private(set) var updater: SPUUpdater?
   private var userDriver: UserDriver?
@@ -53,6 +59,8 @@ final class Updates: NSObject, SPUUpdaterDelegate {
     }
     userDriver = driver
     self.updater = updater
+    // Sparkle keeps the setting in the defaults, which a release build may have turned on
+    if Updates.isDevBuild { updater.automaticallyChecksForUpdates = false }
     NSLog("SWTOR on Mac: update checks %@, feed %@",
           updater.automaticallyChecksForUpdates ? "automatic" : "manual", updater.feedURL?.absoluteString ?? "-")
   }
@@ -63,7 +71,7 @@ final class Updates: NSObject, SPUUpdaterDelegate {
 
   var automaticChecks: Bool {
     get { updater?.automaticallyChecksForUpdates ?? true }
-    set { updater?.automaticallyChecksForUpdates = newValue }
+    set { if !Updates.isDevBuild { updater?.automaticallyChecksForUpdates = newValue } }
   }
 
   // An install or uninstall has finished: a held update goes ahead.
