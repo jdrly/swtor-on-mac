@@ -10,7 +10,7 @@
 # for the game, Wine and the app. Never the game's command line (the launcher passes the
 # account name and session on it), nor anything from the Wine prefixes.
 # Every file is redacted on the way in: home folder → ~, user and full name → USER and NAME,
-# e-mail addresses → EMAIL, "-set <key> <value>" arguments and password/user name/token
+# account names (from the game's <account>_Account.ini names) → ACCOUNT, e-mail addresses → EMAIL, "-set <key> <value>" arguments and password/user name/token
 # settings → REDACTED, serial numbers and device identifiers left out.
 #
 # SWTOR_ON_MAC_ROOT=/abs/dir: a sandbox (as for som.sh); the zip then goes to its Desktop.
@@ -30,8 +30,13 @@ trap 'rm -rf "$work"' EXIT
 out="$work/$name"
 mkdir -p "$out/logs" "$out/crash-reports"
 
+# Account names to hide: the game names its per-account settings <account>_Account.ini (in
+# both Wine prefixes; only the names are read).
+accounts="$(find "$BS_WINE/drive_c/users" "$SOM/prefix/drive_c/users" -path '*/AppData/Local/SWTOR/swtor/settings/*' \
+  -maxdepth 7 -name '*_Account*.ini' 2>/dev/null | sed 's|.*/||; s/_Account.*\.ini$//' | sort -u)"
+
 redact() {  # stdin → stdout
-  SOM_HOME_PATH="$HOME" SOM_ROOT_HOME="$H" SOM_USER="$(id -un)" SOM_NAME="$(id -F 2>/dev/null)" \
+  SOM_HOME_PATH="$HOME" SOM_ROOT_HOME="$H" SOM_USER="$(id -un)" SOM_NAME="$(id -F 2>/dev/null)" SOM_ACCOUNTS="$accounts" \
   LC_ALL=C awk '
     # Replace w with r in s, ignoring case; only where w is a whole word if whole is set.
     function rep(s, w, r, whole,    ls, lw, res, p, n, before, after, last) {
@@ -81,6 +86,7 @@ redact() {  # stdin → stdout
       # A user name that is a common word is only replaced in paths, not everywhere.
       split("admin user users mac test game wine guest root home apple swtor shared crossover", w, " ")
       for (i in w) common[w[i]] = 1
+      n = split(ENVIRON["SOM_ACCOUNTS"], accounts, "\n")
     }
     {
       line = tolower($0)
@@ -92,6 +98,7 @@ redact() {  # stdin → stdout
       s = rep(s, "\\users\\" user, "\\users\\USER", 1)
       if (length(user) >= 2 && !(tolower(user) in common)) s = rep(s, user, "USER", 1)
       if (length(fullname) >= 3) s = rep(s, fullname, "NAME", 1)
+      for (i = 1; i <= n; i++) if (length(accounts[i]) >= 2) s = rep(s, accounts[i], "ACCOUNT", 1)
       s = setargs(s)
       s = secrets(s)
       gsub(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z][A-Za-z]+/, "EMAIL", s)

@@ -60,18 +60,19 @@ jobs:
           for f in Contents/MacOS/SWTORonMac Contents/Resources/som.sh Contents/Resources/wine-wrapper.sh \
                    Contents/Resources/helpers/hold-launcher Contents/Resources/helpers/setsid-exec \
                    Contents/Resources/d9mt/d3d9.dll Contents/Resources/d9mt/winemetal.so \
-                   Contents/Resources/Licenses/d9mt/bridge/COPYING.LIB; do
+                   Contents/Resources/collect-logs.sh Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle \
+                   Contents/Resources/Licenses/d9mt/bridge/COPYING.LIB Contents/Resources/Licenses/sparkle/LICENSE; do
             [ -e "$app/$f" ] || { echo "missing: $f"; exit 1; }
           done
           for h in "$app/Contents/Resources/helpers/"*; do
             [ "$(lipo -archs "$h")" = "x86_64 arm64" ] || { echo "not universal: $h"; exit 1; }
           done
-          # the window runs on macOS 26: every Mach-O must allow it
+          # the window runs on macOS 26: every Mach-O must allow it (Sparkle's say older)
           bad=0
           while IFS= read -r -d '' f; do
             file -b "$f" | grep -q '^Mach-O' || continue
             m="$(vtool -show-build "$f" 2>/dev/null | awk '/minos/ { print $2; exit }')"
-            [ "$m" = 26.0 ] || { echo "needs macOS $m: ${f#"$app"/}"; bad=1; }
+            [ -n "$m" ] && [ "${m%%.*}" -le 26 ] || { echo "needs macOS $m: ${f#"$app"/}"; bad=1; }
           done < <(find "$app" -type f -print0)
           exit "$bad"
 

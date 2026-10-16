@@ -39,11 +39,18 @@ reg_has() {
     inkey && $0 == v { found = 1 }
     END { exit !found }' "$SOM/prefix/user.reg"
 }
-# Fingerprint of a tree: every path with type, mode, symlink target, and file contents
+# Fingerprint of a tree: every path with type, mode, file size, symlink target, and file
+# contents. The game settings in Broadsword's prefix are left out (Uninstall copies them back,
+# with a backup next to them, on purpose; checked on their own).
 snap() {
-  ( cd "$1" && find . -print0 | sort -z | xargs -0 stat -f '%N %HT %Sp %z %Y' &&
-    find . -type f -print0 | sort -z | xargs -0 shasum -a 256 )
+  ( cd "$1" && find . -path '*/AppData/Local/SWTOR/swtor/settings*' -prune -o -print0 | sort -z |
+      xargs -0 stat -f '%N|%HT|%Sp|%z|%Y' | awk -F'|' -v OFS='|' '$2 == "Directory" { $4 = "" } { print }' &&
+    find . -path '*/AppData/Local/SWTOR/swtor/settings*' -prune -o -type f -print0 | sort -z | xargs -0 shasum -a 256 )
 }
+AGENT_PLIST="$H/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist"
+# the watch job as launchd would start it (the sandbox never loads it into launchd)
+watch() { SWTOR_ON_MAC_SETTLE="${SETTLE:-1}" /bin/bash "$SOM/agent/som.sh" watch; }
+notes() { if [ -f "$LOGS/notifications.log" ]; then wc -l <"$LOGS/notifications.log" | tr -d ' '; else echo 0; fi; }
 # Wine processes of the sandbox (its engine, or anything with the sandbox in its path)
 sandbox_wine() {
   local tag=/nonexistent/
@@ -69,6 +76,7 @@ BS_APP="$SANDBOX/Applications/Star Wars - The Old Republic.app"
 BS_WINE="$H/Library/Application Support/com.broadsword.swtor/Star Wars - The Old Republic/swtor-precompiled/Libraries/Wine"
 SOM="$H/Library/Application Support/SWTOR on Mac"
 LOGS="$H/Library/Logs/SWTOR on Mac"
+AGENT_PLIST="$H/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist"
 export SWTOR_ON_MAC_ROOT="$SANDBOX"
 mkdir -p "$SANDBOX/Applications" "$(dirname "$BS_WINE")" "$SANDBOX/usertmp"
 cp -c -R -P "$REAL_APP" "$SANDBOX/Applications/"
@@ -81,13 +89,27 @@ if [ -d "$BS_WINE/bin-real" ]; then
   rm -rf "$BS_WINE/bin-real"
 fi
 # a copy of whatever wrapper the real install has (for the conflict test), from the real tree
+# (SWTOR on Mac's own wrapper there does not count: then a made-up one stands in for it)
 PERSONAL_WRAPPER="$SANDBOX/personal-wrapper"
-if ! is_macho "$REAL_WINE/bin/wine64-preloader"; then
-  mkdir -p "$PERSONAL_WRAPPER"
+mkdir -p "$PERSONAL_WRAPPER"
+if ! is_macho "$REAL_WINE/bin/wine64-preloader" && ! grep -q SWTOR_ON_MAC_WRAPPER "$REAL_WINE/bin/wine64-preloader"; then
   cp -p "$REAL_WINE/bin/wine64-preloader" "$REAL_WINE/bin/wine-preloader" "$PERSONAL_WRAPPER/"
   cp -p "$REAL_WINE/bin-real/hold-launcher" "$REAL_WINE/bin-real/setsid-exec" "$PERSONAL_WRAPPER/" 2>/dev/null || true
+else
+  for b in wine64-preloader wine-preloader; do
+    printf '#!/bin/bash\n# another Wine wrapper (test)\nexec "$(dirname "$0")/../bin-real/$(basename "$0")" "$@"\n' >"$PERSONAL_WRAPPER/$b"
+    chmod 755 "$PERSONAL_WRAPPER/$b"
+  done
 fi
 STOCK="$(snap "$BS_WINE")"
+printf '%s\n' "$STOCK" >"$SANDBOX/snap-stock.txt"
+# like_stock <name>: Broadsword's folder is as it was (else the difference is in <name>.diff)
+like_stock() {
+  local now; now="$(snap "$BS_WINE")"
+  [ "$STOCK" = "$now" ] && return 0
+  printf '%s\n' "$now" | diff "$SANDBOX/snap-stock.txt" - >"$SANDBOX/$1.diff"
+  return 1
+}
 check "fake official install is stock" test "$(st wrapper)" = stock
 check "status: official app found" test "$(st official_app)" = yes
 check "status: not installed" test "$(st installed)" = no
@@ -150,6 +172,47 @@ check "install: game settings user crossover" test -d "$SOM/prefix/drive_c/users
 check "install: download cache removed" test ! -e "$H/Library/Caches/SWTOR on Mac/downloads"
 check "install: log" test -s "$LOGS/install.log"
 check "install: no Wine left running" test -z "$(sandbox_wine)"
+check "install: settings.conf" grep -qx 'memory=auto' "$SOM/settings.conf"
+check "install: env memory profile" grep -qx 'D9MT_MEMORY_PROFILE=auto' "$SOM/env"
+check "install: env update check" grep -qx 'SWTOR_UPDATE_CHECK=1' "$SOM/env"
+check "install: env feed" grep -q '^SWTOR_UPDATE_FEED="https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml"$' "$SOM/env"
+check "install: env notifications to a file (sandbox)" grep -q '^SWTOR_NOTIFY_LOG=' "$SOM/env"
+check "install: env HUD off" grep -q '^#MTL_HUD_ENABLED=1' "$SOM/env"
+check "install: env Game Mode on" grep -q '^SWTOR_GAMEMODE_APP=' "$SOM/env"
+check "install: launchd job written" plutil -lint -s "$AGENT_PLIST"
+check "install: launchd job watches Wine/bin" test "$(plutil -extract WatchPaths.0 raw -o - "$AGENT_PLIST")" = "$BS_WINE/bin"
+check "install: launchd job not at load" test "$(plutil -extract RunAtLoad raw -o - "$AGENT_PLIST")" = false
+check "install: launchd job throttled" test "$(plutil -extract ThrottleInterval raw -o - "$AGENT_PLIST")" = 30
+check "install: launchd job runs the agent copy" test "$(plutil -extract ProgramArguments.1 raw -o - "$AGENT_PLIST")" = "$SOM/agent/som.sh"
+check "install: agent copy" test -f "$SOM/agent/som.sh" -a -f "$SOM/agent/wine-wrapper.sh" -a -x "$SOM/agent/helpers/hold-launcher"
+check "install: launchd job not loaded (sandbox)" eval '! launchctl print "gui/$(id -u)/cz.jandrly.swtoronmac.watch" >/dev/null 2>&1'
+check "install: status watch_agent" test "$(st watch_agent)" = yes
+check "install: manifest settings user" test -n "$(plutil -extract settings_user raw -o - "$SOM/install-manifest.json")"
+
+echo "== 4b. settings"
+check "settings: listed" test "$(som settings | sed -n 's/^vsync=//p')" = on
+som set hud on >/dev/null && check "set hud: MTL_HUD_ENABLED=1" grep -qx 'MTL_HUD_ENABLED=1' "$SOM/env"
+som set vsync off >/dev/null && check "set vsync off: presentInterval unset" eval '! grep -q "^d3d9.presentInterval" "$SOM/dxvk.conf"'
+check "set vsync off: other options kept" grep -q '^d3d9.allowOutOfRangeVsDefs = True' "$SOM/dxvk.conf"
+som set debug on >/dev/null && check "set debug: info + profile + memstats" eval 'grep -qx DXVK_LOG_LEVEL=info "$SOM/env" && grep -qx D9MT_PROFILE=1 "$SOM/env" && grep -qx D9MT_MEMSTATS=1 "$SOM/env"'
+som set memory high >/dev/null && check "set memory high" grep -qx 'D9MT_MEMORY_PROFILE=high' "$SOM/env"
+som set gamemode off >/dev/null && check "set gamemode off" grep -q '^#SWTOR_GAMEMODE_APP=' "$SOM/env"
+som set updates off >/dev/null && check "set updates off" grep -qx 'SWTOR_UPDATE_CHECK=0' "$SOM/env"
+check "set: bad value refused" eval '! som set memory huge >/dev/null 2>&1'
+check "set: bad key refused" eval '! som set foo on >/dev/null 2>&1'
+som set retina off >/dev/null && check "set retina off: user.reg" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="n"'
+out=$(env -u WINEPREFIX WINEPREFIX="$SOM/prefix" WINEDEBUG=-all DYLD_FALLBACK_LIBRARY_PATH="$SOM/frameworks:/usr/lib" \
+  "$SOM/engine/bin/wine" reg query 'HKCU\Software\Wine\Mac Driver' /v RetinaMode 2>/dev/null | tr -d '\r' || true)
+cleanup_wine
+check "set retina off: Wine reads n ($(echo "$out" | awk '/RetinaMode/ { print $NF }'))" test "$(echo "$out" | awk '/RetinaMode/ { print $NF }')" = n
+check "set retina: no Wine left running" test -z "$(sandbox_wine)"
+printf '#include <unistd.h>\nint main(void) { sleep(30); return 0; }\n' >"$SANDBOX/sleep2.c"
+clang -o "$BS_APP/Contents/MacOS/test-sleep2" "$SANDBOX/sleep2.c"
+"$BS_APP/Contents/MacOS/test-sleep2" & sleeper=$!; sleep 0.5
+check "set retina: refused while the launcher runs" eval '! som set retina on >/dev/null 2>&1'
+check "set hud: allowed while the launcher runs" eval 'som set hud off >/dev/null'
+kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true; rm -f "$BS_APP/Contents/MacOS/test-sleep2"
+som set retina on >/dev/null && check "set retina on again" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
 
 echo "== 5. the wrapper hands Wine calls to the app's engine"
 out=$("$BS_WINE/bin/wine64-preloader" "$BS_WINE/bin/wine64" --version 2>&1 || true)
@@ -164,27 +227,122 @@ check "reinstall: engine kept" test "$ino" = "$(stat -f %i "$SOM/engine/bin/wine
 check "reinstall: prefix kept" grep -q 'Updating the existing Wine prefix' "$SANDBOX/reinstall.txt"
 check "reinstall: wrapper ours" test "$(st wrapper)" = ours
 check "reinstall: no Wine left running" test -z "$(sandbox_wine)"
+check "reinstall: settings kept" eval 'grep -qx memory=high "$SOM/settings.conf" && grep -qx D9MT_MEMORY_PROFILE=high "$SOM/env" && grep -qx DXVK_LOG_LEVEL=info "$SOM/env"'
+check "reinstall: vsync stays off" eval '! grep -q "^d3d9.presentInterval" "$SOM/dxvk.conf"'
+check "reinstall: Retina stays on" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
+som set vsync on >/dev/null; som set debug off >/dev/null; som set memory auto >/dev/null
+som set gamemode on >/dev/null; som set updates on >/dev/null
+check "settings: back to the defaults" test "$(som settings | sed -n 's/^debug=//p')" = off
+
+echo "== 6b. the wrapper's daily update check (stub engine; the game is never started)"
+U="$SANDBOX/update-check"
+mkdir -p "$U/bin" "$U/bin-real" "$U/engine/bin" "$U/app"
+cp "$BS_WINE/bin-real/setsid-exec" "$BS_WINE/bin-real/hold-launcher" "$U/bin-real/"
+printf '#!/bin/bash\necho "$@" >>"%s/wine-args"\n' "$U" >"$U/engine/bin/wine"
+printf '#!/bin/bash\nexit 0\n' >"$U/engine/bin/wineserver"
+chmod +x "$U/engine/bin/wine" "$U/engine/bin/wineserver"
+feed() { # <version>: an appcast like generate_appcast's
+  printf '<?xml version="1.0" standalone="yes"?>\n<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">\n<channel><item>\n<sparkle:version>%s</sparkle:version>\n<sparkle:shortVersionString>%s</sparkle:shortVersionString>\n</item></channel></rss>\n' "$1" "$1" >"$U/appcast.xml"
+}
+cat >"$U/env" <<ENV
+SWTOR_ENGINE="$U/engine"
+SWTOR_PREFIX="$U/prefix"
+SWTOR_LOG_DIR="$U/logs"
+SWTOR_ON_MAC_VERSION=0.0.1
+SWTOR_APP_DIR="$U/app"
+SWTOR_UPDATE_FEED="file://$U/appcast.xml"
+SWTOR_UPDATE_CHECK=1
+SWTOR_NOTIFY_LOG="$U/notifications.log"
+ENV
+sed "s|@CONF@|$U/env|" "$APP/Contents/Resources/wine-wrapper.sh" >"$U/bin/wine64-preloader"; chmod +x "$U/bin/wine64-preloader"
+game() { "$U/bin/wine64-preloader" "$U/bin/wine64" 'C:\swtor\retailclient\swtor.exe' -set username TESTACCOUNT >/dev/null 2>&1; sleep 1.5; }
+feed 0.0.2; game
+check "update check: notification for 0.0.2" grep -q 'update available (0.0.2)' "$U/notifications.log"
+check "update check: update-available for the app" test "$(cat "$U/app/update-available" 2>/dev/null)" = 0.0.2
+check "update check: the game started anyway" grep -q swtor.exe "$U/wine-args"
+n=$(wc -l <"$U/notifications.log"); feed 0.0.3; game
+check "update check: at most once a day" test "$(wc -l <"$U/notifications.log")" = "$n"
+touch -t 202001010000 "$U/app/last-update-check"; rm -f "$U/app/update-available"; feed 0.0.1; game
+check "update check: same version, no notification" test "$(wc -l <"$U/notifications.log")" = "$n"
+touch -t 202001010000 "$U/app/last-update-check"; sed -i '' 's|^SWTOR_UPDATE_FEED=.*|SWTOR_UPDATE_FEED="http://127.0.0.1:9/appcast.xml"|' "$U/env"
+t0=$SECONDS; game
+check "update check: offline is silent" test "$(wc -l <"$U/notifications.log")" = "$n" -a ! -e "$U/app/update-available"
+check "update check: the game does not wait ($((SECONDS - t0)) s incl. 1.5 s pause)" test $((SECONDS - t0)) -le 3
+check "update check: no account in the logs" eval '! grep -rq TESTACCOUNT "$U/logs"'
+
+echo "== 6c. the launchd job (simulated: run as launchd would)"
+watch; check "watch: wrapper in place, nothing to do" test "$(st wrapper)" = ours
+check "watch: logged" grep -q 'the wrapper is in place' "$LOGS/watch.log"
+rm -f "$BS_WINE/bin-real/setsid-exec"; watch
+check "watch: missing helper restored" test -x "$BS_WINE/bin-real/setsid-exec"
 
 echo "== 7. a launcher update replaced the wrapper"
-cp -p "$BS_WINE/bin-real/wine64-preloader" "$BS_WINE/bin/.x" && mv -f "$BS_WINE/bin/.x" "$BS_WINE/bin/wine64-preloader"
-cp -p "$BS_WINE/bin-real/wine-preloader" "$BS_WINE/bin/.x" && mv -f "$BS_WINE/bin/.x" "$BS_WINE/bin/wine-preloader"
+launcher_update() {
+  cp -p "$BS_WINE/bin-real/wine64-preloader" "$BS_WINE/bin/.x" && mv -f "$BS_WINE/bin/.x" "$BS_WINE/bin/wine64-preloader"
+  cp -p "$BS_WINE/bin-real/wine-preloader" "$BS_WINE/bin/.x" && mv -f "$BS_WINE/bin/.x" "$BS_WINE/bin/wine-preloader"
+}
+launcher_update
 check "update: status replaced" test "$(st wrapper)" = replaced
 som install >"$SANDBOX/reinstall2.txt" 2>&1 || bad "reinstall after update"
 check "update: wrapper back" test "$(st wrapper)" = ours
+echo "== 7b. ...and the launchd job puts it back by itself"
+launcher_update; n=$(notes)
+mkdir "$SOM/.lock"; watch; rmdir "$SOM/.lock"
+check "watch: leaves a running install alone" test "$(st wrapper)" = replaced
+t0=$SECONDS; SETTLE=3 watch
+check "watch: waited for Wine/bin to settle ($((SECONDS - t0)) s)" test $((SECONDS - t0)) -ge 2
+check "watch: wrapper back" test "$(st wrapper)" = ours
+check "watch: notified" test "$(notes)" -gt "$n"
+check "watch: manifest has the new preloader" test "$(plutil -extract original_preloaders_sha256.wine64-preloader raw -o - "$SOM/install-manifest.json")" = "$(shasum -a 256 "$BS_WINE/bin-real/wine64-preloader" | cut -d" " -f1)"
+check "watch: manifest still JSON" plutil -convert json -o /dev/null "$SOM/install-manifest.json"
+n=$(notes); watch
+check "watch: idempotent (no second notification)" test "$(notes)" = "$n"
+# a launcher half way through its update: a preloader missing
+launcher_update; mv "$BS_WINE/bin/wine-preloader" "$SANDBOX/wp.tmp"; n=$(notes); watch
+check "watch: half-updated folder only notified" test "$(notes)" -gt "$n" -a ! -e "$BS_WINE/bin/wine-preloader"
+check "watch: half-updated folder untouched" is_macho "$BS_WINE/bin/wine64-preloader"
+mv "$SANDBOX/wp.tmp" "$BS_WINE/bin/wine-preloader"; watch
+check "watch: complete again, wrapper back" test "$(st wrapper)" = ours
 
-echo "== 8. uninstall restores the official install byte for byte"
+echo "== 8. uninstall restores the official install byte for byte, and copies the game settings back"
+GS_REL="AppData/Local/SWTOR/swtor/settings"
+GS_USER=$(plutil -extract settings_user raw -o - "$SOM/install-manifest.json")
+GS_APP="$SOM/prefix/drive_c/users/crossover/$GS_REL"
+GS_BS="$BS_WINE/drive_c/users/$GS_USER/$GS_REL"
+if [ -d "$GS_APP" ]; then
+  echo "test-change $(date +%s)" >"$GS_APP/client_settings_test.ini"
+  echo "context" >"$GS_APP/ContextError.ini.new" && mv -f "$GS_APP/ContextError.ini.new" "$GS_APP/ContextError.ini"
+fi
+# Collect Logs (sandbox: the zip goes to the sandbox's Desktop)
+echo "2026-10-16 launch: swtor.exe -set username SECRETACCOUNT -set password hunter2 $HOME/x" >>"$LOGS/install.log"
+zip=$("$APP/Contents/Resources/collect-logs.sh" 2>"$SANDBOX/collect.err" || true)
+check "logs: zip on the sandbox Desktop" test -f "$zip" -a "${zip#"$H/Desktop/"}" != "$zip"
+if [ -f "$zip" ]; then
+  mkdir -p "$SANDBOX/zip" && unzip -q -o "$zip" -d "$SANDBOX/zip"
+  check "logs: install.log, env, manifest, system info" test -f "$SANDBOX"/zip/*/logs/install.log -a -f "$SANDBOX"/zip/*/env -a -f "$SANDBOX"/zip/*/install-manifest.json -a -f "$SANDBOX"/zip/*/system-info.txt
+  check "logs: no -set values" eval '! grep -rq -e SECRETACCOUNT -e hunter2 "$SANDBOX/zip"'
+  check "logs: no user name in paths" eval '! grep -rq "/Users/$(id -un)/" "$SANDBOX/zip"'
+  check "logs: system info has the Mac" grep -q '^Mac: ' "$SANDBOX"/zip/*/system-info.txt
+fi
 # the Game Mode link the wrapper would have made at game start
 pre="$SOM/engine/bin/wine-preloader"; m=$(stat -f '%Fm' "$pre")
 link="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$pre")-${m%.*}-$((10#${m#*.}))/swtor.exe"
 mkdir -p "$(dirname "$link")" && ln -sf "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe" "$link"
 som uninstall >"$SANDBOX/uninstall.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall.txt"; bad "uninstall exit"; }
 check "uninstall: @done" grep -q '^@done' "$SANDBOX/uninstall.txt"
-check "uninstall: official install identical to stock" test "$STOCK" = "$(snap "$BS_WINE")"
+check "uninstall: official install identical to stock" like_stock uninstall
 check "uninstall: status stock" test "$(st wrapper)" = stock
 for c in engine frameworks prefix gamemode env dxvk.conf install-manifest.json; do
   check "uninstall: $c removed" test ! -e "$SOM/$c"
 done
 check "uninstall: Game Mode link removed" test ! -L "$link"
+check "uninstall: launchd job removed" test ! -e "$AGENT_PLIST" -a ! -e "$SOM/agent"
+if [ -d "$GS_BS" ]; then
+  check "uninstall: game settings copied back" grep -q test-change "$GS_BS/client_settings_test.ini"
+  check "uninstall: ContextError.ini not copied" eval '! grep -qx context "$GS_BS/ContextError.ini" 2>/dev/null'
+  check "uninstall: backup of the previous settings" test -n "$(ls -d "$GS_BS"-backup-* 2>/dev/null)"
+  check "uninstall: backup has no test file" eval '! ls "$GS_BS"-backup-*/client_settings_test.ini >/dev/null 2>&1'
+fi
 check "uninstall: logs kept" test -s "$LOGS/install.log"
 check "uninstall: no Wine left running" test -z "$(sandbox_wine)"
 
@@ -212,7 +370,7 @@ if [ -d "$PERSONAL_WRAPPER" ]; then
   check "force: backup of the other wrapper" test -n "$(ls "$SOM/backup" 2>/dev/null)"
   check "force: no Wine left running" test -z "$(sandbox_wine)"
   som uninstall >"$SANDBOX/force-un.txt" 2>&1 || bad "uninstall after takeover"
-  check "force: uninstall gives stock" test "$STOCK" = "$(snap "$BS_WINE")"
+  check "force: uninstall gives stock" like_stock force-uninstall
 fi
 
 cleanup_wine

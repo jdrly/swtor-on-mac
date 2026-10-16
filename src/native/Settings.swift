@@ -34,6 +34,10 @@ final class GameSettings {
         parsed[String(line[..<eq])] = String(line[line.index(after: eq)...])
       }
       values = parsed
+      // Sparkle follows the setting (it lives in settings.conf, which survives app updates)
+      if let updates, let value = parsed["updates"], parsed["installed"] == "yes" {
+        updates.automaticChecks = value == "on"
+      }
     }
   }
 

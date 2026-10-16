@@ -32,6 +32,9 @@ final class Updates: NSObject, SPUUpdaterDelegate {
   private var heldInstall: (() -> Void)?
   // true while an install or uninstall runs: an update waits for it
   var isBusy: () -> Bool = { false }
+  // a sheet is open on the main window (it would keep the app from quitting), and closing it
+  var sheetOpen: () -> Bool = { false }
+  var closeSheets: () -> Void = {}
 
   // Starts Sparkle; without it (not the app bundle, Sparkle failed), no updates.
   func start() {
@@ -80,7 +83,13 @@ final class Updates: NSObject, SPUUpdaterDelegate {
 
   func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
                untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
-    guard isBusy() else { return false }
+    if !isBusy() {
+      guard sheetOpen() else { return false }
+      // close it first, then let Sparkle quit and relaunch the app
+      closeSheets()
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { installHandler() }
+      return true
+    }
     NSLog("SWTOR on Mac: holding the update to %@ until the installer has finished", item.displayVersionString)
     heldInstall = installHandler
     userDriver?.window.showHeld()

@@ -19,7 +19,26 @@ Mode. You keep starting the game from the official app, as usual.
 >
 > Star Wars: The Old Republic and SWTOR are trademarks of their respective owners.
 
-<img src="docs/screenshots/installed-sandbox.png" width="420" alt="The SWTOR on Mac window after an install">
+<img src="docs/screenshots/installed.png" width="720" alt="The SWTOR on Mac window after an install">
+
+## Features
+
+- **d9mt**: the game's Direct3D 9 goes straight to Metal, on CrossOver 24.0.7 Wine, with
+  macOS **Game Mode** and Retina rendering.
+- **Settings** (SWTOR on Mac > Settings…, ⌘,): Retina mode, vsync, d9mt's video memory
+  profile, Game Mode, the Metal HUD, debug logging, automatic update checks.
+- **Updates**: the app updates itself with [Sparkle](https://sparkle-project.org) (SWTOR on
+  Mac > Check for Updates…), and the game's start looks for a new version once a day.
+- **Survives launcher updates**: when the official launcher updates its Wine and drops SWTOR on
+  Mac's hook, a small launchd job hooks it back in by itself.
+- **Collect Logs…** makes a zip for bug reports, without account names or passwords.
+- **Fully reversible**: Uninstall puts the official app back exactly as Broadsword ships it and
+  copies your game settings back to it.
+
+<img src="docs/screenshots/installing-steps.png" width="360" alt="Installing: the timeline of the steps"> <img src="docs/screenshots/settings.png" width="200" alt="The Settings window"> <img src="docs/screenshots/installed-dark.png" width="360" alt="Installed, in dark mode">
+
+More in [docs/screenshots](docs/screenshots) (the notice, a failed install, uninstall, a narrow
+window).
 
 ## Requirements
 
@@ -39,16 +58,85 @@ Mode. You keep starting the game from the official app, as usual.
 3. Start SWTOR from the official app as usual. The launcher looks and works the same; the game
    runs on SWTOR on Mac's engine.
 
-Install again (**Reinstall**) whenever you like, for example after the official launcher has
-updated itself: it is safe to repeat and keeps your game settings. The window shows when a
-launcher update has removed the hook (*Wine wrapper: Removed by a launcher update*).
+**The first minutes of play may stutter**, and so may each new area or effect the first time
+you see it (for example a city full of players): d9mt compiles the game's shaders and pipelines
+for Metal the first time it meets them and caches them, so it gets smooth after that. After an
+update of SWTOR on Mac the cache is rebuilt once.
+
+Install again (**Reinstall**) whenever you like: it is safe to repeat and keeps your game
+settings and SWTOR on Mac's settings. After an official launcher update SWTOR on Mac hooks
+itself back in (see below); the window shows it if that did not work (*Launcher hook: Removed by
+a launcher update*, with a **Repair** button).
+
+## Settings
+
+SWTOR on Mac > **Settings…** (⌘,), while SWTOR on Mac is installed. Changes take effect the
+next time the game starts.
+
+| Setting | Default | What it changes |
+|---|---|---|
+| Retina Mode | on | Wine's Mac driver `RetinaMode` in the prefix's registry (only while the launcher and the game are closed) |
+| Vsync | on | `d3d9.presentInterval = 1` in `dxvk.conf` (off: unset) |
+| Video Memory Profile | Automatic | `D9MT_MEMORY_PROFILE` (auto, low, medium, high, ultra, unlimited) |
+| Game Mode | on | `SWTOR_GAMEMODE_APP` in `env` |
+| Show Metal HUD | off | `MTL_HUD_ENABLED=1` in `env`. It can't be toggled with a key in the game; turn it on here before starting the game |
+| Check for updates automatically | on | Sparkle's automatic checks and the daily check at the game's start |
+| Debug Logging | off | `DXVK_LOG_LEVEL=info`, `D9MT_PROFILE=1`, `D9MT_MEMSTATS=1` (else `DXVK_LOG_LEVEL=warn`) |
+
+They are kept in `~/Library/Application Support/SWTOR on Mac/settings.conf`; `env` and
+`dxvk.conf` are made from it (`som.sh settings`, `som.sh set <key> <value>`).
+
+## Updates
+
+- The app checks [its feed](https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml)
+  with Sparkle, signed with an EdDSA key (`SUPublicEDKey`), and asks before installing; SWTOR on
+  Mac > **Check for Updates…** checks right away.
+- At most once a day, when the game starts, the Wine wrapper looks at the same feed in a
+  detached process (2 s timeout; the game never waits for it, offline it does nothing). If
+  there is a newer version it posts a notification, *SWTOR on Mac update available — open the
+  app to update*, and the app then offers the update when it is opened.
+- After an app update, click **Update** in the window: it brings the installed setup (wrapper,
+  d9mt) up to the app's version.
+
+## Launcher updates (the launchd job)
+
+The official launcher sometimes updates its own Wine and puts Broadsword's preloaders back in
+place of SWTOR on Mac's wrapper. Install sets up a launchd job for that,
+`~/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist`: launchd starts it only when
+Broadsword's `Wine/bin` folder changes (`WatchPaths`, not at login, at most every 30 s); it
+checks the wrapper and exits. Nothing runs in between. If a launcher update replaced the
+wrapper, it waits until the folder has been quiet for 20 s, puts the wrapper back exactly like
+Install does, records the new preloaders in `install-manifest.json` and posts a notification.
+It does nothing while an install or uninstall runs or when another Wine wrapper is installed,
+and if the folder looks half updated it only notifies (*open SWTOR on Mac and click
+Reinstall*). It runs a copy of `som.sh` in `~/Library/Application Support/SWTOR on Mac/agent`,
+so updating or moving the app does not affect it; its log is `~/Library/Logs/SWTOR on
+Mac/watch.log`.
+
+Uninstall removes it. To remove it by hand:
+
+```sh
+launchctl bootout gui/$(id -u)/cz.jandrly.swtoronmac.watch
+rm ~/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist
+```
+
+## Collect Logs
+
+SWTOR on Mac > **Collect Logs…** saves `SWTOR-on-Mac-logs-<date>.zip` to the Desktop and shows
+it in Finder: SWTOR on Mac's logs, `env`, `settings.conf`, `dxvk.conf`,
+`install-manifest.json`, the versions, system information (macOS, chip, memory, displays) and
+crash reports of the last 7 days for the game and Wine. Your home folder, user name, account
+names and e-mail addresses are replaced, and the game's command line (the launcher passes the
+account on it) is never included.
 
 ## Uninstall
 
-Quit the launcher and the game, open SWTOR on Mac and click **Uninstall…**. The official app
-goes back to exactly how Broadsword ships it, and SWTOR on Mac's engine, prefix and settings are
-deleted, including the game settings stored in its prefix (graphics options, UI layouts and key
-bindings saved on this Mac; characters live on the server and are not affected). Logs stay in
+Quit the launcher and the game, open SWTOR on Mac and click **Uninstall…**. Your game settings
+(graphics options, UI layouts, key bindings: `AppData/Local/SWTOR/swtor/settings` of SWTOR on
+Mac's prefix, without `ContextError.ini`) are copied back to Broadsword's prefix first, with a
+copy of its previous ones next to them (`settings-backup-<time>`). Then the official app goes
+back to exactly how Broadsword ships it, and SWTOR on Mac's engine, prefix, settings and launchd
+job are deleted (characters live on the server and are not affected). Logs stay in
 `~/Library/Logs/SWTOR on Mac`. Then move the app to the Bin.
 
 ## What it changes
@@ -71,16 +159,20 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
     with d9mt's `d3d9.dll` in `system32` (Wine's own kept as `d3d9.dll.wine`) and the settings
     below; your existing game settings are taken over once
   - `gamemode/SWTOR.app` – the bundle that gets the game macOS Game Mode
-  - `env` – the settings the wrapper applies, `dxvk.conf` – d9mt's options
+  - `settings.conf` – the Settings window's settings; `env` – what the wrapper applies,
+    `dxvk.conf` – d9mt's options (both made from `settings.conf`)
   - `install-manifest.json` – what was changed, for Uninstall
+  - `agent/` – the copy of `som.sh` the launchd job runs; `last-update-check`,
+    `update-available` – the wrapper's daily update check
   - `backup/` – only if you replaced another Wine wrapper: a copy of it
-- `~/Library/Logs/SWTOR on Mac/` – `install.log`, and per game start `wine.log` (d9mt
-  warnings), `hold.log`, `launch-env.txt`, `effective-env.txt`
+- `~/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist` – the launchd job (see above)
+- `~/Library/Logs/SWTOR on Mac/` – `install.log`, `watch.log`, and per game start `wine.log`
+  (d9mt warnings), `hold.log`, `launch-env.txt`, `effective-env.txt`
 
 To revert by hand: in Broadsword's `Wine` folder, move `bin-real/wine-preloader` and
 `bin-real/wine64-preloader` back into `bin/` (replacing the scripts there), delete `bin-real`,
-and delete `~/Library/Application Support/SWTOR on Mac`. Deleting only the latter also works:
-the wrapper then runs Broadsword's own Wine.
+delete `~/Library/Application Support/SWTOR on Mac`, and remove the launchd job (above).
+Deleting only the folder also works: the wrapper then runs Broadsword's own Wine.
 
 ## How it works
 
@@ -100,15 +192,14 @@ game (`swtor.exe`) it also:
   `gamemode/SWTOR.app`, a bundle with `LSSupportsGameMode` around an identical clone of the
   engine's preloader, so macOS turns Game Mode on.
 
-Settings (`env` and the prefix's registry): `WINEMSYNC=1`, `WINEDEBUG=-all`,
-`WINEDLLOVERRIDES=d3d9=n,b` (also per app for `swtor.exe`), d9mt's `dxvk.conf` with
-`d3d9.presentInterval = 1` (vsync; SWTOR asks for none in borderless mode) and
-`d3d9.allowOutOfRangeVsDefs = True`, `DXVK_LOG_LEVEL=warn`, Wine's Mac driver `RetinaMode=y`,
-and `GrabPointer=n` for `swtor.exe` (no hitch when mouse-look starts). The Metal HUD is off; add
-`MTL_HUD_ENABLED=1` to `env` to see frame rates.
+Fixed settings (`env` and the prefix's registry): `WINEMSYNC=1`, `WINEDEBUG=-all`,
+`WINEDLLOVERRIDES=d3d9=n,b` (also per app for `swtor.exe`), `d3d9.allowOutOfRangeVsDefs = True`
+in d9mt's `dxvk.conf`, and `GrabPointer=n` for `swtor.exe` (no hitch when mouse-look starts).
+Vsync is on by default because SWTOR asks for none in borderless mode, which tears. The rest is
+in the Settings window (above).
 
-The installer is `src/som.sh` (`status`, `install`, `uninstall`); the window
-(`src/native/App.swift`, SwiftUI) runs it and shows its progress. Install is idempotent and
+The installer is `src/som.sh` (`status`, `install`, `uninstall`, `settings`, `set`, `watch`);
+the window (`src/native`, SwiftUI) runs it and shows its progress as a timeline. Install is idempotent and
 all-or-nothing: it refuses while the launcher or game runs, checks every download against a
 pinned sha256, prepares everything in SWTOR on Mac's folders first, touches Broadsword's folder
 last, and rolls back if anything fails. If Broadsword's Wine folder holds a Wine wrapper that is
@@ -120,10 +211,14 @@ unless you confirm; it then keeps a copy in `backup/`.
 `som.sh` takes `SWTOR_ON_MAC_ROOT=/abs/dir` (every path, official install included, under that
 directory) and `SWTOR_ON_MAC_DRY_RUN=1` (print the changes, make none). The app passes both on,
 so `SWTOR_ON_MAC_ROOT=/tmp/x "SWTOR on Mac.app/Contents/MacOS/SWTORonMac"` shows the window for
-a sandbox. `scripts/test-sandbox.sh` builds a sandbox from APFS clones of this Mac's official
-install and runs install, reinstall, a simulated launcher update, a failed install, the
-conflict cases and uninstall end to end, checking that uninstall restores Broadsword's folder
-byte for byte and that no Wine process is left behind.
+a sandbox. In a sandbox the launchd job is written but not loaded, and notifications go to
+`notifications.log`. `scripts/test-sandbox.sh` builds a sandbox from APFS clones of this Mac's
+official install and runs install, the settings, reinstall, the wrapper's update check (with a
+stub engine and a local feed), a simulated launcher update and the launchd job's repair (run as
+launchd would), a failed install, Collect Logs, the conflict cases and uninstall end to end,
+checking that uninstall restores Broadsword's folder byte for byte, copies the game settings
+back and that no Wine process is left behind. `scripts/test-update.sh` tests app updates with
+two Developer ID builds and a local feed, as in SWGL on Mac.
 
 ## Building
 
@@ -131,13 +226,18 @@ byte for byte and that no Wine process is left behind.
   [jdrly/d9mt](https://github.com/jdrly/d9mt) in a scratch clone into `prebuilt/d9mt`
   (Homebrew bash, mingw-w64, cmake, ninja, Xcode; an LLVM 15 build for macOS 26 via
   `D9MT_LLVM`).
-- `build.sh` assembles `dist/SWTOR on Mac.app` (ad-hoc signed; `--install` copies it to
-  /Applications). Needs Xcode 27 (macOS 27 SDK); the app runs on macOS 26 and later.
-- `scripts/release.sh` signs a copy with the Developer ID (hardened runtime, entitlements in
-  `src/entitlements`), builds the DMG, and notarizes and staples it (`--sign-only`,
-  `--no-notarize` for dry runs).
+- `build.sh` assembles `dist/SWTOR on Mac.app` with Sparkle (pinned download; ad-hoc signed;
+  `--install` copies it to /Applications). Needs Xcode 27 (macOS 27 SDK); the app runs on
+  macOS 26 and later.
+- `scripts/release.sh` signs a copy with the Developer ID (hardened runtime; the helpers get
+  `allow-dyld-environment-variables`, the app and Sparkle no exceptions), builds the DMG,
+  notarizes and staples it, and builds the Sparkle feed (`appcast.xml` with delta updates from
+  the last 5 versions in `release/updates/`, checked by `scripts/check-appcast.swift`), then
+  drafts the GitHub release (`--sign-only`, `--no-notarize`, `--no-release` for local runs;
+  `--ci`, `--feed <version>` for the two halves of a CI release, as in SWGL on Mac).
 - `.github/workflows/checks.yml` lints the scripts and builds the app;
-  `.github/workflows/release.yml` signs and notarizes on a `v*` tag.
+  `.github/workflows/release.yml` signs and notarizes on a `v*` tag; Sparkle's EdDSA key never
+  leaves Jan's Mac, so the feed is added with `scripts/release.sh --feed <version>` there.
 
 `prebuilt/` holds the d9mt binaries, so `build.sh` works from a fresh clone.
 
@@ -147,6 +247,7 @@ byte for byte and that no Wine process is left behind.
 |---|---|---|
 | Wine engine `WS12WineCX24.0.7_7` (CrossOver 24.0.7, Wine 9.0, x86_64) | [Sikarugir-App/Engines v1.0](https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS12WineCX24.0.7_7.tar.xz) | `203f9e9fd6c2cc77e6525d798a434ced326145db34a356355e05659d3445fd1c` |
 | Engine libraries (`Template-1.0.21.app/Contents/Frameworks`, without `renderer/`) | [Sikarugir-App/Template v1.0](https://github.com/Sikarugir-App/Template/releases/download/v1.0/Template-1.0.21.tar.xz) | `bbe996e4e4375318485953d0c7818b7b4b0a4dc1f13303bcc584f99f7602f78d` |
+| Sparkle 2.10.0 (bundled) | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
 | d9mt `159bec7` (bundled, `prebuilt/d9mt`) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/159bec7c5f3433cb3273db2ed576464086ac762c) | see `prebuilt/d9mt` |
 
 ## Credits and licenses
@@ -160,6 +261,8 @@ byte for byte and that no Wine process is left behind.
 - [Wine](https://www.winehq.org) (LGPL-2.1-or-later) from CodeWeavers' CrossOver 24.0.7
   sources, built by [Sikarugir](https://github.com/Sikarugir-App); the engine and its
   libraries are downloaded from Sikarugir's releases at install time, not redistributed.
+- [Sparkle](https://sparkle-project.org) for app updates (MIT-style license, in the app under
+  `Resources/Licenses/sparkle`).
 - Built after the example of SWGL on Mac.
 
 ## License

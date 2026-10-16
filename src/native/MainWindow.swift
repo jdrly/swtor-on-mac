@@ -22,7 +22,7 @@ let firstRunNote = "The first minutes of play (and each new area or effect seen 
 struct MainView: View {
   @Bindable var installer: Installer
   let settings: GameSettings
-  @Environment(\.openSettings) private var openSettings
+  @Environment(\.openWindow) private var openWindow
   @State private var confirmUninstall = false
   @State private var confirmReplace: Installer.Operation?
   @State private var showNotice = false
@@ -83,6 +83,16 @@ struct MainView: View {
     .sheet(isPresented: $showLogSheet) {
       LogSheet(installer: installer)
     }
+    // sheets keep the app from quitting: close them when asked to (an app update)
+    .onChange(of: installer.closeSheets) { _, _ in
+      showNotice = false
+      showLogSheet = false
+      confirmUninstall = false
+      confirmReplace = nil
+    }
+    .onChange(of: showNotice || showLogSheet || confirmUninstall || confirmReplace != nil) { _, open in
+      installer.sheetOpen = open
+    }
     .onChange(of: installer.loaded) { _, loaded in
       if loaded && !installer.installed && !installer.understood { showNotice = true }
     }
@@ -109,7 +119,7 @@ struct MainView: View {
   private var actions: PanelActions {
     PanelActions(install: askInstall, uninstall: { confirmUninstall = true },
                  review: { showNotice = true }, showLog: { showLogSheet = true },
-                 settings: { settings.reload(); openSettings() })
+                 settings: { settings.reload(); openWindow(id: "settings") })
   }
 
   private var replaceTitle: String {
@@ -690,8 +700,8 @@ struct Timeline: View {
             .contentTransition(.numericText(value: Double(p.done)))
         }
       } else {
-        Text(installer.step).font(.caption).foregroundStyle(.secondary)
-          .contentTransition(.opacity)
+        Text(step.detail).font(.caption).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
       }
     case .failed:
       if case .failed(_, let message) = installer.phase {
@@ -877,6 +887,11 @@ struct NoticeSheet: View {
       Toggle("I understand, and I use SWTOR on Mac at my own risk", isOn: $agreed)
         .toggleStyle(.checkbox)
       HStack {
+        // (a sheet keeps the app from quitting: this one can)
+        Button("Quit") {
+          isPresented = false
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { NSApp.terminate(nil) }
+        }
         Button("Not Now") { isPresented = false }
           .keyboardShortcut(.cancelAction)
         Spacer()

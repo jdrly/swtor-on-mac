@@ -68,6 +68,10 @@ final class Installer {
     didSet { UserDefaults.standard.set(understood, forKey: "acceptedNotice") }
   }
   var showLog = false
+  // a sheet or alert is open on the main window (it keeps the app from quitting), and a
+  // request to close them
+  var sheetOpen = false
+  var closeSheets = 0
   // the operation shown in the step list, and how far it got
   var operation: Operation = .install
   var stepIndex: Int?
@@ -429,7 +433,7 @@ struct AppCommands: Commands {
   let updates: Updates
   let settings: GameSettings
   let logs: LogCollector
-  @Environment(\.openSettings) private var openSettings
+  @Environment(\.openWindow) private var openWindow
 
   var body: some Commands {
     CommandGroup(replacing: .appInfo) {
@@ -441,7 +445,7 @@ struct AppCommands: Commands {
       // only with SWTOR on Mac installed: the settings live in its folder
       Button("Settings…") {
         settings.reload()
-        openSettings()
+        openWindow(id: "settings")
       }
       .keyboardShortcut(",")
       .disabled(!installer.installed)
@@ -456,6 +460,7 @@ struct AppCommands: Commands {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
   var installer: Installer?
+
 
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
@@ -486,11 +491,14 @@ struct SWTORonMacApp: App {
           settings.updates = updates
           if !updates.available {
             updates.isBusy = { [installer] in installer.isBusy }
+            updates.sheetOpen = { [installer] in installer.sheetOpen }
+            updates.closeSheets = { [installer] in installer.closeSheets += 1 }
             installer.onIdle = { [updates] in updates.installerIdle() }
             installer.onUpdateAvailable = { [updates] _ in updates.checkForUpdates() }
             updates.start()
           }
           installer.refresh()
+          settings.reload()
           // (not for the UI test script, which drives the window in the background)
           switch ProcessInfo.processInfo.environment["SWTOR_ON_MAC_UI_TEST"] {
           case nil: NSApp.activate()
@@ -510,8 +518,13 @@ struct SWTORonMacApp: App {
     .restorationBehavior(.disabled)
     .commands { AppCommands(installer: installer, updates: updates, settings: settings, logs: logs) }
 
-    Settings {
+    // A window, not a Settings scene: that one's menu item could not be disabled while SWTOR on
+    // Mac is not installed (and with our own item, the menu showed two).
+    Window("SWTOR on Mac Settings", id: "settings") {
       SettingsView(settings: settings)
     }
+    .windowResizability(.contentSize)
+    .defaultLaunchBehavior(.suppressed)
+    .restorationBehavior(.disabled)
   }
 }

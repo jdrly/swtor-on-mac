@@ -1,6 +1,8 @@
-# Builds, signs and notarizes SWTOR on Mac on GitHub's macOS runners.
-#   Push a tag v<version>: creates the draft release v<version> with the notarized DMG;
-#   publishing the draft releases it.
+# Builds, signs and notarizes SWTOR on Mac on GitHub's macOS runners (as SWGL on Mac does).
+#   Push a tag v<version>: creates the draft release v<version> with the notarized DMG. Then,
+#   on Jan's Mac, `scripts/release.sh --feed <version>` adds the Sparkle feed (appcast.xml and
+#   deltas, signed with the EdDSA key that never leaves that Mac); publishing the draft makes
+#   the update live (the app and the Wine wrapper read releases/latest/download/appcast.xml).
 #   Run it by hand (Actions -> Release -> Run workflow): the same build, signing and
 #   notarization without a release; the DMG is kept as an artifact for a day.
 #
@@ -45,6 +47,12 @@ jobs:
             [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "Tag $GITHUB_REF_NAME does not match build.sh ($version)"; exit 1; }
             [ -f "release-notes/$version.md" ] || { echo "Missing release-notes/$version.md"; exit 1; }
           fi
+
+      - name: Cache downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache
+          key: downloads-${{ hashFiles('build.sh') }}
 
       - name: Import the signing certificate
         env:
