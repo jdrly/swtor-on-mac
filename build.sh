@@ -1,0 +1,135 @@
+#!/bin/bash
+# Builds "dist/SWTOR on Mac.app": a small SwiftUI app that installs SWTOR on Mac on top of the
+# official SWTOR Mac app (see README.md). The app bundles only its own pieces:
+#   Contents/MacOS/SWTORonMac          the window (src/native/App.swift), arm64
+#   Contents/Resources/som.sh          install/uninstall/status logic (src/som.sh)
+#   Contents/Resources/wine-wrapper.sh the wrapper template installed into Broadsword's Wine
+#   Contents/Resources/helpers/        hold-launcher, setsid-exec (universal)
+#   Contents/Resources/d9mt/           prebuilt d9mt (scripts/build-d9mt.sh)
+#   Contents/Resources/Licenses/       licenses of the app and the bundled components
+# The Wine engine and its libraries are not bundled: som.sh downloads them at install time
+# from Sikarugir's official releases (pinned URL + sha256 in src/som.sh).
+#
+# Built with the macOS 27 SDK (Xcode 27; the design follows the SDK the app links against)
+# for macOS 26.0 and later.
+#
+#   ./build.sh                 build into dist/, ad-hoc signed
+#   ./build.sh --install       also copy the app to /Applications
+#
+# Signing for distribution (Developer ID, hardened runtime, notarization) is
+# scripts/release.sh, which re-signs a copy of dist/ inside out.
+set -euo pipefail
+cd "$(dirname "$0")"
+ROOT="$PWD"
+
+# SWTOR_ON_MAC_VERSION overrides the version for test builds.
+APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.0.1}
+APP_AUTHOR="Jan Drlý"
+GITHUB_URL=https://github.com/jdrly
+REPO_URL=https://github.com/jdrly/swtor-on-mac
+MACOS_MIN=26.0
+CACHE="$ROOT/.cache"
+APP="$ROOT/dist/SWTOR on Mac.app"
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+
+# Sparkle (app updates) is planned for 0.0.2; it comes in like in SWGL on Mac: a pinned
+# download here (fetch <url> <sha256>), the framework in Contents/Frameworks, SUFeedURL and
+# SUPublicEDKey in src/Info.plist, and the feed built by scripts/release.sh.
+fetch() { # url sha256 -> prints path of the verified download
+  local url=$1 sha=$2 dir="$CACHE/$2" file
+  file="$dir/$(basename "$url")"
+  if [ ! -f "$file" ]; then
+    mkdir -p "$dir"
+    echo "Downloading $url" >&2
+    curl -fL --progress-bar -o "$file.part" "$url"
+    mv "$file.part" "$file"
+  fi
+  echo "$sha  $file" | shasum -a 256 -c --quiet >&2
+  echo "$file"
+}
+
+sdk="$(xcrun --sdk macosx --show-sdk-version)"
+case "$sdk" in 2[7-9]*|[3-9]*) ;; *) echo "Needs the macOS 27 SDK (Xcode 27); found $sdk" >&2; exit 1 ;; esac
+
+D9=prebuilt/d9mt
+for f in d3d9.dll winemetal.dll winemetal.so VERSION LICENSE THIRD_PARTY_NOTICES.md bridge/COPYING.LIB; do
+  [ -f "$D9/$f" ] || { echo "Missing $D9/$f; run scripts/build-d9mt.sh" >&2; exit 1; }
+done
+
+echo "Assembling $APP"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+R="$APP/Contents/Resources"
+sed "s/@VERSION@/$APP_VERSION/g" src/Info.plist >"$APP/Contents/Info.plist"
+plutil -lint -s "$APP/Contents/Info.plist"
+printf 'APPL????' >"$APP/Contents/PkgInfo"
+
+NB="$CACHE/native-build"
+rm -rf "$NB" && mkdir -p "$NB"
+swiftc -parse-as-library -O -target "arm64-apple-macos$MACOS_MIN" \
+  -o "$APP/Contents/MacOS/SWTORonMac" src/native/App.swift
+
+install -m 755 src/som.sh "$R/som.sh"
+install -m 644 src/wine-wrapper.sh "$R/wine-wrapper.sh"
+install -m 644 src/dxvk.conf "$R/dxvk.conf"
+
+# Helpers the wrapper runs from Broadsword's Wine/bin-real. Universal: the launcher and its
+# Wine run under Rosetta.
+mkdir -p "$R/helpers"
+clang -O2 -arch x86_64 -arch arm64 -mmacosx-version-min=$MACOS_MIN -fobjc-arc -framework AppKit \
+  -o "$R/helpers/hold-launcher" src/helpers/hold-launcher/hold_launcher.c src/helpers/hold-launcher/hide_app.m
+clang -O2 -arch x86_64 -arch arm64 -mmacosx-version-min=$MACOS_MIN \
+  -o "$R/helpers/setsid-exec" src/helpers/setsid-exec/setsid_exec.c
+
+# d9mt: d3d9.dll for the app's prefix, the winemetal bridge for the app's engine copy
+mkdir -p "$R/d9mt"
+install -m 644 "$D9/d3d9.dll" "$R/d9mt/d3d9.dll"
+install -m 644 "$D9/winemetal.dll" "$R/d9mt/winemetal.dll"
+install -m 755 "$D9/winemetal.so" "$R/d9mt/winemetal.so"
+install -m 644 "$D9/VERSION" "$R/d9mt/VERSION"
+
+# Licenses: the app's own (MIT) and d9mt's (zlib; its bridge LGPL-2.1-or-later; third parties)
+L="$R/Licenses"
+mkdir -p "$L/d9mt/bridge"
+cp LICENSE "$L/SWTOR-on-Mac-LICENSE.txt"
+cp -R "$D9/LICENSE" "$D9/LICENSES" "$D9/THIRD_PARTY_NOTICES.md" "$L/d9mt/"
+cp "$D9/bridge/LICENSE" "$D9/bridge/COPYING.LIB" "$L/d9mt/bridge/"
+cat >"$L/README.txt" <<EOF
+SWTOR on Mac $APP_VERSION - licenses
+
+SWTOR on Mac's own code (the app, som.sh, the Wine wrapper, hold-launcher, setsid-exec):
+MIT, see SWTOR-on-Mac-LICENSE.txt.
+
+d9mt ($(cat "$D9/VERSION")), https://github.com/jdrly/d9mt (based on neo773/d9mt-v2):
+d3d9.dll is zlib/libpng (d9mt/LICENSE); the winemetal bridge (winemetal.so, winemetal.dll)
+is derived from DXMT and licensed LGPL-2.1-or-later (d9mt/bridge/). Its complete source is
+https://github.com/jdrly/d9mt/tree/$(cat "$D9/VERSION")/bridge. Other components and their
+licenses: d9mt/THIRD_PARTY_NOTICES.md and d9mt/LICENSES/.
+
+Not included in this app: the Wine engine (CrossOver 24.0.7 sources by CodeWeavers, built by
+Sikarugir, LGPL-2.1-or-later) and its libraries are downloaded at install time from
+https://github.com/Sikarugir-App (Engines and Template releases).
+EOF
+
+printf 'version=%s\nauthor=%s\ngithub=%s\nrepo=%s\n' "$APP_VERSION" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" >"$R/app.properties"
+printf 'app %s\nd9mt %s\nengine %s\nframeworks %s\nsdk %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
+  "$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)" "$(sed -n 's/^FW_NAME=//p' src/som.sh)" "$sdk" >"$R/VERSIONS"
+
+iconset="$CACHE/AppIcon.iconset"
+rm -rf "$iconset"
+swift src/make-icon.swift "$iconset"
+iconutil -c icns "$iconset" -o "$R/AppIcon.icns"
+
+xattr -cr "$APP"
+# Ad-hoc signatures (Developer ID: scripts/release.sh). The helpers keep their own signature
+# when the installer copies them into Broadsword's Wine folder.
+for h in "$R/helpers/"*; do codesign --force --sign - "$h"; done
+codesign --force --sign - "$APP"
+codesign --verify --strict "$APP"
+echo "Built $APP ($(du -sh "$APP" | cut -f1))"
+
+if [ "${1:-}" = --install ]; then
+  rm -rf "/Applications/SWTOR on Mac.app"
+  ditto "$APP" "/Applications/SWTOR on Mac.app"
+  echo "Installed to /Applications/SWTOR on Mac.app"
+fi

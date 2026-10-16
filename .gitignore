@@ -1,0 +1,5 @@
+# Build outputs and caches
+/dist/
+/release/
+/.cache/
+.DS_Store

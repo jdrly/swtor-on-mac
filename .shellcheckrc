@@ -1,0 +1,5 @@
+# Every script here is bash (macOS's /bin/bash 3.2 at run time).
+shell=bash
+# The wrapper sources the settings file whose path the installer writes into it, and its
+# Game Mode directory is created exactly like CrossOver's ntdll creates it (mode on the leaf).
+disable=SC1090,SC2174
