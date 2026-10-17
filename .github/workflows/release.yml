@@ -57,6 +57,7 @@ jobs:
             [ "$(head -n 1 "$notes")" = "## SWTOR on Mac $version" ] || { echo "$notes must start with: ## SWTOR on Mac $version"; exit 1; }
             summary="$(awk 'NR > 1 && NF { print; exit }' "$notes")"
             case "$summary" in ''|'#'*|'- '*|'* '*) echo "$notes needs a one-sentence summary right after the title"; exit 1 ;; esac
+            grep -q 'discord.gg/AnV3fZWz2b' "$notes" || { echo "$notes needs the Discord invite in Support"; exit 1; }
           fi
 
       - name: Cache downloads
