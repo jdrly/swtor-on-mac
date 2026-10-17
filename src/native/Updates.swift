@@ -18,7 +18,7 @@
 // For testing, `defaults write cz.jandrly.swtoronmac SWTORUpdateFeedURL <url>` replaces the
 // feed (Sparkle accepts http only on 127.0.0.1/localhost); scripts/test-update.sh does that.
 //
-// Development builds (SWTORChannel dev in Info.plist, version X.Y.Z-dev.N; build.sh) never
+// Development builds (compiled with SWTOR_DEV, SWTORChannel dev in Info.plist, version X.Y.Z-dev.N; build.sh) never
 // check automatically, whatever the setting says; Check for Updates… still works. Their
 // CFBundleVersion sorts between the previous release and X.Y.Z (0.0.6-dev.1 is 0.0.5.1001),
 // so the feed's 0.0.5 is never offered and the public 0.0.6 is.
@@ -31,7 +31,13 @@ import SwiftUI
 final class Updates: NSObject, SPUUpdaterDelegate {
   static let appBundleID = "cz.jandrly.swtoronmac"
   static let feedOverrideKey = "SWTORUpdateFeedURL"
-  static let isDevBuild = (Bundle.main.object(forInfoDictionaryKey: "SWTORChannel") as? String) == "dev"
+  // build.sh compiles development builds with SWTOR_DEV (and writes SWTORChannel dev into
+  // Info.plist for som.sh); release binaries contain none of the dev-only UI.
+  #if SWTOR_DEV
+  static let isDevBuild = true
+  #else
+  static let isDevBuild = false
+  #endif
 
   private(set) var updater: SPUUpdater?
   private var userDriver: UserDriver?

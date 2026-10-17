@@ -228,7 +228,9 @@ struct Hero: View {
           HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text("SWTOR on Mac")
               .font(.system(size: 32, weight: .bold, design: .rounded))
-            if Updates.isDevBuild { DevBuildBadge() }
+            #if SWTOR_DEV
+            DevBuildBadge()
+            #endif
           }
           Text("Faster graphics for the official SWTOR Mac app: Direct3D 9 straight to Metal, on a newer Wine.")
             .font(.title3)
@@ -272,6 +274,7 @@ struct Hero: View {
   }
 }
 
+#if SWTOR_DEV
 // "Development build 0.0.6-dev.1" next to the title in development builds (build.sh).
 struct DevBuildBadge: View {
   private var version: String {
@@ -290,6 +293,7 @@ struct DevBuildBadge: View {
       .fixedSize()
   }
 }
+#endif
 
 // Deep space: a slowly drifting mesh gradient (navy, teal, a touch of gold) under a
 // twinkling starfield. Still with Reduce Motion, and paused while the window is not key.

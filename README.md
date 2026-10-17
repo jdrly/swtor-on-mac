@@ -100,17 +100,17 @@ SWTOR on Mac > **Settings…** (⌘,), while SWTOR on Mac is installed. A sideba
 (Graphics, Game, Keyboard, Play Button, Updates, Troubleshooting; the window opens on the one
 used last) and the selected pane's settings. Changes take effect the next time the game starts.
 
-| Setting | Default | What it changes |
-|---|---|---|
-| Retina Mode | on | Wine's Mac driver `RetinaMode` in the prefix's registry (only while the launcher and the game are closed) |
-| Vsync | on | `d3d9.presentInterval = 1` in `dxvk.conf` (off: unset) |
-| Video Memory Profile | Automatic | `D9MT_MEMORY_PROFILE` (auto, low, medium, high, ultra, unlimited). The video memory the game is told it has: Low 2 GB, Medium 3 GB, High and above 4 GB. Automatic picks by the Mac's memory: 8 GB Low, 16 GB Medium, 24 GB High, more Ultra |
-| Game Mode | on | `SWTOR_GAMEMODE_APP` in `env` |
-| Show Metal HUD | off | `MTL_HUD_ENABLED=1` in `env`. It can't be toggled with a key in the game; turn it on here before starting the game |
-| Game keys by keyboard position | off | The game sees every key by its position on a US keyboard (see below): SWTOR on Mac's build of Wine's Mac driver in its engine and `PhysicalKeyboard=y` for `swtor.exe` in the prefix's registry; off, the engine's own driver (only while the launcher and the game are closed) |
-| Check for updates automatically | on | Sparkle's automatic checks and the daily check at the game's start |
-| Debug Logging | off | `DXVK_LOG_LEVEL=info`, `D9MT_PROFILE=1`, `D9MT_MEMSTATS=1`, `D9MT_DEBUG_FILE=C:\d9mt\flags.txt` (d9mt's live debug flags, below; else `DXVK_LOG_LEVEL=warn`) |
-| Quit SWTOR on Mac after launching | off | The app quits once **Play SWTOR** has opened the official app (the app's own preference) |
+| Pane | Setting | Default | What it changes |
+|---|---|---|---|
+| Graphics | Retina Mode | on | Wine's Mac driver `RetinaMode` in the prefix's registry (only while the launcher and the game are closed) |
+| Graphics | Vsync | on | `d3d9.presentInterval = 1` in `dxvk.conf` (off: unset) |
+| Graphics | Video Memory Profile | Automatic | `D9MT_MEMORY_PROFILE` (auto, low, medium, high, ultra, unlimited). The video memory the game is told it has: Low 2 GB, Medium 3 GB, High and above 4 GB. Automatic picks by the Mac's memory: 8 GB Low, 16 GB Medium, 24 GB High, more Ultra |
+| Game | Game Mode | on | `SWTOR_GAMEMODE_APP` in `env` |
+| Game | Show Metal HUD | off | `MTL_HUD_ENABLED=1` in `env`. It can't be toggled with a key in the game; turn it on here before starting the game |
+| Keyboard | Game keys by keyboard position | off | The game sees every key by its position on a US keyboard (see below): SWTOR on Mac's build of Wine's Mac driver in its engine and `PhysicalKeyboard=y` for `swtor.exe` in the prefix's registry; off, the engine's own driver (only while the launcher and the game are closed) |
+| Updates | Check for updates automatically | on | Sparkle's automatic checks and the daily check at the game's start |
+| Troubleshooting | Debug Logging | off | `DXVK_LOG_LEVEL=info`, `D9MT_PROFILE=1`, `D9MT_MEMSTATS=1`, `D9MT_DEBUG_FILE=C:\d9mt\flags.txt` (d9mt's live debug flags, below; else `DXVK_LOG_LEVEL=warn`) |
+| Play Button | Quit SWTOR on Mac after launching | off | The app quits once **Play SWTOR** has opened the official app (the app's own preference) |
 
 They are kept in `~/Library/Application Support/SWTOR on Mac/settings.conf`; `env` and
 `dxvk.conf` are made from it (`som.sh settings`, `som.sh set <key> <value>`). *Quit SWTOR on
@@ -156,6 +156,13 @@ they differ from releases in three ways:
   `0.0.6-dev.N` is `0.0.5.(1000+N)`. So the feed's 0.0.5 is never offered as an update, and the
   public 0.0.6 is offered once it is out. `CFBundleShortVersionString` stays `0.0.6-dev.N`.
 
+### Debug Logging, session reports and live d9mt flags
+
+For a bug report about stutter or frame rate: turn on Settings > Troubleshooting > **Debug
+Logging**, start the game, play the part that misbehaves, quit, then use **Collect Logs…** (it
+includes the session report below). Turn Debug Logging off again afterwards: it costs a little
+performance. A setting you choose is kept through updates and Reinstall.
+
 **Session report.** `"/Applications/SWTOR on Mac.app/Contents/Resources/session-report.sh"`
 (`scripts/session-report.sh`) sums up the last game session from
 `~/Library/Logs/SWTOR on Mac/wine.log`:
@@ -163,10 +170,10 @@ they differ from releases in three ways:
 - frames over 33 ms and 50 ms;
 - hitches, split into d9mt's and the game's, and d9mt's top causes;
 - compile waits and the memory peak;
-- render passes and the attachment traffic d9mt saved, and (0.0.6-dev.3 and later) the
+- render passes and the attachment traffic d9mt saved, and (0.0.6 and later) the
   render thread's CPU time in that optimization and the clears per frame, to tell its cost
   apart from compile waits (a cold shader cache);
-- the attachment re-clears by cause, from the `RESTORE` lines (d9mt 0.0.6-dev.2 and later):
+- the attachment re-clears by cause, from the `RESTORE` lines (0.0.6 and later):
   image format and size, the aspects re-cleared, why and the D3D9 call, per frame.
 
 `wine.log` starts afresh at every game start, so `--keep` saves a copy to `sessions/`.
@@ -468,7 +475,7 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 | Wine engine `WS12WineCX24.0.7_7` (CrossOver 24.0.7, Wine 9.0, x86_64) | [Sikarugir-App/Engines v1.0](https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS12WineCX24.0.7_7.tar.xz) | `203f9e9fd6c2cc77e6525d798a434ced326145db34a356355e05659d3445fd1c` |
 | Engine libraries (`Template-1.0.21.app/Contents/Frameworks`, without `renderer/`) | [Sikarugir-App/Template v1.0](https://github.com/Sikarugir-App/Template/releases/download/v1.0/Template-1.0.21.tar.xz) | `bbe996e4e4375318485953d0c7818b7b4b0a4dc1f13303bcc584f99f7602f78d` |
 | Sparkle 2.10.0 (bundled) | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
-| d9mt `7975e2e` (bundled, `prebuilt/d9mt`) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/7975e2ea6a90493b2c565c75e4fd92bf73f986c6) | see `prebuilt/d9mt` |
+| d9mt `68c7190` (bundled, `prebuilt/d9mt`) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/68c7190d670d199227513b02a792ecbad5e43571) | see `prebuilt/d9mt` |
 | CrossOver 24.0.7 sources (for the Mac driver, `prebuilt/winemac`) | [CodeWeavers](https://media.codeweavers.com/pub/crossover/source/crossover-sources-24.0.7.tar.gz) | `56749e926df9f0437dbcea259cf0bff6657a43871af50182887fe15a84fc2e4e` |
 
 ## Credits and licenses

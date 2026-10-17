@@ -288,32 +288,34 @@ struct SettingsView: View {
 
     case .updates:
       Section {
-        if Updates.isDevBuild {
+        #if SWTOR_DEV
           Toggle(isOn: .constant(false)) {
             Text("Check for updates automatically")
             Text("Off in development builds. SWTOR on Mac > Check for Updates… still offers a newer "
                  + "public version, never an older one.")
           }
           .disabled(true)
-        } else {
+        #else
           Toggle(isOn: settings.toggle("updates")) {
             Text("Check for updates automatically")
             Text("SWTOR on Mac looks for a new version once a day, and so does the game's start (a "
                  + "notification if there is one). Updates install only when you choose to.")
           }
-        }
+        #endif
       }
 
     case .troubleshooting:
       Section {
         Toggle(isOn: settings.toggle("debug")) {
           Text("Debug Logging")
-          Text(Updates.isDevBuild
-               ? "On by default in development builds: d9mt logs frame times, hitches, render-pass and "
-                 + "memory statistics for the test session (scripts/session-report.sh, Collect Logs). "
-                 + "Costs a little performance."
-               : "Much more detailed d9mt logs (timings, memory statistics) for bug reports, at some "
-                 + "cost in performance. Turn it on only when asked to, and off again afterwards.")
+          #if SWTOR_DEV
+          Text("On by default in development builds: d9mt logs frame times, hitches, render-pass and "
+               + "memory statistics for the test session (scripts/session-report.sh, Collect Logs). "
+               + "Costs a little performance.")
+          #else
+          Text("Much more detailed d9mt logs (timings, memory statistics) for bug reports, at some "
+               + "cost in performance. Turn it on only when asked to, and off again afterwards.")
+          #endif
         }
       }
     }

@@ -30,7 +30,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # SWTOR_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.0.6-dev.4}
+APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.0.6}
 
 # Development builds: a version with a prerelease suffix, X.Y.Z-dev.N. They are published only
 # as GitHub pre-releases, never in the appcast. CFBundleShortVersionString is the version as is;
@@ -115,7 +115,10 @@ printf 'APPL????' >"$APP/Contents/PkgInfo"
 
 NB="$CACHE/native-build"
 rm -rf "$NB" && mkdir -p "$NB"
-swiftc -parse-as-library -O -target "arm64-apple-macos$MACOS_MIN" -F "$SPARKLE" -framework Sparkle \
+# Development builds compile their dev-only UI (badge, About line, Settings texts) in with
+# SWTOR_DEV; a release binary has none of it.
+dev_flags=(); [ "$CHANNEL" = release ] || dev_flags=(-D SWTOR_DEV)
+swiftc -parse-as-library -O ${dev_flags[@]+"${dev_flags[@]}"} -target "arm64-apple-macos$MACOS_MIN" -F "$SPARKLE" -framework Sparkle \
   -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
   -o "$APP/Contents/MacOS/SWTORonMac" src/native/*.swift
 # Sparkle without its XPC services (they are only for sandboxed apps); its license ships with it.

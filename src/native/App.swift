@@ -463,13 +463,18 @@ enum AppActions {
       text.append(NSAttributedString(string: "\n", attributes: body))
       text.append(NSAttributedString(string: url.replacingOccurrences(of: "https://", with: ""), attributes: attributes))
     }
-    if Updates.isDevBuild {
+    #if SWTOR_DEV
+    do {
       var dev = body
       dev[.font] = NSFont.boldSystemFont(ofSize: NSFont.smallSystemFontSize)
       dev[.foregroundColor] = NSColor.systemPurple
       text.insert(NSAttributedString(string: "Development build: for testing, not a release. "
         + "Debug Logging is on by default; no automatic update checks.\n\n", attributes: dev), at: 0)
     }
+    let devSuffix = " (development build)"
+    #else
+    let devSuffix = ""
+    #endif
     var small = body
     small[.font] = NSFont.systemFont(ofSize: NSFont.labelFontSize - 1)
     small[.foregroundColor] = NSColor.secondaryLabelColor
@@ -477,7 +482,7 @@ enum AppActions {
     NSApp.activate()
     NSApp.orderFrontStandardAboutPanel(options: [
       .applicationName: "SWTOR on Mac",
-      .applicationVersion: (credits["version"] ?? "?") + (Updates.isDevBuild ? " (development build)" : ""),
+      .applicationVersion: (credits["version"] ?? "?") + devSuffix,
       .version: "",
       .credits: text,
     ])
