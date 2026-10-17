@@ -18,6 +18,9 @@
 #   HITCH     each frame over 50 ms: d9mt's time in it and by what, or the game's
 #   COMPILE   render-thread frames with compiles or over 33 ms (shader/pipeline waits)
 #   DIAG MEM  every 256 frames: Metal's allocated memory
+#   RESTORE   seconds with attachment re-clears (d9mt 0.0.6-dev.2 and later): what was
+#             re-cleared (format, size, aspects), why, and the D3D9 call it came from;
+#             RESTORE-SUMMARY when the game released its device (not every exit does)
 # Also in Collect Logs (session-report.txt). Runs under macOS's /bin/bash 3.2 and awk.
 set -euo pipefail
 
@@ -116,6 +119,25 @@ analyze() {
       v = field("psos"); sub(/\/.*/, "", v); cpso += num(v)
       next
     }
+    / RESTORE t=/ {
+      if (num(field("t")) <= skip) next
+      nrl++
+      # " | 120x 2048x2048 Depth32Float_Stencil8 s sample@Draw | ... | +3 other"
+      rl = $0; sub(/^[^|]*\| /, "", rl)
+      nr = split(rl, rparts, / \| /)
+      for (i = 1; i <= nr; i++) {
+        p = rparts[i]
+        if (p ~ /^\+[0-9]+ other/) { v = p; sub(/^\+/, "", v); sub(/ .*/, "", v); rc["(other: below a second'"'"'s top 5)"] += num(v); continue }
+        if (p !~ /^[0-9]+x /) continue
+        v = p; sub(/x .*/, "", v); k = p; sub(/^[0-9]+x /, "", k)
+        rc[k] += num(v); rtot += num(v)
+      }
+      next
+    }
+    / RESTORE-SUMMARY frames=/ {
+      rs = $0; sub(/.*RESTORE-SUMMARY /, "", rs); sub(/ \|.*/, "", rs)
+      next
+    }
     / DIAG MEM frame=/ {
       a = num(field("allocatedMiB")); if (a > diagPeak) diagPeak = a
       fr = num(field("frame")); if (fr > lastFrame) lastFrame = fr
@@ -169,6 +191,18 @@ analyze() {
         }
         print "hitch_top=" (top == "" ? "-" : top)
       }
+      if (nrl) {
+        printf "restore_seconds=%d\n", nrl
+        for (k = 1; k <= 8; k++) {
+          best = ""; bv = 0
+          for (c in rc) if (!(c in rused) && rc[c] > bv) { best = c; bv = rc[c] }
+          if (best == "") break
+          rused[best] = 1
+          if (frames) printf "restore_cause_%d=%7.2f/frame %7dx  %s\n", k, bv / frames, bv, best
+          else        printf "restore_cause_%d=%7dx  %s\n", k, bv, best
+        }
+      }
+      if (rs != "") print "restore_summary=" rs
       if (mp != "") print "memory_profile=" mp
       if (budget != "") print "wait_budget=" budget
       if (resets) print "devices=" resets + 1
@@ -223,6 +257,22 @@ report() {
   row "Attachment optimization" att
   row "Memory profile" memory_profile
   row "Pipeline wait budget" wait_budget
+  causes "$A" "${B:+A: }"
+  [ -z "${B:-}" ] || causes "$B" "B: "
+}
+
+# causes <analysis> <prefix>: the re-clears by cause, from the RESTORE lines
+causes() {
+  local k line n
+  n=$(get restore_seconds "$1")
+  [ -n "$n" ] || [ -n "$(get restore_summary "$1")" ] || return 0
+  echo "  ${2}Re-clears by cause (RESTORE lines, ${n:-0} seconds with any):"
+  for k in 1 2 3 4 5 6 7 8; do
+    line=$(get "restore_cause_$k" "$1")
+    [ -n "$line" ] && echo "    $line"
+  done
+  line=$(get restore_summary "$1")
+  [ -z "$line" ] || echo "    session total at device release: $line"
 }
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT

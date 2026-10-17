@@ -108,7 +108,7 @@ next time the game starts.
 | Show Metal HUD | off | `MTL_HUD_ENABLED=1` in `env`. It can't be toggled with a key in the game; turn it on here before starting the game |
 | Game keys by keyboard position | off | The game sees every key by its position on a US keyboard (see below): SWTOR on Mac's build of Wine's Mac driver in its engine and `PhysicalKeyboard=y` for `swtor.exe` in the prefix's registry; off, the engine's own driver (only while the launcher and the game are closed) |
 | Check for updates automatically | on | Sparkle's automatic checks and the daily check at the game's start |
-| Debug Logging | off | `DXVK_LOG_LEVEL=info`, `D9MT_PROFILE=1`, `D9MT_MEMSTATS=1` (else `DXVK_LOG_LEVEL=warn`) |
+| Debug Logging | off | `DXVK_LOG_LEVEL=info`, `D9MT_PROFILE=1`, `D9MT_MEMSTATS=1`, `D9MT_DEBUG_FILE=C:\d9mt\flags.txt` (d9mt's live debug flags, below; else `DXVK_LOG_LEVEL=warn`) |
 | Quit SWTOR on Mac after launching | off | The app quits once **Play SWTOR** has opened the official app (the app's own preference) |
 
 They are kept in `~/Library/Application Support/SWTOR on Mac/settings.conf`; `env` and
@@ -162,12 +162,30 @@ they differ from releases in three ways:
 - frames over 33 ms and 50 ms;
 - hitches, split into d9mt's and the game's, and d9mt's top causes;
 - compile waits and the memory peak;
-- render passes and the attachment traffic d9mt saved.
+- render passes and the attachment traffic d9mt saved;
+- the attachment re-clears by cause, from the `RESTORE` lines (d9mt 0.0.6-dev.2 and later):
+  image format and size, the aspects re-cleared, why and the D3D9 call, per frame.
 
 `wine.log` starts afresh at every game start, so `--keep` saves a copy to `sessions/`.
 `--compare A.log B.log` puts two sessions side by side. `--skip <s>` leaves out the first
 seconds (loading). Collect Logs adds the report as `session-report.txt`. Logs from 0.0.5 have
 no `STATS` lines: hitches, compile waits and memory still compare.
+
+**Live d9mt flags.** With Debug Logging on, d9mt reads
+`~/Library/Application Support/SWTOR on Mac/prefix/drive_c/d9mt/flags.txt` (`C:\d9mt\flags.txt`)
+once a second while the game runs: one flag per line, `#` comments; the file is written with
+every flag commented out, and edits are kept. `no_attach_opt` switches d9mt's attachment
+load/store optimization off and back on live (A/B), `att_trace` logs up to 400 render-pass
+decisions and re-clears to `wine.log` (remove and re-add the line for 400 more), `dump` dumps
+the next frame's draws into that folder. For example:
+
+```bash
+F="$HOME/Library/Application Support/SWTOR on Mac/prefix/drive_c/d9mt/flags.txt"
+echo att_trace >>"$F"                          # trace on
+sed -i '' '/^att_trace$/d' "$F"                # trace off
+echo no_attach_opt >>"$F"                      # optimization off (A/B)
+sed -i '' '/^no_attach_opt$/d' "$F"            # back on
+```
 
 ### Launcher updates (the launchd job)
 

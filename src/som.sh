@@ -717,11 +717,16 @@ write_env() {
   hud="MTL_HUD_ENABLED=1"
   [ "$(setting hud)" = on ] || hud="#$hud   (off in Settings)"
   if [ "$(setting debug)" = on ]; then
-    dbg="# Debug logging is on in Settings: d9mt's info messages, per-frame timing (HITCH, PSOBUILD)
-# and memory statistics (DIAG MEM) in wine.log. Costs some performance.
+    dbg="# Debug logging is on in Settings: d9mt's info messages, per-frame timing (HITCH, PSOBUILD,
+# STATS and RESTORE once a second) and memory statistics (DIAG MEM) in wine.log. Costs some
+# performance.
 DXVK_LOG_LEVEL=info
 D9MT_PROFILE=1
-D9MT_MEMSTATS=1"
+D9MT_MEMSTATS=1
+# d9mt's live debug flags, read once a second while the game runs: $D9MT_FLAGS_FILE
+# (one flag per line, # comments; the file lists them)
+D9MT_DEBUG_FILE='C:\\d9mt\\flags.txt'"
+    write_d9mt_flags
   else
     dbg="# d9mt's own warnings and errors only (cheap); Debug logging in Settings adds more
 DXVK_LOG_LEVEL=warn"
@@ -768,6 +773,27 @@ SWTOR_APP_DIR="$SOM"
 SWTOR_UPDATE_FEED="$FEED_URL"
 SWTOR_UPDATE_CHECK=$upd
 $notify_log
+EOF
+}
+
+# Debug Logging: d9mt's live debug flags file in the prefix (D9MT_DEBUG_FILE=C:\d9mt\flags.txt).
+# Written once, with every flag commented out; edits are kept. d9mt also writes its frame
+# dumps (flag dump) and d9mt-debug.log into that folder. Gone with the prefix at Uninstall.
+D9MT_FLAGS_FILE="$SOM/prefix/drive_c/d9mt/flags.txt"
+write_d9mt_flags() {
+  [ -d "$SOM/prefix/drive_c" ] || return 0
+  [ -f "$D9MT_FLAGS_FILE" ] && return 0
+  run mkdir -p "${D9MT_FLAGS_FILE%/*}"
+  put "$D9MT_FLAGS_FILE" 644 <<'EOF'
+# d9mt live debug flags (SWTOR on Mac, Debug Logging on). d9mt reads this file once a second
+# while the game runs; a flag is on while its line is here without the leading #. Output goes
+# to ~/Library/Logs/SWTOR on Mac/wine.log.
+#
+# no_attach_opt   attachment load/store optimization off (the previous Load/Store actions), for A/B
+# att_trace       log up to 400 render-pass load/store decisions and re-clears (D9MT-ATT lines);
+#                 remove the line and add it again for the next 400
+# dump            dump the next frame's draws to d9mt-dump-<n>.txt in this folder (re-save the
+#                 file for another; ignored if already here when the game starts)
 EOF
 }
 

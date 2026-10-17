@@ -298,6 +298,7 @@ if [ "$CHANNEL" = dev ]; then
   check "install: env update check off (development build)" grep -qx 'SWTOR_UPDATE_CHECK=0' "$SOM/env"
   check "install: Debug Logging on (development build)" eval 'grep -qx debug=on "$SOM/settings.conf" && grep -qx D9MT_PROFILE=1 "$SOM/env"'
   check "install: development defaults recorded" grep -qx "debug-on=$APPV" "$SOM/dev-defaults"
+  check "install: d9mt flags file in the prefix (Debug Logging)" test -f "$SOM/prefix/drive_c/d9mt/flags.txt"
 else
   check "install: env update check" grep -qx 'SWTOR_UPDATE_CHECK=1' "$SOM/env"
   check "install: Debug Logging off" grep -qx 'debug=off' "$SOM/settings.conf"
@@ -329,6 +330,11 @@ som set hud on >/dev/null && check "set hud: MTL_HUD_ENABLED=1" grep -qx 'MTL_HU
 som set vsync off >/dev/null && check "set vsync off: presentInterval unset" eval '! grep -q "^d3d9.presentInterval" "$SOM/dxvk.conf"'
 check "set vsync off: other options kept" grep -q '^d3d9.allowOutOfRangeVsDefs = True' "$SOM/dxvk.conf"
 som set debug on >/dev/null && check "set debug: info + profile + memstats" eval 'grep -qx DXVK_LOG_LEVEL=info "$SOM/env" && grep -qx D9MT_PROFILE=1 "$SOM/env" && grep -qx D9MT_MEMSTATS=1 "$SOM/env"'
+FLAGS="$SOM/prefix/drive_c/d9mt/flags.txt"
+check "set debug: D9MT_DEBUG_FILE names the flags file" eval '(set -a; . "$SOM/env"; [ "$D9MT_DEBUG_FILE" = "C:\\d9mt\\flags.txt" ])'
+check "set debug: flags file written, all flags off" eval 'grep -q "^# att_trace" "$FLAGS" && ! grep -q "^[a-z]" "$FLAGS"'
+echo att_trace >>"$FLAGS"
+som set debug on >/dev/null && check "set debug: flags file edits kept" grep -qx att_trace "$FLAGS"
 som set memory high >/dev/null && check "set memory high" grep -qx 'D9MT_MEMORY_PROFILE=high' "$SOM/env"
 som set gamemode off >/dev/null && check "set gamemode off" grep -q '^#SWTOR_GAMEMODE_APP=' "$SOM/env"
 som set updates off >/dev/null && check "set updates off" grep -qx 'SWTOR_UPDATE_CHECK=0' "$SOM/env"
