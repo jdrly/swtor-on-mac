@@ -145,7 +145,7 @@ messages. With the setting on:
   and an input thread of the driver sends them to the Wine server as they arrive;
 - `GCMouse` reports the mouse's own counts, not the pointer's speed, so the driver measures the
   ratio of the two while you turn and sends the counts at that ratio: at *Mouse-Look Speed* 1×
-  the camera turns as fast as with the pointer's moves (SWTOR on Mac 0.0.x and 0.1.0-dev.1),
+  the camera turns as fast as with the pointer's moves (SWTOR on Mac 0.0.x),
   including your pointer speed in System Settings and Retina mode. Until the first measurement,
   a second or so into the first mouse-look, the pointer's own moves are sent (also through the
   input thread). A device `GCMouse` does not report (a trackpad) keeps the pointer's moves;
@@ -270,16 +270,17 @@ and the game's command line (the launcher passes the account on it) is never inc
 **Settings > Debug Logging** only when asked: it makes the logs much more detailed for the next
 game start, at some cost in performance, so turn it off again afterwards.
 
-## Known issues (test versions)
+## Known issues
 
-- **The new Wine engine (0.1.0 development builds)**: CrossOver 26.3 with Wine 11 is new for
-  SWTOR on Mac. If the game doesn't start or behaves worse than on 0.0.6, please report it
-  (Debug Logging on, then **Collect Logs…**), and go back to 0.0.6 if you need to: copy it
-  over the app and click Reinstall.
-- **Raw mouse-look (0.1.0-dev.2)** is new and on by default in development builds. If
-  mouse-look feels wrong (speed, jumps, the pointer not coming back where you clicked), turn it
-  off in Settings > Mouse to compare, and report it with Debug Logging on. Its speed matches
-  your pointer speed from about a second into the first mouse-look; *Mouse-Look Speed* scales it.
+- **The Wine engine changed in 0.1.0** (CrossOver 26.3 with Wine 11, before CrossOver 24.0.7
+  with Wine 9). If the game doesn't start or behaves worse than on 0.0.6, please report it
+  (Debug Logging on, then **Collect Logs…**), and go back to 0.0.6 if you need to: download it
+  from [Releases](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.0.6), copy it over the
+  app and click Reinstall.
+- **Raw mouse-look** is on by default. If mouse-look feels wrong (speed, jumps, the pointer
+  not coming back where you clicked), turn it off in Settings > Mouse to compare, and report it
+  with Debug Logging on. Its speed matches your pointer speed from about a second into the
+  first mouse-look; *Mouse-Look Speed* scales it.
 - **Stutter the first time** you see an area or effect, while d9mt compiles and caches its
   shaders (see [Install](#install)). It gets smooth after that.
 - **Retina Mode** can only be changed while the launcher and the game are closed (it is in the
@@ -554,7 +555,7 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 |---|---|---|
 | Wine engine `cx-26.3.0-8` (CrossOver 26.3, Wine 11.0, x86_64 WoW64; the one SWGL on Mac uses) | [athei/wine-build cx-26.3.0-8](https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
 | Sparkle 2.10.0 (bundled) | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
-| d9mt `92ce8d3` (bundled, `prebuilt/d9mt`; branch `feat/pace-stats`, main `68c7190` plus the PACE line) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/92ce8d30f6a815253deb4198b0fc3fa3cf5b641f) | see `prebuilt/d9mt` |
+| d9mt `4b7ab26` (bundled, `prebuilt/d9mt`; main after jdrly/d9mt#9, the PACE line) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/4b7ab2652ae90383eac965a68da53bf3e81418bb) | see `prebuilt/d9mt` |
 | The engine's Wine sources (for the Mac driver, `prebuilt/winemac`): athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0) (codeload tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006 (only for configuring that build) | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 

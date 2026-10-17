@@ -24,7 +24,7 @@
 #   RESTORE   seconds with attachment re-clears (d9mt 0.0.6-dev.2 and later): what was
 #             re-cleared (format, size, aspects), why, and the D3D9 call it came from;
 #             RESTORE-SUMMARY when the game released its device (not every exit does)
-#   PACE      once a second (d9mt 92ce8d3 and later): the interval between the game's
+#   PACE      once a second (d9mt 4b7ab26 and later): the interval between the game's
 #             Present calls (min/avg/max, sd), the Present thread's time per frame inside d9mt
 #             and outside it, its CPU time split into d9mt's and the game's own
 #   THREADCPU once a second (the app's Mac driver, 0.1.0-dev.2 and later): CPU time of the
