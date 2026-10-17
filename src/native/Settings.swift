@@ -1,4 +1,5 @@
-// The Settings window (SWTOR on Mac > Settings…, ⌘,), only while SWTOR on Mac is installed.
+// The Settings window (SWTOR on Mac > Settings…, ⌘,), only while SWTOR on Mac is installed:
+// a sidebar of panes (SettingsPane), the selected one's settings next to it.
 // Reads and changes the settings through Resources/som.sh (`settings`, `set <key> <value>`),
 // which keeps them in settings.conf and writes the env file, dxvk.conf, the prefix's
 // RetinaMode and PhysicalKeyboard and the engine's Mac driver from it. They take effect the
@@ -106,18 +107,120 @@ final class GameSettings {
   }
 }
 
+// The panes of the Settings window, in sidebar order. A new pane (e.g. Advanced, for the Wine
+// engine) is a case here, its title and symbol, whether it changes the game, and its sections
+// in SettingsView.sections(for:).
+enum SettingsPane: String, CaseIterable, Identifiable {
+  case graphics, game, keyboard, playButton, updates, troubleshooting
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .graphics: "Graphics"
+    case .game: "Game"
+    case .keyboard: "Keyboard"
+    case .playButton: "Play Button"
+    case .updates: "Updates"
+    case .troubleshooting: "Troubleshooting"
+    }
+  }
+
+  var symbol: String {
+    switch self {
+    case .graphics: "sparkles.tv"
+    case .game: "gamecontroller"
+    case .keyboard: "keyboard"
+    case .playButton: "play.circle"
+    case .updates: "arrow.down.circle"
+    case .troubleshooting: "stethoscope"
+    }
+  }
+
+  // settings.conf settings the game reads when it starts (not the app's own Play Button
+  // preference, and not Updates, which Sparkle follows at once)
+  var appliesAtNextGameStart: Bool {
+    switch self {
+    case .graphics, .game, .keyboard, .troubleshooting: true
+    case .playButton, .updates: false
+    }
+  }
+}
+
 struct SettingsView: View {
+  static let selectedPaneKey = "settingsPane"
+
   @Bindable var settings: GameSettings
   // the app's own preference (UserDefaults, not settings.conf; Play.swift)
   @AppStorage(Installer.quitAfterLaunchKey) private var quitAfterLaunch = false
+  // the pane shown last time
+  @AppStorage(Self.selectedPaneKey) private var selectedPane: SettingsPane = .graphics
+  // the sidebar has the keyboard focus when the window opens: ↑ ↓ switch panes
+  @FocusState private var sidebarFocused: Bool
 
   var body: some View {
-    Form {
-      Section("Graphics") {
+    NavigationSplitView {
+      List(SettingsPane.allCases, selection: Binding(get: { selectedPane }, set: { if let p = $0 { selectedPane = p } })) { pane in
+        Label(pane.title, systemImage: pane.symbol)
+      }
+      .accessibilityLabel("Settings sections")
+      .focused($sidebarFocused)
+      .toolbar(removing: .sidebarToggle)
+      .navigationSplitViewColumnWidth(min: 180, ideal: 190, max: 260)
+    } detail: {
+      Form {
+        sections(for: selectedPane)
+          .disabled(!settings.loaded || !settings.installed)
+        notes(for: selectedPane)
+      }
+      .formStyle(.grouped)
+      .navigationTitle(selectedPane.title)
+    }
+    .frame(minWidth: 640, minHeight: 400)
+    .onAppear {
+      settings.reload()
+      sidebarFocused = true
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      settings.reload()
+    }
+  }
+
+  // Under the pane's settings: a failed save, why everything is disabled, and (once per pane,
+  // for the panes whose settings the game reads) when changes apply.
+  @ViewBuilder private func notes(for pane: SettingsPane) -> some View {
+    let notInstalled = settings.loaded && !settings.installed
+    if settings.error != nil || notInstalled || pane.appliesAtNextGameStart {
+      Section {
+      } footer: {
+        VStack(alignment: .leading, spacing: 8) {
+          if let error = settings.error {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+              .foregroundStyle(.orange)
+          } else if notInstalled {
+            Label("Install SWTOR on Mac first.", systemImage: "exclamationmark.circle")
+          }
+          if pane.appliesAtNextGameStart {
+            Label("Changes take effect the next time the game starts.", systemImage: "info.circle")
+          }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+  }
+
+  private var gameRunningNote: String { "Quit the SWTOR launcher and the game to change this." }
+
+  @ViewBuilder private func sections(for pane: SettingsPane) -> some View {
+    switch pane {
+    case .graphics:
+      Section {
         Toggle(isOn: settings.toggle("retina")) {
           Text("Retina Mode")
           Text(settings.running
-               ? "Quit the SWTOR launcher and the game to change this."
+               ? gameRunningNote
                : "Renders the game at your display's full resolution. Sharper, at some cost in frame rate.")
         }
         .disabled(settings.running)
@@ -126,6 +229,8 @@ struct SettingsView: View {
           Text("Waits for the display between frames: no tearing in borderless windowed mode, frame "
                + "rate capped at the display's refresh rate.")
         }
+      }
+      Section {
         Picker(selection: settings.memory) {
           ForEach(GameSettings.memoryProfiles, id: \.0) { value, title in Text(title).tag(value) }
         } label: {
@@ -137,7 +242,8 @@ struct SettingsView: View {
         }
       }
 
-      Section("Game") {
+    case .game:
+      Section {
         Toggle(isOn: settings.toggle("gamemode")) {
           Text("Game Mode")
           Text("While the game is in full screen, macOS gives it priority on the CPU and GPU and "
@@ -150,18 +256,17 @@ struct SettingsView: View {
         }
       }
 
+    case .keyboard:
       Section {
         Toggle(isOn: settings.toggle("physkeys")) {
           Text("Game keys by keyboard position")
           Text(settings.running
-               ? "Quit the SWTOR launcher and the game to change this."
+               ? gameRunningNote
                : "For non-US layouts (Czech, German, French…): the game sees keys by their position "
                  + "on a US keyboard, so the number row is 1–0 in key binds and action bars. Typing "
                  + "in chat still uses your layout.")
         }
         .disabled(settings.running)
-      } header: {
-        Text("Keyboard")
       } footer: {
         if let layout = settings.nonDigitLayout, settings.values["physkeys"] != "on" {
           Label("Your keyboard layout (\(layout.name)) types \(layout.keys) on the number row: "
@@ -172,7 +277,8 @@ struct SettingsView: View {
         }
       }
 
-      Section("Play Button") {
+    case .playButton:
+      Section {
         Toggle(isOn: $quitAfterLaunch) {
           Text("Quit SWTOR on Mac after launching")
           Text("Play SWTOR opens the official SWTOR app, then SWTOR on Mac quits. It doesn't need "
@@ -180,7 +286,8 @@ struct SettingsView: View {
         }
       }
 
-      Section("Updates") {
+    case .updates:
+      Section {
         if Updates.isDevBuild {
           Toggle(isOn: .constant(false)) {
             Text("Check for updates automatically")
@@ -197,7 +304,8 @@ struct SettingsView: View {
         }
       }
 
-      Section("Troubleshooting") {
+    case .troubleshooting:
+      Section {
         Toggle(isOn: settings.toggle("debug")) {
           Text("Debug Logging")
           Text(Updates.isDevBuild
@@ -208,31 +316,6 @@ struct SettingsView: View {
                  + "cost in performance. Turn it on only when asked to, and off again afterwards.")
         }
       }
-    }
-    .formStyle(.grouped)
-    .disabled(!settings.loaded || !settings.installed)
-    .safeAreaInset(edge: .bottom, spacing: 0) {
-      VStack(spacing: 6) {
-        if let error = settings.error {
-          Label(error, systemImage: "exclamationmark.triangle.fill")
-            .foregroundStyle(.orange)
-            .fixedSize(horizontal: false, vertical: true)
-        } else if settings.loaded && !settings.installed {
-          Text("Install SWTOR on Mac first.")
-            .foregroundStyle(.secondary)
-        }
-        Text("Changes take effect the next time the game starts.")
-          .foregroundStyle(.red)
-      }
-      .font(.callout)
-      .padding(.horizontal, 20)
-      .padding(.bottom, 18)
-    }
-    .frame(width: 540)
-    .fixedSize(horizontal: false, vertical: true)
-    .onAppear { settings.reload() }
-    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-      settings.reload()
     }
   }
 }

@@ -662,7 +662,8 @@ struct SWTORonMacApp: App {
     Window("SWTOR on Mac Settings", id: "settings") {
       SettingsView(settings: settings)
     }
-    .windowResizability(.contentSize)
+    .windowResizability(.contentMinSize)
+    .defaultSize(width: 760, height: 520)
     .defaultLaunchBehavior(.suppressed)
     .restorationBehavior(.disabled)
   }

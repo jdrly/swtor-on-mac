@@ -39,7 +39,7 @@ Mode. You start the game with **Play SWTOR** in its window, or from the official
 - **Fully reversible**: Uninstall puts the official app back exactly as Broadsword ships it and
   copies your game settings back to it.
 
-<img src="docs/screenshots/installing-steps.png" width="360" alt="Installing: the timeline of the steps"> <img src="docs/screenshots/settings.png" width="200" alt="The Settings window"> <img src="docs/screenshots/installed-dark.png" width="360" alt="Installed, in dark mode">
+<img src="docs/screenshots/installing-steps.png" width="360" alt="Installing: the timeline of the steps"> <img src="docs/screenshots/settings.png" width="360" alt="The Settings window"> <img src="docs/screenshots/installed-dark.png" width="360" alt="Installed, in dark mode">
 
 More in [docs/screenshots](docs/screenshots) (the notice, a failed install, uninstall, a narrow
 window).
@@ -96,8 +96,9 @@ settings and SWTOR on Mac's settings.
 
 ### Settings
 
-SWTOR on Mac > **Settings…** (⌘,), while SWTOR on Mac is installed. Changes take effect the
-next time the game starts.
+SWTOR on Mac > **Settings…** (⌘,), while SWTOR on Mac is installed. A sidebar of panes
+(Graphics, Game, Keyboard, Play Button, Updates, Troubleshooting; the window opens on the one
+used last) and the selected pane's settings. Changes take effect the next time the game starts.
 
 | Setting | Default | What it changes |
 |---|---|---|
