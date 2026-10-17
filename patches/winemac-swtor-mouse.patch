@@ -1,0 +1,591 @@
+SWTOR on Mac's changes on top of SWGL on Mac's two mouse patches
+(patches/winemac-swgl-relative-mouse.patch, patches/winemac-swgl-input-thread.patch):
+
+- RawMouseWhenCursorHidden and IgnoreStaleCursorWarps are off unless the registry turns them
+  on; SWTOR on Mac turns RawMouseWhenCursorHidden on for swtor.exe only ("Raw mouse-look" in
+  Settings) and leaves IgnoreStaleCursorWarps off: SWTOR calls SetCursorPos only to centre
+  the pointer for mouse-look and to put it back where the click was, never to re-assert an
+  old position as SWG does, and does not read DirectInput. The fallback that looks for one of
+  our windows under the pointer is part of the option too, so with it off the driver behaves
+  as the stock one.
+- RawMouseMatchPointerSpeed (on by default): GCMouse's device counts are sent at the measured
+  ratio of AppKit's motion (the macOS pointer: tracking speed, Retina scale) to GCMouse's, so
+  mouse-look turns as fast as with AppKit's moves (SWTOR on Mac 0.0.x); until the first
+  measurement AppKit's moves are sent. RawMouseGameControllerScale (Mouse-Look Speed) is a
+  factor on that, for both sources.
+- The PE side starts the input thread only if the unix side says it has it (init params'
+  app_icon_callback set to MACDRV_HAS_RAW_INPUT_THREAD): installers that swap only winemac.so
+  (SWTOR on Mac 0.1.0-dev.1 and earlier) can leave this PE side with an older unix side.
+- Debug output: warn+rawmouse, a RAWMOUSE line a second while moves are sent (both sources,
+  the measured ratio); warn+threadcpu, a THREADCPU line a second from the input thread: the
+  CPU time of the process, its busiest threads and the session's wineserver, in the process
+  whose ThreadCpuStats option is on (swtor.exe; the session's other processes inherit its
+  WINEDEBUG and stderr).
+
+diff -ru a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -90,7 +90,89 @@
+ /* CLOCK_UPTIME_RAW time of the last GCMouse delta, in or out of relative mode. */
+ static uint64_t gc_mouse_last_delta_ns;
+ 
++/* RawMouseMatchPointerSpeed (SWTOR on Mac): GCMouse reports device counts,
++   while the game's mouse-look was tuned to the macOS pointer (AppKit's
++   deltas, with the user's tracking speed and the Retina scale).  In
++   relative mode both report the same motion, so their ratio is measured:
++   Windows pixels per GCMouse count.  Until the first measurement AppKit's
++   moves are sent (through the input thread) and GCMouse's are only
++   counted; from then on GCMouse's are sent at that ratio (times
++   RawMouseGameControllerScale), and AppKit's are left out and keep
++   refining it.  Samples start 100 ms after relative mode was entered
++   (AppKit's moves arrive about a refresh after GCMouse's) and the window
++   in progress is dropped when it ends; AppKit motion counts only while
++   GCMouse reported in the last 100 ms (a device it does not report, e.g. a
++   trackpad, does not skew the ratio). */
++#define GC_CALIB_WINDOW_COUNTS  800.0
++static os_unfair_lock gc_calib_lock = OS_UNFAIR_LOCK_INIT;
++static double gc_calib_counts, gc_calib_pixels;
++static double gc_calib_ratio;          /* 0: not measured yet */
++static unsigned int gc_calib_samples;  /* windows measured */
++static uint64_t gc_calib_from_ns;      /* samples count from then on; 0: not in relative mode */
++
++static void gc_calib_restart(BOOL relative)
++{
++    os_unfair_lock_lock(&gc_calib_lock);
++    gc_calib_counts = gc_calib_pixels = 0;
++    gc_calib_from_ns = relative ? clock_gettime_nsec_np(CLOCK_UPTIME_RAW) + 100 * NSEC_PER_MSEC : 0;
++    os_unfair_lock_unlock(&gc_calib_lock);
++}
++
++/* counts: GCMouse motion (device counts); pixels: AppKit motion (Windows pixels) */
++static void gc_calib_add(double counts, double pixels)
++{
++    uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++
++    os_unfair_lock_lock(&gc_calib_lock);
++    if (gc_calib_from_ns && now >= gc_calib_from_ns)
++    {
++        gc_calib_counts += counts;
++        gc_calib_pixels += pixels;
++        if (gc_calib_counts >= GC_CALIB_WINDOW_COUNTS)
++        {
++            double ratio = gc_calib_pixels / gc_calib_counts;
++
++            /* A window without AppKit motion, or a wild one, tells nothing. */
++            if (ratio >= 0.02 && ratio <= 50)
++            {
++                gc_calib_ratio = gc_calib_ratio ? 0.75 * gc_calib_ratio + 0.25 * ratio : ratio;
++                gc_calib_samples++;
++            }
++            gc_calib_counts = gc_calib_pixels = 0;
++        }
++    }
++    os_unfair_lock_unlock(&gc_calib_lock);
++}
++
+ /***********************************************************************
++ *              macdrv_raw_mouse_pixels_per_count
++ *
++ * The measured ratio (0 if none yet) and how many windows it is made of;
++ * for mouse.c's statistics line.
++ */
++double macdrv_raw_mouse_pixels_per_count(unsigned int *samples)
++{
++    double ratio;
++
++    os_unfair_lock_lock(&gc_calib_lock);
++    ratio = gc_calib_ratio;
++    if (samples) *samples = gc_calib_samples;
++    os_unfair_lock_unlock(&gc_calib_lock);
++    return ratio;
++}
++
++/* Windows pixels per GCMouse count to send, 0: leave the motion to AppKit. */
++static double gc_mouse_scale(void)
++{
++    double ratio;
++
++    if (!raw_mouse_match_pointer_speed)
++        return raw_mouse_game_controller_scale;
++    ratio = macdrv_raw_mouse_pixels_per_count(NULL);
++    return ratio * raw_mouse_game_controller_scale;
++}
++
++/***********************************************************************
+  *              WineLocalizedString
+  *
+  * Look up a localized string by its ID in the dictionary.
+@@ -1243,12 +1325,14 @@
+ 
+             [self setUpGameControllerMice];
+             [self discardGameControllerMouseMotion];
++            gc_calib_restart(TRUE);
+             __atomic_store_n(&gc_mouse_target_hwnd, macdrv_get_window_hwnd((macdrv_window)lastTargetWindow),
+                              __ATOMIC_RELEASE);
+         }
+         else
+         {
+             relativeMouseMode = FALSE;
++            gc_calib_restart(FALSE);
+             /* GCMouse motion from now on is dropped; count what was handed over. */
+             __atomic_store_n(&gc_mouse_target_hwnd, NULL, __ATOMIC_RELEASE);
+             [self applyGameControllerMouseMotion];
+@@ -1400,6 +1484,7 @@
+     {
+         uint64_t now_ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+         NSTimeInterval now = now_ns / (double)NSEC_PER_SEC;
++        double scale;
+         int dx, dy;
+ 
+         __atomic_store_n(&gc_mouse_last_delta_ns, now_ns, __ATOMIC_RELAXED);
+@@ -1412,8 +1497,16 @@
+             return;
+         }
+ 
+-        gcMouseRemainderX += deltaX * raw_mouse_game_controller_scale;
+-        gcMouseRemainderY -= deltaY * raw_mouse_game_controller_scale;
++        gc_calib_add(hypot(deltaX, deltaY), 0);
++        if (!(scale = gc_mouse_scale()))
++        {
++            /* Not measured yet: AppKit's moves carry the motion. */
++            gcMouseRemainderX = gcMouseRemainderY = 0;
++            return;
++        }
++
++        gcMouseRemainderX += deltaX * scale;
++        gcMouseRemainderY -= deltaY * scale;
+         dx = gcMouseRemainderX;
+         dy = gcMouseRemainderY;
+         gcMouseRemainderX -= dx;
+@@ -1482,6 +1575,14 @@
+         return gcMouseQueue && last && clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - last < 5 * NSEC_PER_SEC;
+     }
+ 
++    /* Whether GCMouse reported motion in the last NS nanoseconds. */
++    - (BOOL) gameControllerMouseReportedWithin:(uint64_t)ns
++    {
++        uint64_t last = __atomic_load_n(&gc_mouse_last_delta_ns, __ATOMIC_RELAXED);
++
++        return gcMouseQueue && last && clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - last < ns;
++    }
++
+     /* Let relativeModeCursorPosition follow the motion GCMouse handed over. */
+     - (void) applyGameControllerMouseMotion
+     {
+@@ -1909,7 +2010,7 @@
+             /* The window server sometimes names another app's window that sits
+                behind ours, which would drop the move. While we are active, take
+                our frontmost window under the point instead. */
+-            if (![targetWindow isKindOfClass:[WineWindow class]] && [NSApp isActive])
++            if (raw_mouse_when_cursor_hidden && ![targetWindow isKindOfClass:[WineWindow class]] && [NSApp isActive])
+             {
+                 for (NSWindow* window in [NSApp orderedWindows])
+                 {
+@@ -2028,10 +2129,12 @@
+                 mouseMoveDeltaX = 0;
+                 mouseMoveDeltaY = 0;
+             }
+-            else if (relativeMouseMode && [self gameControllerMouseIsReporting])
++            else if (relativeMouseMode && [self gameControllerMouseIsReporting] && gc_mouse_scale())
+             {
+                 double scale = retina_on ? 2 : 1;
+ 
++                if ([self gameControllerMouseReportedWithin:100 * NSEC_PER_MSEC])
++                    gc_calib_add(0, hypot(eventDeltaX, eventDeltaY) * scale);
+                 /* GCMouse reports this motion (see -setUpGameControllerMice). */
+                 macdrv_note_left_out_mouse_move(eventDeltaX * scale, eventDeltaY * scale);
+                 mouseMoveDeltaX = 0;
+@@ -2045,8 +2148,19 @@
+ 
+                 /* Add event delta to accumulated delta error */
+                 /* deltaY is already flipped */
+-                mouseMoveDeltaX += eventDeltaX;
+-                mouseMoveDeltaY += eventDeltaY;
++                if (relativeMouseMode && raw_mouse_match_pointer_speed)
++                {
++                    /* Mouse-Look Speed applies to AppKit's moves too. */
++                    if ([self gameControllerMouseReportedWithin:100 * NSEC_PER_MSEC])
++                        gc_calib_add(0, hypot(eventDeltaX, eventDeltaY) * scale);
++                    mouseMoveDeltaX += eventDeltaX * raw_mouse_game_controller_scale;
++                    mouseMoveDeltaY += eventDeltaY * raw_mouse_game_controller_scale;
++                }
++                else
++                {
++                    mouseMoveDeltaX += eventDeltaX;
++                    mouseMoveDeltaY += eventDeltaY;
++                }
+                 if (relativeMouseMode)
+                     [self trackRelativeMotionX:eventDeltaX y:eventDeltaY];
+ 
+diff -ru a/dlls/winemac.drv/dllmain.c b/dlls/winemac.drv/dllmain.c
+--- a/dlls/winemac.drv/dllmain.c
++++ b/dlls/winemac.drv/dllmain.c
+@@ -507,7 +507,8 @@
+     if (MACDRV_CALL(init, &params)) return FALSE;
+ 
+     /* One per process; it starts running once the loader lock is released. */
+-    CloseHandle(CreateThread(NULL, 0, raw_input_thread, NULL, 0, NULL));
++    if (params.app_icon_callback == MACDRV_HAS_RAW_INPUT_THREAD)
++        CloseHandle(CreateThread(NULL, 0, raw_input_thread, NULL, 0, NULL));
+ 
+     return TRUE;
+ }
+diff -ru a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
+--- a/dlls/winemac.drv/macdrv.h
++++ b/dlls/winemac.drv/macdrv.h
+@@ -43,6 +43,7 @@
+ extern BOOL allow_set_gamma;
+ extern BOOL allow_software_rendering;
+ extern BOOL raw_mouse_input_thread;
++extern BOOL thread_cpu_stats;
+ 
+ extern UINT64 app_icon_callback;
+ extern UINT64 app_quit_request_callback;
+diff -ru a/dlls/winemac.drv/macdrv_cocoa.h b/dlls/winemac.drv/macdrv_cocoa.h
+--- a/dlls/winemac.drv/macdrv_cocoa.h
++++ b/dlls/winemac.drv/macdrv_cocoa.h
+@@ -143,6 +143,7 @@
+ extern bool ignore_stale_cursor_warps;
+ extern bool raw_mouse_game_controller;
+ extern double raw_mouse_game_controller_scale;
++extern bool raw_mouse_match_pointer_speed;
+ extern bool cursor_clipping_locks_windows;
+ extern bool use_precise_scrolling;
+ extern bool physical_keyboard;  /* PhysicalKeyboard: vkeys by US key position */
+@@ -249,6 +250,7 @@
+ extern void macdrv_note_left_out_mouse_move(int dx, int dy);
+ extern void macdrv_note_game_controller_mouse(void);
+ extern int macdrv_mouse_events_pending(void);
++extern double macdrv_raw_mouse_pixels_per_count(unsigned int *samples);
+ extern int macdrv_set_cursor_position(CGPoint pos);
+ extern int macdrv_clip_cursor(CGRect rect);
+ 
+diff -ru a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
+--- a/dlls/winemac.drv/macdrv_main.c
++++ b/dlls/winemac.drv/macdrv_main.c
+@@ -55,11 +55,15 @@
+ BOOL allow_software_rendering = FALSE;
+ bool allow_immovable_windows = true;
+ bool use_confinement_cursor_clipping = true;
+-bool raw_mouse_when_cursor_hidden = true;
+-bool ignore_stale_cursor_warps = true;
++/* SWTOR on Mac: both off unless the registry turns them on (for swtor.exe only), so
++   every other process keeps the stock behaviour. */
++bool raw_mouse_when_cursor_hidden = false;
++bool ignore_stale_cursor_warps = false;
+ BOOL raw_mouse_input_thread = TRUE;
+ bool raw_mouse_game_controller = true;
+ double raw_mouse_game_controller_scale = 1.0;
++bool raw_mouse_match_pointer_speed = true;
++BOOL thread_cpu_stats = FALSE;
+ bool cursor_clipping_locks_windows = true;
+ bool physical_keyboard = false;
+ bool use_precise_scrolling = true;
+@@ -386,7 +390,16 @@
+     if (!get_config_key(hkey, appkey, "RawMouseGameController", buffer, sizeof(buffer)))
+         raw_mouse_game_controller = IS_OPTION_TRUE(buffer[0]);
+ 
+-    /* Windows mickeys per GCMouse device count (a decimal number). */
++    if (!get_config_key(hkey, appkey, "RawMouseMatchPointerSpeed", buffer, sizeof(buffer)))
++        raw_mouse_match_pointer_speed = IS_OPTION_TRUE(buffer[0]);
++
++    /* THREADCPU lines (with warn+threadcpu): only in the process this is set for, as the
++       others of a session (explorer.exe) inherit its WINEDEBUG and stderr. */
++    if (!get_config_key(hkey, appkey, "ThreadCpuStats", buffer, sizeof(buffer)))
++        thread_cpu_stats = IS_OPTION_TRUE(buffer[0]);
++
++    /* Windows mickeys per GCMouse device count (a decimal number); with
++       RawMouseMatchPointerSpeed, a factor on the macOS pointer's speed. */
+     if (!get_config_key(hkey, appkey, "RawMouseGameControllerScale", buffer, sizeof(buffer)))
+     {
+         char number[32];
+@@ -504,6 +517,7 @@
+     }
+ 
+     init_user_driver();
++    params->app_icon_callback = MACDRV_HAS_RAW_INPUT_THREAD;  /* see unixlib.h */
+     return STATUS_SUCCESS;
+ }
+ 
+@@ -701,6 +715,7 @@
+         UINT64 regsetvalueexa_callback;
+     } *params32 = arg;
+     struct init_params params;
++    NTSTATUS status;
+ 
+     params.strings = UlongToPtr(params32->strings);
+     params.app_icon_callback = params32->app_icon_callback;
+@@ -708,7 +723,9 @@
+     params.regcreateopenkeyexa_callback = params32->regcreateopenkeyexa_callback;
+     params.regqueryvalueexa_callback = params32->regqueryvalueexa_callback;
+     params.regsetvalueexa_callback = params32->regsetvalueexa_callback;
+-    return macdrv_init(&params);
++    status = macdrv_init(&params);
++    params32->app_icon_callback = params.app_icon_callback;
++    return status;
+ }
+ 
+ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+diff -ru a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
+--- a/dlls/winemac.drv/mouse.c
++++ b/dlls/winemac.drv/mouse.c
+@@ -26,8 +26,14 @@
+ 
+ #include "config.h"
+ 
++#include <dlfcn.h>
+ #include <errno.h>
+ #include <fcntl.h>
++#include <libproc.h>
++#include <limits.h>
++#include <poll.h>
++#include <stdlib.h>
++#include <sys/proc_info.h>
+ #include <pthread.h>
+ #include <pthread/qos.h>
+ #include <os/lock.h>
+@@ -39,6 +45,8 @@
+ #include "wine/server.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(cursor);
++WINE_DECLARE_DEBUG_CHANNEL(rawmouse);
++WINE_DECLARE_DEBUG_CHANNEL(threadcpu);
+ 
+ 
+ static pthread_mutex_t cursor_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+@@ -298,8 +306,19 @@
+         len += snprintf(buf + len, sizeof(buf) - len, "%s%s %u events (%d,%d)", i ? ", " : "",
+                         names[i], events, dx, dy);
+     }
+-    TRACE("last %.2f s: %s; %d GCMouse device(s)\n", (now - raw_mouse_stats_ns) / 1e9, buf,
+-          __atomic_load_n(&raw_mouse_gc_mice, __ATOMIC_RELAXED));
++    if (WARN_ON(rawmouse))
++    {
++        unsigned int samples;
++        double ratio = macdrv_raw_mouse_pixels_per_count(&samples);
++
++        WARN_(rawmouse)("RAWMOUSE %.2f s: %s; %d GCMouse device(s); pixels/count %.3f (%u samples), speed %.2f\n",
++                        (now - raw_mouse_stats_ns) / 1e9, buf,
++                        __atomic_load_n(&raw_mouse_gc_mice, __ATOMIC_RELAXED), ratio, samples,
++                        raw_mouse_game_controller_scale);
++    }
++    else
++        TRACE("last %.2f s: %s; %d GCMouse device(s)\n", (now - raw_mouse_stats_ns) / 1e9, buf,
++              __atomic_load_n(&raw_mouse_gc_mice, __ATOMIC_RELAXED));
+     raw_mouse_stats_ns = now;
+ }
+ 
+@@ -349,7 +368,7 @@
+         tail = __atomic_load_n(&raw_moves_tail, __ATOMIC_ACQUIRE);
+     }
+ 
+-    if (TRACE_ON(cursor)) trace_raw_mouse_stats();
++    if (TRACE_ON(cursor) || WARN_ON(rawmouse)) trace_raw_mouse_stats();
+ 
+     pthread_mutex_unlock(&raw_moves_mutex);
+ }
+@@ -451,6 +470,136 @@
+ 
+ 
+ /***********************************************************************
++ *              Thread CPU statistics (SWTOR on Mac, warn+threadcpu)
++ *
++ * Once a second, from the raw input thread: the CPU time this process and
++ * each of its threads used in that second, and that of the session's
++ * wineserver, in ms.  One "THREADCPU" line with the busiest threads, for
++ * telling a game thread that runs out of frame time from Wine or the
++ * window server being slow.  Read from the kernel's per-thread counters
++ * (proc_pidinfo), about a hundred cheap calls a second; nothing else runs.
++ */
++struct thread_cpu
++{
++    uint64_t handle;
++    uint64_t ns;
++};
++
++#define THREAD_CPU_MAX 1024
++
++static struct thread_cpu thread_cpu_prev[THREAD_CPU_MAX];
++static int thread_cpu_prev_count;
++static UINT64 thread_cpu_prev_time, thread_cpu_server_ns;
++static pid_t thread_cpu_server = -1;  /* -1: not looked up yet, 0: not found */
++
++/* The wineserver of this engine: <engine>/bin/wineserver, the engine being
++   four levels above this library (lib/wine/x86_64-unix/winemac.so). */
++static pid_t find_wineserver(void)
++{
++    char path[PATH_MAX], want[PATH_MAX], real[PATH_MAX], *p;
++    Dl_info info;
++    pid_t *pids;
++    int i, n, found = 0;
++
++    if (!dladdr((void *)find_wineserver, &info) || !realpath(info.dli_fname, path)) return 0;
++    for (i = 0; i < 4; i++)
++    {
++        if (!(p = strrchr(path, '/'))) return 0;
++        *p = 0;
++    }
++    snprintf(real, sizeof(real), "%s/bin/wineserver", path);
++    if (!realpath(real, want)) return 0;
++
++    if ((n = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0)) <= 0 || !(pids = malloc(n))) return 0;
++    n = proc_listpids(PROC_ALL_PIDS, 0, pids, n) / sizeof(*pids);
++    for (i = 0; i < n && !found; i++)
++    {
++        size_t len;
++        if (pids[i] <= 1 || proc_pidpath(pids[i], path, sizeof(path)) <= 0) continue;
++        len = strlen(path);
++        if (len < 11 || strcmp(path + len - 11, "/wineserver")) continue;
++        if (realpath(path, real) && !strcmp(real, want)) found = pids[i];
++    }
++    free(pids);
++    return found;
++}
++
++static void trace_thread_cpu(void)
++{
++    static uint64_t handles[THREAD_CPU_MAX];
++    struct thread_cpu now_cpu[THREAD_CPU_MAX];
++    struct { uint64_t handle; uint64_t ns; char name[MAXTHREADNAMESIZE]; } top[8];
++    UINT64 now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++    pid_t pid = getpid();
++    uint64_t total = 0, server = 0;
++    int i, j, n, count = 0, ntop = 0, len = 0;
++    char buf[1024];
++
++    if (thread_cpu_server < 0) thread_cpu_server = find_wineserver();
++    if (thread_cpu_server > 0)
++    {
++        struct proc_taskinfo ti;
++        if (proc_pidinfo(thread_cpu_server, PROC_PIDTASKINFO, 0, &ti, sizeof(ti)) == sizeof(ti))
++        {
++            uint64_t ns = ti.pti_total_user + ti.pti_total_system;
++            server = thread_cpu_server_ns ? ns - thread_cpu_server_ns : 0;
++            thread_cpu_server_ns = ns;
++        }
++        else thread_cpu_server = -1;  /* gone (a new session?): look again next time */
++    }
++
++    n = proc_pidinfo(pid, PROC_PIDLISTTHREADS, 0, handles, sizeof(handles)) / (int)sizeof(*handles);
++    memset(top, 0, sizeof(top));
++    for (i = 0; i < n; i++)
++    {
++        struct proc_threadinfo info;
++        uint64_t used = 0;
++
++        if (proc_pidinfo(pid, PROC_PIDTHREADINFO, handles[i], &info, sizeof(info)) != sizeof(info)) continue;
++        now_cpu[count].handle = handles[i];
++        now_cpu[count].ns = info.pth_user_time + info.pth_system_time;
++        for (j = 0; j < thread_cpu_prev_count; j++)
++            if (thread_cpu_prev[j].handle == handles[i]) break;
++        /* a new thread (or a new one with an ended thread's handle: its time went down) */
++        if (j < thread_cpu_prev_count && now_cpu[count].ns >= thread_cpu_prev[j].ns)
++            used = now_cpu[count].ns - thread_cpu_prev[j].ns;
++        else if (thread_cpu_prev_time)
++            used = now_cpu[count].ns;
++        total += used;
++        count++;
++
++        /* keep the busiest, sorted */
++        for (j = ntop; j > 0 && top[j - 1].ns < used; j--)
++            if (j < ARRAY_SIZE(top)) top[j] = top[j - 1];
++        if (j < ARRAY_SIZE(top))
++        {
++            top[j].handle = handles[i];
++            top[j].ns = used;
++            memcpy(top[j].name, info.pth_name, sizeof(top[j].name));
++            top[j].name[sizeof(top[j].name) - 1] = 0;
++            if (ntop < ARRAY_SIZE(top)) ntop++;
++        }
++    }
++
++    if (thread_cpu_prev_time)
++    {
++        for (i = 0; i < ntop && top[i].ns >= 1000000; i++)
++            len += snprintf(buf + len, sizeof(buf) - len, "%s%05llx%s%s%s %llu", i ? ", " : "",
++                            (unsigned long long)(top[i].handle >> 4) & 0xfffff,
++                            top[i].name[0] ? " \"" : "", top[i].name, top[i].name[0] ? "\"" : "",
++                            (unsigned long long)(top[i].ns / 1000000));
++        WARN_(threadcpu)("THREADCPU %.2f s: process %llu ms (%d threads), wineserver %llu ms%s; busiest (ms): %s\n",
++                         (now - thread_cpu_prev_time) / 1e9, (unsigned long long)(total / 1000000), count,
++                         (unsigned long long)(server / 1000000), thread_cpu_server > 0 ? "" : " (not found)",
++                         len ? buf : "none");
++    }
++    memcpy(thread_cpu_prev, now_cpu, count * sizeof(*now_cpu));
++    thread_cpu_prev_count = count;
++    thread_cpu_prev_time = now;
++}
++
++
++/***********************************************************************
+  *              macdrv_raw_input_thread
+  *
+  * The body of the raw input thread, a Wine thread of this process created
+@@ -461,13 +610,25 @@
+ {
+     int fds[2], expected = 0;
+     char buf[64];
+-    ssize_t len;
++    ssize_t len = 0;
++    BOOL mouse = raw_mouse_when_cursor_hidden && raw_mouse_input_thread;
++    BOOL stats = thread_cpu_stats && WARN_ON(threadcpu);
++    UINT64 next_stats = 0;
+ 
+-    if (!raw_mouse_when_cursor_hidden || !raw_mouse_input_thread)
++    if (!mouse && !stats)
+     {
+         TRACE("disabled\n");
+         return STATUS_SUCCESS;
+     }
++    if (!mouse)
++    {
++        /* Only the statistics. */
++        for (;;)
++        {
++            trace_thread_cpu();
++            usleep(1000000);
++        }
++    }
+     if (!__atomic_compare_exchange_n(&raw_input_thread_state, &expected, 1, FALSE,
+                                      __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+     {
+@@ -494,6 +655,22 @@
+ 
+     for (;;)
+     {
++        if (stats)
++        {
++            struct pollfd pfd = { fds[0], POLLIN, 0 };
++            UINT64 now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++            int ret;
++
++            if (now >= next_stats)
++            {
++                trace_thread_cpu();
++                next_stats = now + 1000000000;
++            }
++            ret = poll(&pfd, 1, (int)((next_stats - now + 999999) / 1000000));
++            if (ret < 0 && errno == EINTR) continue;
++            if (ret < 0) { len = -1; break; }
++            if (ret == 0) continue;
++        }
+         len = read(fds[0], buf, sizeof(buf));
+         if (len < 0 && errno == EINTR) continue;
+         if (len <= 0) break;
+diff -ru a/dlls/winemac.drv/unixlib.h b/dlls/winemac.drv/unixlib.h
+--- a/dlls/winemac.drv/unixlib.h
++++ b/dlls/winemac.drv/unixlib.h
+@@ -47,6 +47,13 @@
+     UINT64 regsetvalueexa_callback;
+ };
+ 
++/* SWTOR on Mac: a unix side that has unix_raw_input_thread sets the init
++   params' app_icon_callback (already taken over by then) to this.  A PE side
++   paired with an older unix side (a downgrade that swapped only winemac.so)
++   must not make that call: unix calls are not range-checked.  The struct
++   stays as it is, so neither side writes past the other's. */
++#define MACDRV_HAS_RAW_INPUT_THREAD 0x5357544f52524954ull
++
+ /* macdrv_quit_result params */
+ struct quit_result_params
+ {

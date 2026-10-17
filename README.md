@@ -30,7 +30,7 @@ engine SWGL on Mac uses), with macOS Game Mode. You start the game with **Play S
   macOS **Game Mode** and Retina rendering.
 - **Settings** (SWTOR on Mac > Settings…, ⌘,): Retina mode, vsync, d9mt's video memory
   profile, Game Mode, the Metal HUD, game keys by keyboard position (for non-US layouts),
-  debug logging, automatic update checks.
+  raw mouse-look and its speed, debug logging, automatic update checks.
 - **Updates**: the app updates itself with [Sparkle](https://sparkle-project.org) (SWTOR on
   Mac > Check for Updates…), and the game's start looks for a new version once a day.
 - **Survives launcher updates**: when the official launcher updates its Wine and drops SWTOR on
@@ -97,8 +97,8 @@ settings and SWTOR on Mac's settings.
 ### Settings
 
 SWTOR on Mac > **Settings…** (⌘,), while SWTOR on Mac is installed. A sidebar of panes
-(Graphics, Game, Keyboard, Play Button, Updates, Troubleshooting; the window opens on the one
-used last) and the selected pane's settings. Changes take effect the next time the game starts.
+(Graphics, Game, Keyboard, Mouse, Play Button, Updates, Troubleshooting; the window opens on
+the one used last) and the selected pane's settings. Changes take effect the next time the game starts.
 
 | Pane | Setting | Default | What it changes |
 |---|---|---|---|
@@ -108,8 +108,10 @@ used last) and the selected pane's settings. Changes take effect the next time t
 | Game | Game Mode | on | `SWTOR_GAMEMODE_APP` in `env` |
 | Game | Show Metal HUD | off | `MTL_HUD_ENABLED=1` in `env`. It can't be toggled with a key in the game; turn it on here before starting the game |
 | Keyboard | Game keys by keyboard position | off | The game sees every key by its position on a US keyboard (see below): SWTOR on Mac's build of Wine's Mac driver in its engine and `PhysicalKeyboard=y` for `swtor.exe` in the prefix's registry; off, the engine's own driver (only while the launcher and the game are closed) |
+| Mouse | Raw mouse-look | on | While the game hides the pointer to turn the camera, the mouse's own moves from GameController's `GCMouse`, sent by an input thread of the Mac driver as they come, the macOS pointer frozen (see below): SWTOR on Mac's build of Wine's Mac driver in its engine and `RawMouseWhenCursorHidden=y` for `swtor.exe`; off, `n` (and the engine's own driver if *Game keys by keyboard position* is off too). Only while the launcher and the game are closed |
+| Mouse | Mouse-Look Speed | 1× | `RawMouseGameControllerScale` for `swtor.exe` (0.5× to 3×): a factor on the macOS pointer's speed, which raw mouse-look matches at 1× |
 | Updates | Check for updates automatically | on | Sparkle's automatic checks and the daily check at the game's start |
-| Troubleshooting | Debug Logging | off | `DXVK_LOG_LEVEL=info`, `D9MT_PROFILE=1`, `D9MT_MEMSTATS=1`, `D9MT_DEBUG_FILE=C:\d9mt\flags.txt` (d9mt's live debug flags, below; else `DXVK_LOG_LEVEL=warn`) |
+| Troubleshooting | Debug Logging | off | `DXVK_LOG_LEVEL=info`, `D9MT_PROFILE=1` (with d9mt's `STATS` and `PACE` lines every second: frame times, and how evenly the game calls Present and how its thread's time per frame splits into d9mt's D3D9 calls and the game's own work), `D9MT_MEMSTATS=1`, `D9MT_DEBUG_FILE=C:\d9mt\flags.txt` (d9mt's live debug flags, below; else `DXVK_LOG_LEVEL=warn`), and `SWTOR_GAME_WINEDEBUG=-all,warn+rawmouse,warn+threadcpu`: the wrapper sets it as the game's `WINEDEBUG`, so the app's Mac driver logs `THREADCPU` (from `swtor.exe` only, `ThreadCpuStats=y` in the prefix) (the CPU time of the game's busiest threads and of the wineserver, once a second) and `RAWMOUSE` (raw mouse-look, once a second while it moves) |
 | Play Button | Quit SWTOR on Mac after launching | off | The app quits once **Play SWTOR** has opened the official app (the app's own preference) |
 
 They are kept in `~/Library/Application Support/SWTOR on Mac/settings.conf`; `env` and
@@ -124,9 +126,34 @@ number row is 1–0, the key right of P is `[`, and so on, in key binds and acti
 in chat still uses your layout (ě š č, dead keys like ´ + e = é, Shift and Option). The
 catch: everything follows US positions, so on QWERTZ layouts (Czech, German) the key labelled
 Z is *Y* in the game and the other way round. Settings says when your current layout's number
-row doesn't type 1–0. It works with the patched Mac driver, which is used only while the
-setting is on (see [Credits and licenses](#credits-and-licenses)); changing it needs no
-Reinstall.
+row doesn't type 1–0. It works with the patched Mac driver, which is used only while this
+setting or *Raw mouse-look* is on (see [Credits and licenses](#credits-and-licenses));
+changing it needs no Reinstall.
+
+**Raw mouse-look** ports [SWGL on Mac](https://github.com/jdrly/swgl-on-mac)'s two mouse
+patches to SWTOR. SWTOR has no raw input: while you hold a mouse button it hides the pointer,
+reads the pointer's position from its window messages and puts it back to the window's centre
+after every move (`SetCursorPos`). Wine's stock Mac driver moves the real pointer for each of
+those and drops the moves queued around it, and the moves themselves reach the game once per
+screen refresh, about a refresh late, and only when the game's thread next looks at its
+messages. With the setting on:
+
+- while the game hides the pointer, the macOS pointer stays where it is (no warps) and the
+  game gets the mouse's moves as relative motion; its re-centring only moves Wine's own pointer,
+  as on Windows;
+- the moves come from GameController's `GCMouse` (around 1000 a second for a typical mouse)
+  and an input thread of the driver sends them to the Wine server as they arrive;
+- `GCMouse` reports the mouse's own counts, not the pointer's speed, so the driver measures the
+  ratio of the two while you turn and sends the counts at that ratio: at *Mouse-Look Speed* 1×
+  the camera turns as fast as with the pointer's moves (SWTOR on Mac 0.0.x and 0.1.0-dev.1),
+  including your pointer speed in System Settings and Retina mode. Until the first measurement,
+  a second or so into the first mouse-look, the pointer's own moves are sent (also through the
+  input thread). A device `GCMouse` does not report (a trackpad) keeps the pointer's moves;
+- SWG-specific parts stay off for SWTOR: `SetCursorPos` to a recent position is not ignored
+  (SWTOR puts the pointer back where mouse-look began), and the prefix keeps Windows mouse
+  acceleration settings untouched (SWTOR does not apply them itself);
+- the pointer is hidden as before, with a blank cursor image, never by turning the cursor off
+  (that would drop the game out of Direct presentation, the Metal HUD's *Direct*).
 
 ## Updates
 
@@ -249,6 +276,10 @@ game start, at some cost in performance, so turn it off again afterwards.
   SWTOR on Mac. If the game doesn't start or behaves worse than on 0.0.6, please report it
   (Debug Logging on, then **Collect Logs…**), and go back to 0.0.6 if you need to: copy it
   over the app and click Reinstall.
+- **Raw mouse-look (0.1.0-dev.2)** is new and on by default in development builds. If
+  mouse-look feels wrong (speed, jumps, the pointer not coming back where you clicked), turn it
+  off in Settings > Mouse to compare, and report it with Debug Logging on. Its speed matches
+  your pointer speed from about a second into the first mouse-look; *Mouse-Look Speed* scales it.
 - **Stutter the first time** you see an area or effect, while d9mt compiles and caches its
   shaders (see [Install](#install)). It gets smooth after that.
 - **Retina Mode** can only be changed while the launcher and the game are closed (it is in the
@@ -278,8 +309,8 @@ game start, at some cost in performance, so turn it off again afterwards.
 - **A button says the launcher, the game or Wine is running.** Quit the SWTOR launcher and the
   game. SWTOR on Mac's own Wine ends by itself a few seconds after they quit.
 - **Leftover Wine processes of SWTOR on Mac's engine.** Click **End Leftover Wine Processes**
-  (Install, Uninstall, the Retina setting and Game keys by keyboard position also end them
-  first).
+  (Install, Uninstall and the settings kept in the prefix's registry, Retina, game keys by
+  keyboard position, raw mouse-look and its speed, also end them first).
 - **Another Wine wrapper is installed** in Broadsword's Wine folder (another tool, or a manual
   setup). SWTOR on Mac leaves it alone unless you confirm; it then keeps a copy in
   `~/Library/Application Support/SWTOR on Mac/backup/`.
@@ -315,8 +346,10 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
 
 - `~/Library/Application Support/SWTOR on Mac/`
   - `engine/` – the Wine engine (self-contained: its libraries are inside it), with d9mt's
-    winemetal bridge (and, while *Game keys by keyboard position* is on, SWTOR on Mac's build
-    of its Mac driver `winemac.so`; the engine's own is kept as `winemac.so.stock`)
+    winemetal bridge (and, while *Game keys by keyboard position* or *Raw mouse-look* is on,
+    SWTOR on Mac's build of its Mac driver, `winemac.so` and the PE sides
+    `x86_64-windows/winemac.drv`, `i386-windows/winemac.drv`; the engine's own files are kept
+    as `<name>.stock`)
   - `frameworks/` – only in installs of 0.0.x: the old engine's libraries (removed by the
     Reinstall that upgrades it); `upgrade-backup/` – only while that Reinstall runs
   - `prefix/` – the game's Wine prefix: an APFS clone of Broadsword's, updated for the engine,
@@ -336,7 +369,8 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
 - `winetemp-…/wine` (or `winetemp-…/swtor.exe`) in your per-user temporary folder
   (`$TMPDIR`) – the Game Mode link, made at each game start
 - `~/Library/Logs/SWTOR on Mac/` – `install.log`, `watch.log`, and per game start `wine.log`
-  (d9mt warnings), `hold.log`, `launch-env.txt`, `effective-env.txt`
+  (d9mt warnings), `hold.log` (also a line per Wine start that is not the game: its time,
+  the command's first word and who started it), `launch-env.txt`, `effective-env.txt`
 
 ### Removing it by hand
 
@@ -379,10 +413,13 @@ game (`swtor.exe`) it also:
   to `wine.log` instead of the launcher's pipe;
 - runs `hold-launcher`: the launcher quits ~30 s after starting the game, and its exit takes the
   engine's wineserver with it, so the launcher is hidden and frozen (SIGSTOP) until the game
-  exits, then resumed to finish quitting. It waits in kqueue: nothing polls. Once the launcher
-  has quit (within 2 minutes of the game), it ends the engine's Wine session
-  (`wineserver -k`), waits up to 10 s for its wineserver to go, and then ends whatever is left
-  of the engine, each logged in `hold.log`;
+  exits, then resumed to finish quitting. It waits in kqueue: nothing polls while the game
+  runs. Once the launcher has quit (within 2 minutes of the game), it ends the engine's Wine
+  session (`wineserver -k`). Broadsword's `mac_wine` (its helper for the registry token) can
+  outlive the launcher, and each of its Wine calls brings the engine's wineserver back; so for
+  at most 30 s, every half second, it waits while a `mac_wine` has a Wine call running (a live
+  child; never touching it or its call, and not waiting for an idle one), ends the session
+  again whenever a wineserver is back, and stops once none has been seen for 3 s. Then it ends whatever is left of the engine, each logged in `hold.log`;
 - links the name CrossOver's ntdll starts the game from to `gamemode/SWTOR.app`, a bundle
   with `LSSupportsGameMode` around an identical clone of the engine's loader
   (`lib/wine/x86_64-unix/wine`; the engine has no `wine-preloader`) and a link to its
@@ -393,14 +430,16 @@ game (`swtor.exe`) it also:
   command and logs it in `gamemode.log`);
 - sets `WINE_COMPATDB` for the engine's compatdb (its per-process choice of Direct3D
   backends): DXGI stays on wined3d, so neither Apple's D3DMetal nor the DXMT tree with its own
-  winemetal is used next to d9mt's bridge.
+  winemetal is used next to d9mt's bridge;
+- with Debug Logging on, sets `WINEDEBUG` to `SWTOR_GAME_WINEDEBUG` (the Mac driver's
+  `THREADCPU` and `RAWMOUSE` lines, game only).
 
 Leftover Wine processes are processes of SWTOR on Mac's engine (its loader, or CrossOver's
 `winetemp-<inode>-…` hard links of it, found by their real executable: Wine 11 shows
 `C:\…\name.exe` in `ps`) while no wineserver of the engine runs: what is left of
 a session whose server is gone, such as a `winedevice.exe` that would wait forever. They don't
 block anything: the window says so and offers **End Leftover Wine Processes**, and Install,
-Uninstall and the Retina setting end them first (logged in `install.log`). The launcher, the
+Uninstall and the settings in the prefix's registry end them first (logged in `install.log`). The launcher, the
 game, Broadsword's Wine or a running Wine session of the engine (its wineserver) do block
 those; the window says which, and the buttons say why when clicked. The window looks again
 when it becomes active and when the launcher or the game quits.
@@ -431,11 +470,14 @@ official install and runs install, the settings, reinstall, the wrapper's update
 stub engine and a local feed), a simulated launcher update and the launchd job's repair (run as
 launchd would), leftover Wine processes (dummy programs under the sandbox engine: what
 `status` reports, that only they end, from `end-leftovers`, install, uninstall, the wrapper and
-`hold-launcher` after a fake launcher and game, and never while a wineserver runs), a failed
-install, Collect Logs, what Play SWTOR would open, *Game keys by keyboard position* (the Mac
-driver and the registry value, and what the game sees: a probe program run as `swtor.exe`
-with Czech, German and US layouts, picked through the driver's `WINEMAC_TEST_KEYBOARD_LAYOUT`
-test hook without changing the Mac's input source), the conflict cases and uninstall end to end, checking that uninstall
+`hold-launcher` after a fake launcher and game, also with a fake `mac_wine` that outlives the
+launcher and a wineserver that comes back, and never while a wineserver runs), a failed
+install, Collect Logs, what Play SWTOR would open, *Game keys by keyboard position* and *Raw
+mouse-look* (the Mac driver's three files and the registry values, and what the game sees: a
+probe program run as `swtor.exe` with Czech, German and US layouts, picked through the
+driver's `WINEMAC_TEST_KEYBOARD_LAYOUT` test hook without changing the Mac's input source; the
+app's PE side with the engine's own unix side, as an older installer leaves them), the
+conflict cases and uninstall end to end, checking that uninstall
 restores Broadsword's folder byte for byte, copies the game settings back and that no Wine
 process is left behind. With an older app (`OLD_APP`, default `release/0.0.6`) it then tests the
 way from 0.0.6 and back: a 0.0.6 install upgraded (a failed upgrade rolled back first: engine,
@@ -464,13 +506,18 @@ local feed, as in SWGL on Mac.
   `.github/workflows/release.yml` signs and notarizes on a `v*` tag. Both build on GitHub's
   `xcode-27` image (macOS 27 with Xcode 27, a public preview; there is no `macos-27` label).
 
-- `scripts/build-winemac.sh` builds Wine's Mac driver (`winemac.so`, x86_64) from the sources
-  the engine is built from (athei/wine at the commit athei/wine-build's release names, pinned
-  sha256; configured like athei's build; the engine download pinned in `src/som.sh` for
-  linking) with `patches/winemac-physical-keys.patch` into `prebuilt/winemac`, together with an
-  unpatched build: `scripts/winemac-compare.py` checks that one against the engine's own file
-  and that the patch changes only the keyboard functions and the option (Xcode, Rosetta,
-  Homebrew bison; llvm-mingw pinned as in athei's build). The build is reproducible.
+- `scripts/build-winemac.sh` builds Wine's Mac driver (`winemac.so`, x86_64, and its PE sides
+  `x86_64-windows/` and `i386-windows/winemac.drv`) from the sources the engine is built from
+  (athei/wine at the commit athei/wine-build's release names, pinned sha256; configured like
+  athei's build; the engine download pinned in `src/som.sh` for linking) with
+  `patches/winemac-physical-keys.patch`, SWGL on Mac's `winemac-swgl-relative-mouse.patch` and
+  `winemac-swgl-input-thread.patch` (unchanged copies) and `winemac-swtor-mouse.patch`, in that
+  order, into `prebuilt/winemac`, together with an unpatched build: `scripts/winemac-compare.py`
+  checks that one against the engine's own `winemac.so` and that the patches change only the
+  keyboard and mouse functions and the options; the PE sides are checked by their imports and
+  sections. It also refuses if a patch hides the cursor by turning it off (`[NSCursor hide]`),
+  which would cost Direct presentation (Xcode, Rosetta, Homebrew bison; llvm-mingw pinned as in
+  athei's build). The build is reproducible (the PE sides without their debug info).
 
 `prebuilt/` holds the d9mt binaries and the Mac driver, so `build.sh` works from a fresh clone. Build outputs
 (`dist/`, `release/`) are not committed; DMGs, deltas and `appcast.xml` are release assets.
@@ -507,7 +554,7 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 |---|---|---|
 | Wine engine `cx-26.3.0-8` (CrossOver 26.3, Wine 11.0, x86_64 WoW64; the one SWGL on Mac uses) | [athei/wine-build cx-26.3.0-8](https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
 | Sparkle 2.10.0 (bundled) | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
-| d9mt `68c7190` (bundled, `prebuilt/d9mt`) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/68c7190d670d199227513b02a792ecbad5e43571) | see `prebuilt/d9mt` |
+| d9mt `92ce8d3` (bundled, `prebuilt/d9mt`; branch `feat/pace-stats`, main `68c7190` plus the PACE line) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/92ce8d30f6a815253deb4198b0fc3fa3cf5b641f) | see `prebuilt/d9mt` |
 | The engine's Wine sources (for the Mac driver, `prebuilt/winemac`): athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0) (codeload tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006 (only for configuring that build) | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
@@ -525,10 +572,16 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
   [athei/wine-build](https://github.com/athei/wine-build) (the components it bundles are listed
   in its releases); the engine is downloaded from that release at install time, not
   redistributed.
-- Wine's Mac driver (`winemac.so`, LGPL-2.1-or-later), built from the engine's Wine sources
-  (athei/wine, CrossOver 26.3) with SWTOR on Mac's patch for *Game keys by keyboard position*
-  ([`patches/winemac-physical-keys.patch`](patches/winemac-physical-keys.patch), by Jan Drlý):
-  bundled in the app, with Wine's license and the patch under `Resources/Licenses/winemac`.
+- Wine's Mac driver (`winemac.so` and its PE sides, LGPL-2.1-or-later), built from the
+  engine's Wine sources (athei/wine, CrossOver 26.3) with SWTOR on Mac's patch for *Game keys
+  by keyboard position*
+  ([`patches/winemac-physical-keys.patch`](patches/winemac-physical-keys.patch), by Jan Drlý),
+  SWGL on Mac's two mouse-look patches
+  ([`winemac-swgl-relative-mouse.patch`](patches/winemac-swgl-relative-mouse.patch),
+  [`winemac-swgl-input-thread.patch`](patches/winemac-swgl-input-thread.patch), by Jan Drlý)
+  and SWTOR on Mac's changes to them for *Raw mouse-look*
+  ([`patches/winemac-swtor-mouse.patch`](patches/winemac-swtor-mouse.patch)): bundled in the
+  app, with Wine's license and the patches under `Resources/Licenses/winemac`.
 - [Sparkle](https://sparkle-project.org) for app updates (MIT, with bsdiff and other notices;
   in the app under `Resources/Licenses/sparkle`).
 - Built after the example of [SWGL on Mac](https://github.com/jdrly/swgl-on-mac).
@@ -538,8 +591,7 @@ What the app bundles and what it downloads at install time, with their licenses:
 
 ## License
 
-The code in this repository is under the [zlib license](LICENSE), except
-`patches/winemac-physical-keys.patch`, a change to Wine and so under Wine's
-LGPL-2.1-or-later. The files in `prebuilt/` and everything the build or the installer downloads
+The code in this repository is under the [zlib license](LICENSE), except the patches in
+`patches/` (`winemac-*.patch`), changes to Wine and so under Wine's LGPL-2.1-or-later. The files in `prebuilt/` and everything the build or the installer downloads
 keep their own licenses (see above; d9mt's are in `prebuilt/d9mt`, the Mac driver's in
 `prebuilt/winemac`).

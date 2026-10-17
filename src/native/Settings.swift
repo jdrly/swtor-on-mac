@@ -1,8 +1,9 @@
 // The Settings window (SWTOR on Mac > Settings…, ⌘,), only while SWTOR on Mac is installed:
 // a sidebar of panes (SettingsPane), the selected one's settings next to it.
 // Reads and changes the settings through Resources/som.sh (`settings`, `set <key> <value>`),
-// which keeps them in settings.conf and writes the env file, dxvk.conf, the prefix's
-// RetinaMode and PhysicalKeyboard and the engine's Mac driver from it. They take effect the
+// which keeps them in settings.conf and writes the env file, dxvk.conf, the prefix's Mac
+// driver options (RetinaMode, PhysicalKeyboard, raw mouse-look and its speed) and the engine's
+// Mac driver from it. They take effect the
 // next time the game starts. "Quit SWTOR on Mac after launching" is the app's own
 // (UserDefaults).
 
@@ -86,6 +87,13 @@ final class GameSettings {
     Binding(get: { self.values["memory"] ?? "auto" }, set: { self.set("memory", $0) })
   }
 
+  // Mouse-Look Speed: a factor on the macOS pointer's speed (som.sh MOUSE_SPEEDS)
+  static let mouseSpeeds = ["0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.5", "3"]
+
+  var mouseSpeed: Binding<String> {
+    Binding(get: { self.values["mousespeed"] ?? "1" }, set: { self.set("mousespeed", $0) })
+  }
+
   private func set(_ key: String, _ value: String) {
     let previous = values[key]
     values[key] = value
@@ -111,7 +119,7 @@ final class GameSettings {
 // engine) is a case here, its title and symbol, whether it changes the game, and its sections
 // in SettingsView.sections(for:).
 enum SettingsPane: String, CaseIterable, Identifiable {
-  case graphics, game, keyboard, playButton, updates, troubleshooting
+  case graphics, game, keyboard, mouse, playButton, updates, troubleshooting
 
   var id: Self { self }
 
@@ -120,6 +128,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case .graphics: "Graphics"
     case .game: "Game"
     case .keyboard: "Keyboard"
+    case .mouse: "Mouse"
     case .playButton: "Play Button"
     case .updates: "Updates"
     case .troubleshooting: "Troubleshooting"
@@ -131,6 +140,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case .graphics: "sparkles.tv"
     case .game: "gamecontroller"
     case .keyboard: "keyboard"
+    case .mouse: "computermouse"
     case .playButton: "play.circle"
     case .updates: "arrow.down.circle"
     case .troubleshooting: "stethoscope"
@@ -141,7 +151,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
   // preference, and not Updates, which Sparkle follows at once)
   var appliesAtNextGameStart: Bool {
     switch self {
-    case .graphics, .game, .keyboard, .troubleshooting: true
+    case .graphics, .game, .keyboard, .mouse, .troubleshooting: true
     case .playButton, .updates: false
     }
   }
@@ -277,6 +287,32 @@ struct SettingsView: View {
         }
       }
 
+    case .mouse:
+      Section {
+        Toggle(isOn: settings.toggle("rawmouse")) {
+          Text("Raw mouse-look")
+          Text(settings.running
+               ? gameRunningNote
+               : "While you hold a mouse button to turn the camera, the game gets every movement of "
+                 + "the mouse as it happens, straight from the mouse, instead of once per screen "
+                 + "refresh, and the pointer stays put. Turn it off to compare with the previous "
+                 + "behavior.")
+        }
+        .disabled(settings.running)
+        Picker(selection: settings.mouseSpeed) {
+          ForEach(GameSettings.mouseSpeeds, id: \.self) { speed in
+            Text(speed == "1" ? "1× (as fast as the pointer)" : "\(speed)×").tag(speed)
+          }
+        } label: {
+          Text("Mouse-Look Speed")
+          Text(settings.running
+               ? gameRunningNote
+               : "How fast the camera turns with raw mouse-look, compared with your pointer speed "
+                 + "in System Settings. The game's own mouse sensitivity applies on top.")
+        }
+        .disabled(settings.running || settings.values["rawmouse"] != "on")
+      }
+
     case .playButton:
       Section {
         Toggle(isOn: $quitAfterLaunch) {
@@ -310,8 +346,9 @@ struct SettingsView: View {
           Text("Debug Logging")
           #if SWTOR_DEV
           Text("On by default in development builds: d9mt logs frame times, hitches, render-pass and "
-               + "memory statistics for the test session (scripts/session-report.sh, Collect Logs). "
-               + "Costs a little performance.")
+               + "memory statistics, the Mac driver the game's CPU time per thread and raw mouse-look "
+               + "statistics, for the test session (scripts/session-report.sh, Collect Logs). Costs a "
+               + "little performance.")
           #else
           Text("Much more detailed d9mt logs (timings, memory statistics) for bug reports, at some "
                + "cost in performance. Turn it on only when asked to, and off again afterwards.")

@@ -10,20 +10,28 @@ LC_FUNCTION_STARTS) and the registry option names (UTF-16 strings).
 Stock vs patched (does the patch change only what it should?): every function by name with
 its code size, from the local symbols both rebuilds still have.
 Exits non-zero if the stock rebuild does not match the engine's file in exports, libraries,
-ObjC methods or options, or if the patch changes anything outside the keyboard code and
-option parsing.
+ObjC methods or options, or if the patches change anything outside the keyboard code, the
+mouse and cursor code (the mouse patches) and option parsing.
 """
 import bisect
 import re
 import subprocess
 import sys
 
-OPTIONS = ("CursorClippingLocksWindows", "RetinaMode", "PhysicalKeyboard")
-# what the patch may change: keyboard.c, the option parsing (setup_options, inlined into
-# macdrv_init), the test hook in cocoa_app.m (a block)
+OPTIONS = ("CursorClippingLocksWindows", "RetinaMode", "PhysicalKeyboard", "RawMouseWhenCursorHidden",
+           "RawMouseMatchPointerSpeed")
+# what the patches may change: keyboard.c, the option parsing (setup_options, inlined into
+# macdrv_init), the test hook in cocoa_app.m (a block); the mouse patches: mouse.c, the
+# cursor functions of cocoa_app.m, mouse event bookkeeping in cocoa_event.m, the unix call
+# table's new entry and the init handshake (wow64_init), the blocks of those files, and the
+# static inline CoreGraphics helpers (one more copy where the patches use them)
 ALLOWED = re.compile(r"^(_macdrv_compute_keyboard_layout|_macdrv_GetKeyNameText|_macdrv_MapVirtualKeyEx|_us_key_char"
                      r"|_setup_options|_macdrv_init|_macdrv_get_input_source_info"
-                     r"|___macdrv_get_input_source_info_block_invoke)$")
+                     r"|___macdrv_get_input_source_info_block_invoke"
+                     r"|_send_mouse_input|_macdrv_(Get|Set)CursorPos|_macdrv_mouse_\w+|_macdrv_(create|release)_event"
+                     r"|_macdrv_\w*(raw|cursor|mouse|game_controller)\w*|_\w*(raw_mouse|raw_moves|thread_cpu|gc_calib|gc_mouse)\w*"
+                     r"|_find_wineserver|_is_mouse_event_type|_wow64_init|_CG(Rect|Point|Size)\w+"
+                     r"|___macdrv_(set_cursor_position|get_cursor_position|clip_cursor)_block_invoke(_\d+)?)$")
 
 
 def run(*args):
@@ -98,8 +106,9 @@ if set(r) != set(s):
     problems.append(f"ObjC methods differ: {sorted(set(r) ^ set(s))}")
 if ref["options"] != stock["options"]:
     problems.append("registry options differ between the engine and the stock rebuild")
-if not patched["options"]["PhysicalKeyboard"]:
-    problems.append("the patched build has no PhysicalKeyboard option")
+for o in ("PhysicalKeyboard", "RawMouseWhenCursorHidden", "RawMouseMatchPointerSpeed"):
+    if not patched["options"][o]:
+        problems.append(f"the patched build has no {o} option")
 print("exports:", ref["exports"])
 print("imports only in engine:", sorted(ref["imports"] - stock["imports"]),
       "| only in stock:", sorted(stock["imports"] - ref["imports"]))
@@ -116,10 +125,10 @@ print("patched vs stock, ObjC methods changed:", [k for k in s if s[k] != p.get(
       "| imports changed:", sorted(stock["imports"] ^ patched["imports"]))
 outside = [k for k in changed if not ALLOWED.match(k)]
 if outside:
-    problems.append(f"the patch changes functions outside the keyboard code: {outside}")
+    problems.append(f"the patches change functions outside the keyboard and mouse code: {outside}")
 if not sf:
     problems.append("no local symbols in the rebuilds (compare before stripping)")
 if problems:
     print("PROBLEMS:", *problems, sep="\n  ")
     sys.exit(1)
-print("OK: the stock rebuild matches the engine's file; the patch changes only the keyboard code and options")
+print("OK: the stock rebuild matches the engine's file; the patches change only the keyboard and mouse code and options")

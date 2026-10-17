@@ -5,13 +5,14 @@
 #   som.sh install     install or update; idempotent, safe to run again
 #   som.sh uninstall   revert everything (the official install goes back to stock)
 #   som.sh settings    KEY=VALUE lines: the settings (Settings window) and whether they can change
-#   som.sh set K V     change one setting (retina, hud, gamemode, vsync, debug, physkeys: on/off;
-#                      memory: auto/low/medium/high/ultra/unlimited; updates: on/off)
+#   som.sh set K V     change one setting (retina, hud, gamemode, vsync, debug, physkeys,
+#                      rawmouse: on/off; memory: auto/low/medium/high/ultra/unlimited;
+#                      updates: on/off; mousespeed: one of MOUSE_SPEEDS)
 #   som.sh watch       the launchd job (cz.jandrly.swtoronmac.watch): Broadsword's Wine/bin
 #                      changed; hook the wrapper back in if a launcher update replaced it
 #   som.sh end-leftovers  end leftover Wine processes of the engine (only if no launcher,
-#                      game or Wine session runs); install, uninstall and set retina/physkeys do
-#                      it too
+#                      game or Wine session runs); install, uninstall and the settings in the
+#                      prefix's registry (retina, physkeys, rawmouse, mousespeed) do it too
 #
 # Environment:
 #   SWTOR_ON_MAC_ROOT=/abs/dir  sandbox for tests: the official install, the app's own files,
@@ -61,9 +62,12 @@ ENGINE_SHA256=1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d
 # two of its files, checked after unpacking (the known-good engine)
 ENGINE_LOADER_SHA256=2100dea802b2c560ba5d719c20ba1fcc1c8a09daf66580a4da6dd48e552d5a05
 ENGINE_NTDLL_SHA256=f1ca0f092c9435299bb06f2e6e9c92b52b4b0ab5016a42c1a4ce01ccc18c9f4a
-# its Mac driver (lib/wine/x86_64-unix/winemac.so): the app's patched build
-# (Resources/wine/winemac.so, scripts/build-winemac.sh) replaces only this one
+# its Mac driver (lib/wine/x86_64-unix/winemac.so and the PE sides lib/wine/x86_64-windows/
+# and i386-windows/winemac.drv): the app's patched build (Resources/wine/,
+# scripts/build-winemac.sh) replaces only these
 ENGINE_WINEMAC_SHA256=e0ed7ac7405c21ae5644370aec778ff333c8ef6c27e45e6dd739ee83ad422001
+ENGINE_WINEMAC_PE64_SHA256=eff4337246760e5752fe4bd19d729c860e8be0763f73f8787bb6543fcee9b43d
+ENGINE_WINEMAC_PE32_SHA256=2de18f69739238fa5c6e1c4e9def2c153a7d96dd8502019d39778dc47a103054
 # Its compatdb (the per-process Direct3D tree picker) defaults 64-bit processes to Apple's
 # D3DMetal for DXGI, and the DXMT tree it falls back to brings its own winemetal.dll, which
 # would not match d9mt's bridge. SWTOR is Direct3D 9 (d9mt from the prefix): DXGI stays on
@@ -337,24 +341,35 @@ status() {
 }
 
 # --- Settings (the app's Settings window): $SETTINGS holds them as key=value; the env file,
-# dxvk.conf, the prefix's RetinaMode and PhysicalKeyboard and the engine's Mac driver are made
+# dxvk.conf, the prefix's Mac driver options (RetinaMode; for swtor.exe PhysicalKeyboard,
+# RawMouseWhenCursorHidden, RawMouseGameControllerScale) and the engine's Mac driver are made
 # from it. They survive a reinstall.
-#   physkeys  "Game keys by keyboard position": the engine's Mac driver is the app's patched
-#             build (Resources/wine/winemac.so) and swtor.exe gets PhysicalKeyboard=y
-SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys"
+#   physkeys    "Game keys by keyboard position": swtor.exe gets PhysicalKeyboard=y
+#   rawmouse    "Raw mouse-look": swtor.exe gets RawMouseWhenCursorHidden=y (while the game
+#               hides the cursor: the mouse's own moves, from GCMouse, sent by the driver's
+#               input thread, the macOS cursor frozen; patches/winemac-swgl-*.patch)
+#   mousespeed  "Mouse-Look Speed": RawMouseGameControllerScale for swtor.exe, a factor on the
+#               macOS pointer's speed (1: as with SWTOR on Mac 0.0.x)
+# With physkeys or rawmouse on, the engine's Mac driver is the app's patched build
+# (Resources/wine/), else the engine's own (install_winemac).
+SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed"
+MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
 setting_default() {
   case "$1" in
-    retina|gamemode|vsync|updates) echo on ;;
+    retina|gamemode|vsync|updates|rawmouse) echo on ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     hud|physkeys) echo off ;;
     memory) echo auto ;;
+    mousespeed) echo 1 ;;
   esac
 }
 setting_valid() { # <key> <value>
   case "$1:$2" in
     retina:on|retina:off|hud:on|hud:off|gamemode:on|gamemode:off|vsync:on|vsync:off) return 0 ;;
     debug:on|debug:off|updates:on|updates:off|physkeys:on|physkeys:off) return 0 ;;
+    rawmouse:on|rawmouse:off) return 0 ;;
     memory:auto|memory:low|memory:medium|memory:high|memory:ultra|memory:unlimited) return 0 ;;
+    mousespeed:*) case " $MOUSE_SPEEDS " in *" $2 "*) [ -n "$2" ] && return 0 ;; esac ;;
   esac
   return 1
 }
@@ -435,7 +450,7 @@ cmd_set() {
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
   log "---- set $key=$value"
   case "$key" in
-    retina|physkeys)
+    retina|physkeys|rawmouse|mousespeed)
       # Wine keeps the registry in its wineserver and writes it back on exit
       end_leftovers
       ! running_now || die "Quit the SWTOR launcher and the game to change $([ "$key" = retina ] && echo "Retina mode" || echo "this setting")." ;;
@@ -445,8 +460,12 @@ cmd_set() {
   case "$key" in
     retina) set_reg 'Software\\Wine\\Mac Driver' RetinaMode "$([ "$value" = on ] && echo y || echo n)" ;;
     physkeys)
-      install_winemac "$value"
+      install_winemac "$(winemac_wanted physkeys "$value")"
       set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' PhysicalKeyboard "$([ "$value" = on ] && echo y || echo n)" ;;
+    rawmouse)
+      install_winemac "$(winemac_wanted rawmouse "$value")"
+      set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' RawMouseWhenCursorHidden "$([ "$value" = on ] && echo y || echo n)" ;;
+    mousespeed) set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' RawMouseGameControllerScale "$value" ;;
   esac
   write_settings "$key" "$value"
   write_env >/dev/null
@@ -594,37 +613,65 @@ install_engine() {
   say "Installing the d9mt bridge (winemetal) into the engine"
   copy_atomic "$RES/d9mt/winemetal.so" "$w/x86_64-unix/winemetal.so" 755
   copy_atomic "$RES/d9mt/winemetal.dll" "$w/x86_64-windows/winemetal.dll" 644
-  install_winemac "$(setting physkeys)"
+  install_winemac "$(winemac_wanted)"
 }
 
-# install_winemac <on|off>: the engine's Mac driver (lib/wine/x86_64-unix/winemac.so). On
-# ("Game keys by keyboard position"): the app's build of it with the PhysicalKeyboard option
-# (Resources/wine/winemac.so, patches/winemac-physical-keys.patch in the repository); off: the
-# engine's own, kept next to it as winemac.so.stock. Only over the engine build the patched
-# one was made from (ENGINE_WINEMAC_SHA256), so another engine never gets a mismatched driver.
+# winemac_wanted [<key> <value>]: on if the engine needs the app's Mac driver (game keys by
+# keyboard position or raw mouse-look on; <key> about to be set to <value>), else off
+winemac_wanted() {
+  local pk rm
+  pk=$(setting physkeys) rm=$(setting rawmouse)
+  case "${1:-}" in physkeys) pk=$2 ;; rawmouse) rm=$2 ;; esac
+  if [ "$pk" = on ] || [ "$rm" = on ]; then echo on; else echo off; fi
+}
+
+# The engine's Mac driver, three files that go together (the PE sides start the raw mouse
+# input thread of the unix side): <path in lib/wine> <the engine's sha256> <mode>
+WINEMAC_FILES="x86_64-unix/winemac.so:$ENGINE_WINEMAC_SHA256:755
+x86_64-windows/winemac.drv:$ENGINE_WINEMAC_PE64_SHA256:644
+i386-windows/winemac.drv:$ENGINE_WINEMAC_PE32_SHA256:644"
+
+# install_winemac <on|off>: the engine's Mac driver. On: the app's build of it
+# (Resources/wine/: winemac.so, x86_64-windows/ and i386-windows/winemac.drv; scripts/
+# build-winemac.sh with patches/ in the repository: the PhysicalKeyboard and raw mouse-look
+# options, both off unless the prefix turns them on); off: the engine's own files, kept next
+# to them as <name>.stock. Only over the engine build the patched one was made from
+# (ENGINE_WINEMAC_*SHA256), so another engine never gets a mismatched driver. The PE sides go
+# first when switching to the app's build and last when switching back (a PE side of the
+# app's build only uses what the unix side says it has, see patches/winemac-swtor-mouse.patch).
 install_winemac() {
-  local u="$ENG/lib/wine/x86_64-unix" src
-  if [ -n "$DRY" ]; then echo "[dry-run] engine's Mac driver: $([ "$1" = on ] && echo "the app's (PhysicalKeyboard)" || echo "the engine's own")"; return; fi
-  if [ ! -f "$u/winemac.so.stock" ]; then
-    [ "$(sha256 "$u/winemac.so")" = "$ENGINE_WINEMAC_SHA256" ] ||
-      die "The Wine engine's Mac driver (winemac.so) is not the expected build. Uninstall SWTOR on Mac and install it again."
-    run cp -p "$u/winemac.so" "$u/winemac.so.stock"
-  fi
-  [ "$(sha256 "$u/winemac.so.stock")" = "$ENGINE_WINEMAC_SHA256" ] ||
-    die "The Wine engine's copy of its Mac driver (winemac.so.stock) is damaged. Uninstall SWTOR on Mac and install it again."
+  local w="$ENG/lib/wine" e f sha mode src order
+  if [ -n "$DRY" ]; then echo "[dry-run] engine's Mac driver: $([ "$1" = on ] && echo "the app's" || echo "the engine's own")"; return; fi
+  for e in $WINEMAC_FILES; do
+    f=${e%%:*} sha=${e#*:} sha=${sha%%:*}
+    if [ ! -f "$w/$f.stock" ]; then
+      [ "$(sha256 "$w/$f")" = "$sha" ] ||
+        die "The Wine engine's Mac driver ($f) is not the expected build. Uninstall SWTOR on Mac and install it again."
+      run cp -p "$w/$f" "$w/$f.stock"
+    fi
+    [ "$(sha256 "$w/$f.stock")" = "$sha" ] ||
+      die "The Wine engine's copy of its Mac driver ($f.stock) is damaged. Uninstall SWTOR on Mac and install it again."
+  done
   if [ "$1" = on ]; then
-    src="$RES/wine/winemac.so"
-    [ -f "$src" ] || die "This app has no Mac driver build ($src)."
-    say "Installing the Mac driver with game keys by keyboard position (winemac.so) into the engine"
+    for e in $WINEMAC_FILES; do
+      f=${e%%:*}
+      [ -f "$RES/wine/${f#x86_64-unix/}" ] || die "This app has no Mac driver build ($RES/wine/${f#x86_64-unix/})."
+    done
+    say "Installing the app's Mac driver (game keys by keyboard position, raw mouse-look) into the engine"
+    order="x86_64-windows/winemac.drv i386-windows/winemac.drv x86_64-unix/winemac.so"
   else
-    src="$u/winemac.so.stock"
-    say "Using the engine's own Mac driver (winemac.so)"
+    say "Using the engine's own Mac driver"
+    order="x86_64-unix/winemac.so x86_64-windows/winemac.drv i386-windows/winemac.drv"
   fi
-  cmp -s "$src" "$u/winemac.so" || copy_atomic "$src" "$u/winemac.so" 755
+  for f in $order; do
+    mode=$(printf '%s\n' "$WINEMAC_FILES" | awk -F: -v f="$f" '$1 == f { print $3 }')
+    if [ "$1" = on ]; then src="$RES/wine/${f#x86_64-unix/}"; else src="$w/$f.stock"; fi
+    cmp -s "$src" "$w/$f" || copy_atomic "$src" "$w/$f" "$mode"
+  done
   # the manifest says which (written by install; a settings change updates it)
   if [ -f "$MANIFEST" ]; then
-    plutil -replace winemac -string "$([ "$1" = on ] && echo physical-keys || echo stock)" "$MANIFEST"
-    plutil -replace winemac_sha256 -string "$(sha256 "$u/winemac.so")" "$MANIFEST"
+    plutil -replace winemac -string "$([ "$1" = on ] && echo app || echo stock)" "$MANIFEST"
+    plutil -replace winemac_sha256 -string "$(sha256 "$w/x86_64-unix/winemac.so")" "$MANIFEST"
   fi
 }
 
@@ -677,10 +724,13 @@ install_prefix() {
   fi
   say "Updating the prefix for the new engine (wineboot, about a minute)"
   wine_do wineboot -u || { stop_wine; die "Wine could not set up the prefix (details in $LOGS/install.log)."; }
-  say "Setting Wine options: Retina mode, mouse-look fix, game keys by position, d9mt for swtor.exe"
+  say "Setting Wine options: Retina mode, mouse-look fix, game keys by position, raw mouse-look and its speed, d9mt for swtor.exe"
   wine_do reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d "$([ "$(setting retina)" = on ] && echo y || echo n)" /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\X11 Driver' /v GrabPointer /t REG_SZ /d n /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v PhysicalKeyboard /t REG_SZ /d "$([ "$(setting physkeys)" = on ] && echo y || echo n)" /f &&
+    wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v RawMouseWhenCursorHidden /t REG_SZ /d "$([ "$(setting rawmouse)" = on ] && echo y || echo n)" /f &&
+    wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v RawMouseGameControllerScale /t REG_SZ /d "$(setting mousespeed)" /f &&
+    wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v ThreadCpuStats /t REG_SZ /d y /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\DllOverrides' /v d3d9 /t REG_SZ /d native,builtin /f ||
     { stop_wine; die "Wine could not write the settings (details in $LOGS/install.log)."; }
   stop_wine
@@ -770,7 +820,12 @@ D9MT_PROFILE=1
 D9MT_MEMSTATS=1
 # d9mt's live debug flags, read once a second while the game runs: $D9MT_FLAGS_FILE
 # (one flag per line, # comments; the file lists them)
-D9MT_DEBUG_FILE='C:\\d9mt\\flags.txt'"
+D9MT_DEBUG_FILE='C:\\d9mt\\flags.txt'
+# Wine debug output of the game (the wrapper uses it for swtor.exe only): RAWMOUSE (raw
+# mouse-look, once a second while it moves) and THREADCPU (CPU time of the game's busiest
+# threads and of the wineserver, once a second; ThreadCpuStats=y for swtor.exe in the prefix,
+# so not from the session's other processes) from the app's Mac driver
+SWTOR_GAME_WINEDEBUG=-all,warn+rawmouse,warn+threadcpu"
     write_d9mt_flags
   else
     dbg="# d9mt's own warnings and errors only (cheap); Debug logging in Settings adds more
@@ -923,7 +978,7 @@ write_manifest() {
   "engine_id": "$ENGINE_ID",
   "engine": "$ENGINE_NAME",
   "engine_sha256": "$ENGINE_SHA256",
-  "winemac": "$([ "$(setting physkeys)" = on ] && echo physical-keys || echo stock)",
+  "winemac": "$([ "$(winemac_wanted)" = on ] && echo app || echo stock)",
   "winemac_sha256": "$([ -n "$DRY" ] || sha256 "$ENG/lib/wine/x86_64-unix/winemac.so")",
   "broadsword_wine": "$BS_WINE",
   "previous_wrapper": "$WRAPPER_STATE",

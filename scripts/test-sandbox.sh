@@ -302,12 +302,30 @@ check "install: d9mt d3d9.dll" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$
 check "install: Wine's d3d9 kept ($(dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=20 2>/dev/null))" eval 'dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=20 2>/dev/null | grep -q -e "Wine builtin" -e "Wine placeholder"'
 check "install: RetinaMode=y" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
 WM="$SOM/engine/lib/wine/x86_64-unix"
+WL="$SOM/engine/lib/wine"
 WM_STOCK=$(sed -n 's/^ENGINE_WINEMAC_SHA256=//p' "$SOMSH")
+WM_STOCK64=$(sed -n 's/^ENGINE_WINEMAC_PE64_SHA256=//p' "$SOMSH")
+WM_STOCK32=$(sed -n 's/^ENGINE_WINEMAC_PE32_SHA256=//p' "$SOMSH")
 wm_sha() { shasum -a 256 "$WM/winemac.so" | cut -d" " -f1; }
-check "install: engine's own Mac driver (game keys by position off)" test "$(wm_sha)" = "$WM_STOCK"
-check "install: Mac driver kept as winemac.so.stock" cmp -s "$WM/winemac.so" "$WM/winemac.so.stock"
+# the engine's Mac driver, all three files: the app's build (app) or the engine's own (stock)
+wm_is() {
+  local r="$APP/Contents/Resources/wine"
+  if [ "$1" = app ]; then
+    cmp -s "$r/winemac.so" "$WM/winemac.so" && cmp -s "$r/x86_64-windows/winemac.drv" "$WL/x86_64-windows/winemac.drv" &&
+      cmp -s "$r/i386-windows/winemac.drv" "$WL/i386-windows/winemac.drv"
+  else
+    test "$(wm_sha)" = "$WM_STOCK" && test "$(shasum -a 256 "$WL/x86_64-windows/winemac.drv" | cut -d" " -f1)" = "$WM_STOCK64" &&
+      test "$(shasum -a 256 "$WL/i386-windows/winemac.drv" | cut -d" " -f1)" = "$WM_STOCK32"
+  fi
+}
+check "install: the app's Mac driver, all three files (raw mouse-look on by default)" wm_is app
+check "install: the engine's own kept as .stock" eval 'test "$(shasum -a 256 "$WM/winemac.so.stock" | cut -d" " -f1)" = "$WM_STOCK" && test "$(shasum -a 256 "$WL/x86_64-windows/winemac.drv.stock" | cut -d" " -f1)" = "$WM_STOCK64" && test "$(shasum -a 256 "$WL/i386-windows/winemac.drv.stock" | cut -d" " -f1)" = "$WM_STOCK32"'
 check "install: PhysicalKeyboard=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="n"'
-check "install: manifest winemac stock" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = stock
+check "install: RawMouseWhenCursorHidden=y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"RawMouseWhenCursorHidden"="y"'
+check "install: RawMouseGameControllerScale=1" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"RawMouseGameControllerScale"="1"'
+check "install: ThreadCpuStats=y (THREADCPU lines from swtor.exe only)" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"ThreadCpuStats"="y"'
+check "install: no raw mouse-look for other programs" eval '! reg_has "Software\\\\Wine\\\\Mac Driver" "\"RawMouseWhenCursorHidden\"=\"y\""'
+check "install: manifest winemac app" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = app
 check "install: GrabPointer=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\X11 Driver' '"GrabPointer"="n"'
 check "install: d3d9 override" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\DllOverrides' '"d3d9"="native,builtin"'
 check "install: gamemode exe = engine loader" cmp -s "$SOM/engine/lib/wine/x86_64-unix/wine" "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe"
@@ -332,6 +350,7 @@ if [ "$CHANNEL" = dev ]; then
   check "install: Debug Logging on (development build)" eval 'grep -qx debug=on "$SOM/settings.conf" && grep -qx D9MT_PROFILE=1 "$SOM/env"'
   check "install: development defaults recorded" grep -qx "debug-on=$APPV" "$SOM/dev-defaults"
   check "install: d9mt flags file in the prefix (Debug Logging)" test -f "$SOM/prefix/drive_c/d9mt/flags.txt"
+  check "install: the game's Wine debug channels (Debug Logging)" grep -qx 'SWTOR_GAME_WINEDEBUG=-all,warn+rawmouse,warn+threadcpu' "$SOM/env"
 else
   check "install: env update check" grep -qx 'SWTOR_UPDATE_CHECK=1' "$SOM/env"
   check "install: Debug Logging off" grep -qx 'debug=off' "$SOM/settings.conf"
@@ -390,9 +409,22 @@ check "set hud: allowed while the launcher runs" eval 'som set hud off >/dev/nul
 kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true; rm -f "$BS_APP/Contents/MacOS/test-sleep2"
 som set retina on >/dev/null && check "set retina on again" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
 check "settings: physkeys off by default" test "$(som settings | sed -n 's/^physkeys=//p')" = off
-som set physkeys on >/dev/null && check "set physkeys on: the app's Mac driver" cmp -s "$APP/Contents/Resources/wine/winemac.so" "$WM/winemac.so"
+check "settings: rawmouse on, mousespeed 1 by default" test "$(som settings | sed -n 's/^rawmouse=//p')/$(som settings | sed -n 's/^mousespeed=//p')" = on/1
+som set rawmouse off >/dev/null && check "set rawmouse off (physkeys off): the engine's own Mac driver, all three files" wm_is stock
+check "set rawmouse off: RawMouseWhenCursorHidden=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"RawMouseWhenCursorHidden"="n"'
+check "set rawmouse off: manifest stock" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = stock
+som set physkeys on >/dev/null && check "set physkeys on: the app's Mac driver" wm_is app
 check "set physkeys on: PhysicalKeyboard=y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="y"'
-check "set physkeys on: manifest" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = physical-keys
+check "set physkeys on: manifest" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = app
+som set rawmouse on >/dev/null && check "set rawmouse on: the app's Mac driver stays" wm_is app
+check "set rawmouse on: RawMouseWhenCursorHidden=y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"RawMouseWhenCursorHidden"="y"'
+som set mousespeed 1.5 >/dev/null && check "set mousespeed 1.5" eval 'reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"RawMouseGameControllerScale\"=\"1.5\"" && grep -qx mousespeed=1.5 "$SOM/settings.conf"'
+check "set mousespeed: 4 refused" eval '! som set mousespeed 4 >/dev/null 2>&1'
+check "set mousespeed: empty refused" eval '! som set mousespeed "" >/dev/null 2>&1'
+out=$(sbx_wine reg query 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v RawMouseGameControllerScale 2>/dev/null | tr -d '\r' || true)
+cleanup_wine
+check "set mousespeed: Wine reads 1.5 ($(echo "$out" | awk '/RawMouseGameControllerScale/ { print $NF }'))" test "$(echo "$out" | awk '/RawMouseGameControllerScale/ { print $NF }')" = 1.5
+som set mousespeed 1 >/dev/null
 check "set physkeys on: manifest sha" test "$(plutil -extract winemac_sha256 raw -o - "$SOM/install-manifest.json")" = "$(wm_sha)"
 check "set physkeys on: RetinaMode kept" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
 out=$(sbx_wine reg query 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v PhysicalKeyboard 2>/dev/null | tr -d '\r' || true)
@@ -400,7 +432,9 @@ cleanup_wine
 check "set physkeys on: Wine reads y ($(echo "$out" | awk '/PhysicalKeyboard/ { print $NF }'))" test "$(echo "$out" | awk '/PhysicalKeyboard/ { print $NF }')" = y
 clang -o "$BS_APP/Contents/MacOS/test-sleep2" "$SANDBOX/sleep2.c" && { "$BS_APP/Contents/MacOS/test-sleep2" & sleeper=$!; sleep 0.5; }
 check "set physkeys: refused while the launcher runs" eval '! som set physkeys off >/dev/null 2>&1'
-check "set physkeys: driver unchanged while refused" cmp -s "$APP/Contents/Resources/wine/winemac.so" "$WM/winemac.so"
+check "set rawmouse: refused while the launcher runs" eval '! som set rawmouse off >/dev/null 2>&1'
+check "set mousespeed: refused while the launcher runs" eval '! som set mousespeed 2 >/dev/null 2>&1'
+check "set physkeys, rawmouse: driver unchanged while refused" wm_is app
 kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true; rm -f "$BS_APP/Contents/MacOS/test-sleep2"
 
 echo "== 4c. game keys by keyboard position: what the game sees (a probe program as swtor.exe)"
@@ -427,7 +461,10 @@ if command -v x86_64-w64-mingw32-gcc >/dev/null; then
   # the probes' Wine session ends by itself a few seconds later (wineserver's linger), as after
   # a game; until then the setting refuses (Wine keeps the registry in its wineserver)
   WINEPREFIX="$SOM/prefix" "$SOM/engine/bin/wineserver" -w 2>/dev/null || true
-  som set physkeys off >/dev/null && check "set physkeys off: the engine's own Mac driver" test "$(wm_sha)" = "$WM_STOCK"
+  som set physkeys off >/dev/null && check "set physkeys off (rawmouse on): the app's Mac driver stays" wm_is app
+  check "keys off, the app's driver: number row named by what the layout types" eval 'cur_app=$(probe ""); [ "$(line numrow-name "$cur_app")" = "$(line numrow-plain "$cur_app")" ]'
+  WINEPREFIX="$SOM/prefix" "$SOM/engine/bin/wineserver" -w 2>/dev/null || true
+  som set rawmouse off >/dev/null && check "set rawmouse off too: the engine's own Mac driver" wm_is stock
   check "set physkeys off: PhysicalKeyboard=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="n"'
   # the engine's own driver has no test hook: the Mac's current layout only
   cur_off=$(probe "")
@@ -435,8 +472,17 @@ if command -v x86_64-w64-mingw32-gcc >/dev/null; then
   echo "  current layout, on:  names $(line numrow-name "$cur") | typed $(line numrow-plain "$cur") | Shift $(line numrow-shift "$cur")"
   check "keys off: number row named by what the layout types (Wine's own)" test "$(line numrow-name "$cur_off")" = "$(line numrow-plain "$cur_off")"
   check "keys off and on: the same text" test "$(line numrow-plain "$cur_off")/$(line numrow-shift "$cur_off")" = "$(line numrow-plain "$cur")/$(line numrow-shift "$cur")"
+  # The PE side of the app's driver with the engine's own unix side (what an installer that
+  # swaps only winemac.so, 0.1.0-dev.1's, leaves after a downgrade): the input thread is not
+  # started (it would call a unix function the old side lacks), and the driver works
+  WINEPREFIX="$SOM/prefix" "$SOM/engine/bin/wineserver" -w 2>/dev/null || true
+  cp "$APP/Contents/Resources/wine/x86_64-windows/winemac.drv" "$WL/x86_64-windows/winemac.drv"
+  mixed=$(probe "")
+  check "the app's PE side, the engine's unix side: the driver works" test "$(line numrow-plain "$mixed")" = "$(line numrow-plain "$cur_off")"
+  cp "$WL/x86_64-windows/winemac.drv.stock" "$WL/x86_64-windows/winemac.drv"
   cleanup_wine
   check "keyboard probe: no Wine left running" test -z "$(sandbox_wine)"
+  som set rawmouse on >/dev/null
   som set physkeys on >/dev/null
 else
   echo "  (skipped: no x86_64-w64-mingw32-gcc for the probe program)"
@@ -458,10 +504,11 @@ check "reinstall: no Wine left running" test -z "$(sandbox_wine)"
 check "reinstall: settings kept" eval 'grep -qx memory=high "$SOM/settings.conf" && grep -qx D9MT_MEMORY_PROFILE=high "$SOM/env" && grep -qx DXVK_LOG_LEVEL=info "$SOM/env"'
 check "reinstall: vsync stays off" eval '! grep -q "^d3d9.presentInterval" "$SOM/dxvk.conf"'
 check "reinstall: Retina stays on" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
-check "reinstall: the app's Mac driver stays" cmp -s "$APP/Contents/Resources/wine/winemac.so" "$WM/winemac.so"
+check "reinstall: the app's Mac driver stays" wm_is app
 check "reinstall: PhysicalKeyboard stays y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="y"'
-check "reinstall: manifest winemac physical-keys" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = physical-keys
-som set physkeys off >/dev/null && check "set physkeys off again: stock driver" test "$(wm_sha)" = "$WM_STOCK"
+check "reinstall: RawMouseWhenCursorHidden stays y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"RawMouseWhenCursorHidden"="y"'
+check "reinstall: manifest winemac app" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = app
+som set physkeys off >/dev/null && check "set physkeys off again: the app's driver (raw mouse-look on)" wm_is app
 som set vsync on >/dev/null; som set debug off >/dev/null; som set memory auto >/dev/null
 som set gamemode on >/dev/null; som set updates on >/dev/null
 check "settings: back to the defaults" test "$(som settings | sed -n 's/^debug=//p')" = off
@@ -524,6 +571,10 @@ t0=$SECONDS; game
 check "update check: offline is silent" test "$(wc -l <"$U/notifications.log")" = "$n" -a ! -e "$U/app/update-available"
 check "update check: the game does not wait ($((SECONDS - t0)) s incl. 1.5 s pause)" test $((SECONDS - t0)) -le 3
 check "update check: no account in the logs" eval '! grep -rq TESTACCOUNT "$U/logs"'
+check "wrapper: no start line for the game" eval '! grep -q "wine start: swtor.exe" "$U/logs/hold.log"'
+"$U/bin/wine64-preloader" "$U/bin/wine64" 'C:\windows\system32\reg.exe' add 'HKCU\Software\Broadsword' /v Token /d SECRETTOKEN >/dev/null 2>&1
+check "wrapper: one line per other Wine start, the command's first word" eval 'test "$(grep -c "wine start: reg.exe (parent $$ " "$U/logs/hold.log")" = 1'
+check "wrapper: nothing else of the command logged" eval '! grep -rq SECRETTOKEN "$U/logs"'
 
 echo "== 6d. hold-launcher ends what is left of the engine's Wine once the launcher quits (dummies)"
 T="$SANDBOX/hold-test"
@@ -589,6 +640,52 @@ check "hold: left the decoy alone" alive "$d7"
 check "hold: nothing of the engine left" test -z "$(ps -axww -o comm= | grep -F -e "$T/" -e "${TWT##*/}/")"
 kill "$sp" "$d7" 2>/dev/null || true
 pkill -f "$SANDBOX/decoy/" 2>/dev/null || true
+wait "$fl" 2>/dev/null || true
+
+echo "== 6e. hold-launcher after the launcher quit: Broadsword's mac_wine and a Wine call that comes back (dummies)"
+# The launcher's last Wine calls come from Broadsword's mac_wine, which outlives it: a dummy
+# mac_wine (its executable named like the real one) makes a Wine call (a child process) that
+# starts a session 2 s after the launcher quit, then exits a second later; another one stays,
+# idle, with its finished call unreaped (as seen with the real one); 7.5 s after the launcher
+# quit another Wine call brings a wineserver back. hold-launcher must wait for the busy
+# mac_wine only (and never touch either), end the session, end it again when it comes back,
+# and end the leftovers once it stays gone.
+MW="$T/Fake.app/Contents/MacOS/mac_wine"
+printf '#include <stdlib.h>\n#include <stdio.h>\n#include <sys/wait.h>\n#include <unistd.h>\nint main(void) {\n  if (getenv("MW_IDLE")) { if (fork() == 0) _exit(0); sleep(60); return 0; }\n  pid_t c = fork(); if (c == 0) { sleep(2); _exit(system(getenv("MW_CMD")) ? 1 : 0); }\n  int st; waitpid(c, &st, 0); sleep(1);\n  FILE *f = fopen(getenv("MW_DONE"), "w"); if (f) fclose(f); return 0; }\n' >"$T/macwine.c"
+clang -o "$MW" "$T/macwine.c"
+cat >"$T/after2.sh" <<AFTER
+#!/bin/bash
+( MW_IDLE=1 "$MW" </dev/null >/dev/null 2>&1 & echo \$! >"$T/mac_wine_idle.pid" )
+( MW_CMD='( FAKE_LINGER=3 "$TE/wineserver" </dev/null >/dev/null 2>&1 & ); ( "$TWT/winedevice.exe" </dev/null >/dev/null 2>&1 & echo \$! >"$T/orphan2.pid" )' \
+  MW_DONE="$T/mac_wine.done" "$MW" </dev/null >/dev/null 2>&1 & echo \$! >"$T/mac_wine.pid" )
+( sleep 7.5; FAKE_LINGER=3 "$TE/wineserver" </dev/null >/dev/null 2>&1 & ) </dev/null >/dev/null 2>&1 &
+AFTER
+chmod +x "$T/after2.sh"
+rm -f "$T/mac_wine.done" "$T/orphan2.pid" "$TE/ws.pid"
+: >"$T/logs/hold.log"
+t0=$SECONDS
+FAKE_AFTER="$T/after2.sh" SWTOR_ENGINE="$T/engine" WINEPREFIX="$T/prefix" "$FL" "$T/game.sh" </dev/null >/dev/null 2>&1 &
+fl=$!
+for _ in $(seq 60); do
+  grep -q -e 'ended leftover' -e 'no leftover' -e 'leaving the engine' "$T/logs/hold.log" 2>/dev/null && break
+  sleep 1
+done
+sleep 0.5
+echo "  (hold-launcher done after $((SECONDS - t0)) s)"
+sed 's/^/    hold.log: /' "$T/logs/hold.log"
+check "hold, mac_wine: waited for the mac_wine with a Wine call" grep -q 'mac_wine running a Wine call ([0-9]*): waiting for it' "$T/logs/hold.log"
+check "hold, mac_wine: not for the idle one" grep -q 'mac_wine running without a Wine call ([0-9]*): not waiting' "$T/logs/hold.log"
+check "hold, mac_wine: left mac_wine alone (it finished by itself)" test -f "$T/mac_wine.done"
+mwi=$(cat "$T/mac_wine_idle.pid" 2>/dev/null || echo 0)
+check "hold, mac_wine: left the idle mac_wine alone" alive "$mwi"
+kill "$mwi" 2>/dev/null || true
+check "hold, mac_wine: ended the session that came back" grep -q 'came back' "$T/logs/hold.log"
+check "hold, mac_wine: done once no wineserver for 3 s" grep -q 'no wineserver for 3.0 s' "$T/logs/hold.log"
+check "hold, mac_wine: no wineserver left" test -z "$(ps -axww -o comm= | grep -Fx "$TE/wineserver")"
+o2=$(cat "$T/orphan2.pid" 2>/dev/null || echo 0)
+check "hold, mac_wine: ended mac_wine's orphaned winedevice.exe" all_gone "$o2"
+check "hold, mac_wine: logged it" grep -q "ended leftover Wine process $o2 (winedevice.exe" "$T/logs/hold.log"
+check "hold, mac_wine: nothing of the engine left" test -z "$(ps -axww -o comm= | grep -F -e "$T/" -e "${TWT##*/}/")"
 wait "$fl" 2>/dev/null || true
 
 echo "== 6c. the launchd job (simulated: run as launchd would)"
@@ -769,6 +866,7 @@ if [ -x "$OLD_APP/Contents/Resources/som.sh" ]; then
   check "upgrade: settings kept" eval 'grep -qx physkeys=on "$SOM/settings.conf" && grep -qx memory=high "$SOM/settings.conf" && grep -qx retina=off "$SOM/settings.conf" && grep -qx D9MT_MEMORY_PROFILE=high "$SOM/env"'
   check "upgrade: RetinaMode=n kept" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="n"'
   check "upgrade: PhysicalKeyboard=y kept, the app's Mac driver" eval 'reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"y\"" && cmp -s "$APP/Contents/Resources/wine/winemac.so" "$WM/winemac.so"'
+  check "upgrade: raw mouse-look on (the new setting's default), the app's Mac driver, all three files" eval 'grep -qx rawmouse=on "$SOM/settings.conf" && reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"RawMouseWhenCursorHidden\"=\"y\"" && wm_is app'
   check "upgrade: GrabPointer=n and the d3d9 override kept" eval 'reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\X11 Driver" "\"GrabPointer\"=\"n\"" && reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\DllOverrides" "\"d3d9\"=\"native,builtin\""'
   check "upgrade: game settings kept" grep -qx "keybinds-from-$OLDV" "$GS/upgrade-marker.ini"
   check "upgrade: d9mt's d3d9.dll" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"

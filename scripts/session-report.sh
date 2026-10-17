@@ -24,6 +24,13 @@
 #   RESTORE   seconds with attachment re-clears (d9mt 0.0.6-dev.2 and later): what was
 #             re-cleared (format, size, aspects), why, and the D3D9 call it came from;
 #             RESTORE-SUMMARY when the game released its device (not every exit does)
+#   PACE      once a second (d9mt 92ce8d3 and later): the interval between the game's
+#             Present calls (min/avg/max, sd), the Present thread's time per frame inside d9mt
+#             and outside it, its CPU time split into d9mt's and the game's own
+#   THREADCPU once a second (the app's Mac driver, 0.1.0-dev.2 and later): CPU time of the
+#             game process, its busiest threads and the session's wineserver, in ms
+#   RAWMOUSE  once a second while raw mouse-look moves (0.1.0-dev.2 and later): moves by
+#             source (GCMouse, AppKit), the measured pixels per mouse count, the speed setting
 # Also in Collect Logs (session-report.txt). Runs under macOS's /bin/bash 3.2 and awk.
 set -euo pipefail
 
@@ -112,7 +119,7 @@ analyze() {
         if (parts[i] !~ /=/) continue
         name = parts[i]; sub(/=.*/, "", name)
         v = parts[i]; sub(/^[^=]*=[0-9]*\//, "", v); sub(/ms.*/, "", v)
-        if (name == "present" || name == "latencyWait") continue   # mostly vsync/latency waits
+        if (name == "present" || name == "latencyWait" || name == "bgSleep") continue   # mostly vsync/latency waits, the background sleep
         cat[name] += num(v)
       }
       if (rw > 0) cat["renderWait(compiles)"] += rw
@@ -143,6 +150,44 @@ analyze() {
     }
     / RESTORE-SUMMARY frames=/ {
       rs = $0; sub(/.*RESTORE-SUMMARY /, "", rs); sub(/ \|.*/, "", rs)
+      next
+    }
+    / PACE t=/ {
+      if (num(field("t")) <= skip) next
+      np++
+      split(field("present"), pr, "/"); psd[np] = num(field("sd")); pmax[np] = num(pr[3])
+      split(field("d9mt"), dm, "/"); pd9[np] = num(dm[2])
+      split(field("game"), gm, "/"); pgame[np] = num(gm[2]); pgmax[np] = num(gm[3])
+      pwait[np] = num(field("wait"))
+      v = field("cpu"); if (v != "n/a" && v != "") { npc++; pcpu[npc] = num(v); pbusy[npc] = num(field("d9mtBusy")); pgc[npc] = num(field("gameCpu")) }
+      next
+    }
+    / THREADCPU [0-9.]+ s: / {
+      ntc++
+      l = $0; sub(/.* THREADCPU /, "", l)
+      v = l; sub(/.*: process /, "", v); sub(/ ms.*/, "", v); tcp[ntc] = num(v)
+      v = l; sub(/.*wineserver /, "", v); sub(/ ms.*/, "", v); tcw[ntc] = num(v)
+      v = l; sub(/.*busiest \(ms\): /, "", v)
+      nb = split(v, bt, ", ")
+      for (i = 1; i <= nb; i++) {
+        id = bt[i]; sub(/ [0-9]+$/, "", id)            # "1a2b3" or "1a2b3 \"name\""
+        tms = bt[i]; sub(/.* /, "", tms)
+        tct[id] += num(tms)
+        if (i == 1) { ntop1++; top1[ntop1] = num(tms) }
+      }
+      next
+    }
+    / RAWMOUSE [0-9.]+ s: / {
+      nrm++
+      l = $0
+      v = l; sub(/.*gcmouse /, "", v); sub(/ events.*/, "", v); gce = num(v); rmg += gce
+      v = l; sub(/.*: nsevent /, "", v); sub(/ events.*/, "", v); rmn += num(v)
+      v = l; sub(/.*nsevent left out /, "", v); sub(/ events.*/, "", v); rml += num(v)
+      if (gce > 0) { ngc++; gcs[ngc] = gce }
+      v = l; sub(/ GCMouse device.*/, "", v); sub(/.* /, "", v); rmdev = num(v)
+      # the last measured ratio (0 until the first measurement)
+      v = l; sub(/.*pixels\/count /, "", v); sub(/ \(.*/, "", v); if (num(v) > 0) rmppc = v
+      v = l; sub(/.*speed /, "", v); rmspeed = v
       next
     }
     / DIAG MEM frame=/ {
@@ -217,6 +262,39 @@ analyze() {
       if (mp != "") print "memory_profile=" mp
       if (budget != "") print "wait_budget=" budget
       if (resets) print "devices=" resets + 1
+      if (np) {
+        qs(psd, 1, np); qs(pmax, 1, np); qs(pd9, 1, np); qs(pgame, 1, np); qs(pgmax, 1, np); qs(pwait, 1, np)
+        printf "pace_seconds=%d\n", np
+        printf "pace_present_sd=%.2f ms median, %.2f p90 (max interval: %.1f median, %.1f p90)\n", pct(psd, np, 0.5), pct(psd, np, 0.9), pct(pmax, np, 0.5), pct(pmax, np, 0.9)
+        printf "pace_frame=d9mt %.1f ms (of it waiting %.1f), game %.1f ms (worst frame of a second: %.1f median, %.1f p90)\n", pct(pd9, np, 0.5), pct(pwait, np, 0.5), pct(pgame, np, 0.5), pct(pgmax, np, 0.5), pct(pgmax, np, 0.9)
+        if (npc) {
+          qs(pcpu, 1, npc); qs(pbusy, 1, npc); qs(pgc, 1, npc)
+          printf "pace_cpu=%d ms/s median (d9mt %d, game %d), %d p90\n", pct(pcpu, npc, 0.5), pct(pbusy, npc, 0.5), pct(pgc, npc, 0.5), pct(pcpu, npc, 0.9)
+        }
+      }
+      if (ntc) {
+        qs(tcp, 1, ntc); qs(tcw, 1, ntc); qs(top1, 1, ntop1)
+        printf "threadcpu_seconds=%d\n", ntc
+        printf "cpu_process=%d ms/s median, %d p90, %d max\n", pct(tcp, ntc, 0.5), pct(tcp, ntc, 0.9), tcp[ntc]
+        printf "cpu_busiest=%d ms/s median, %d p90, %d max\n", pct(top1, ntop1, 0.5), pct(top1, ntop1, 0.9), top1[ntop1]
+        printf "cpu_wineserver=%d ms/s median, %d p90, %d max\n", pct(tcw, ntc, 0.5), pct(tcw, ntc, 0.9), tcw[ntc]
+        top = ""
+        for (k = 0; k < 4; k++) {
+          best = ""; bv = -1
+          for (c in tct) if (!(c in tused) && tct[c] > bv) { best = c; bv = tct[c] }
+          if (best == "") break
+          tused[best] = 1
+          top = top (top == "" ? "" : ", ") sprintf("%s %.0f", best, bv / ntc)
+        }
+        print "cpu_threads=" top
+      }
+      if (nrm) {
+        qs(gcs, 1, ngc)
+        printf "rawmouse_seconds=%d\n", nrm
+        printf "rawmouse_events=GCMouse %d, AppKit %d sent, %d left out\n", rmg, rmn, rml
+        if (ngc) printf "rawmouse_gc_rate=%d/s median (seconds with GCMouse moves: %d)\n", pct(gcs, ngc, 0.5), ngc
+        printf "rawmouse_calibration=%d GCMouse device(s), %s pixels/count, speed %s\n", rmdev, (rmppc == "" ? "not measured" : rmppc), rmspeed
+      }
     }' "$1"
 }
 
@@ -277,6 +355,19 @@ report() {
   row "Attachment optimization" att
   row "Memory profile" memory_profile
   row "Pipeline wait budget" wait_budget
+  row "PACE seconds" pace_seconds
+  row "  Present interval sd" pace_present_sd
+  row "  per frame (medians)" pace_frame
+  row "  game thread CPU" pace_cpu
+  row "THREADCPU seconds" threadcpu_seconds
+  row "  game process CPU" cpu_process
+  row "  its busiest thread" cpu_busiest
+  row "  wineserver CPU" cpu_wineserver
+  row "  busiest threads (avg ms/s)" cpu_threads
+  row "Raw mouse-look: seconds with moves" rawmouse_seconds
+  row "  moves" rawmouse_events
+  row "  GCMouse moves" rawmouse_gc_rate
+  row "  speed" rawmouse_calibration
   causes "$A" "${B:+A: }"
   [ -z "${B:-}" ] || causes "$B" "B: "
 }

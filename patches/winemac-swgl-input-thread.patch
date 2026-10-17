@@ -1,0 +1,932 @@
+diff -ru a/dlls/winemac.drv/cocoa_app.h b/dlls/winemac.drv/cocoa_app.h
+--- a/dlls/winemac.drv/cocoa_app.h
++++ b/dlls/winemac.drv/cocoa_app.h
+@@ -19,6 +19,7 @@
+  */
+ 
+ #import <AppKit/AppKit.h>
++#include <os/lock.h>
+ 
+ #include "macdrv_cocoa.h"
+ 
+@@ -95,6 +96,20 @@
+        that motion and the client's warps put the Windows cursor. */
+     BOOL relativeMouseMode;
+     CGPoint relativeModeCursorPosition;
++
++    /* GameController's raw mouse deltas for relative mode (see
++       -setUpGameControllerMice).  The queue's state is only used on the
++       queue; gcMouseMotion collects the motion it handed over for
++       relativeModeCursorPosition, under gcMouseMotionLock. */
++    BOOL gcMiceSetUp;
++    dispatch_queue_t gcMouseQueue;
++    double gcMouseRemainderX, gcMouseRemainderY;
++    int gcMouseHeldX, gcMouseHeldY;
++    unsigned int gcMouseHeldEvents;
++    unsigned long gcMouseHeldTime;
++    BOOL gcMouseRetryScheduled;
++    os_unfair_lock gcMouseMotionLock;
++    CGPoint gcMouseMotion;
+ 
+     /* Recently reported absolute cursor positions (macOS coordinates). A client
+        warping the cursor to one of them is re-asserting a position it read
+diff -ru a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -18,6 +18,10 @@
+  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+  */
+ 
++#include <dlfcn.h>
++#include <time.h>
++#import <GameController/GameController.h>
++
+ #import "cocoa_app.h"
+ #import "cocoa_cursorclipping.h"
+ #import "cocoa_event.h"
+@@ -81,6 +85,11 @@
+ /* Set on the main thread when -setCursorPosition: left a stale position alone. */
+ static BOOL last_warp_was_stale;
+ 
++/* The window GCMouse motion goes to while relative mode is on, else NULL. */
++static void* gc_mouse_target_hwnd;
++/* CLOCK_UPTIME_RAW time of the last GCMouse delta, in or out of relative mode. */
++static uint64_t gc_mouse_last_delta_ns;
++
+ /***********************************************************************
+  *              WineLocalizedString
+  *
+@@ -1231,10 +1240,18 @@
+             relativeModeCursorPosition = location;
+             mouseMoveDeltaX = 0;
+             mouseMoveDeltaY = 0;
++
++            [self setUpGameControllerMice];
++            [self discardGameControllerMouseMotion];
++            __atomic_store_n(&gc_mouse_target_hwnd, macdrv_get_window_hwnd((macdrv_window)lastTargetWindow),
++                             __ATOMIC_RELEASE);
+         }
+         else
+         {
+             relativeMouseMode = FALSE;
++            /* GCMouse motion from now on is dropped; count what was handed over. */
++            __atomic_store_n(&gc_mouse_target_hwnd, NULL, __ATOMIC_RELEASE);
++            [self applyGameControllerMouseMotion];
+             /* Put the macOS cursor where the Windows one ended up. */
+             [self noteWarpFrom:NSPointToCGPoint([self flippedMouseLocation:[NSEvent mouseLocation]])
+                             to:relativeModeCursorPosition];
+@@ -1312,6 +1329,180 @@
+         }
+     }
+ 
++    /* AppKit coalesces mouse moves to one event per display refresh and
++       delivers it about a refresh late, so a game that reads input once per
++       frame gets the motion in steps of zero, one or two refreshes, depending
++       on the phase between the two.  GameController's GCMouse reports the
++       device's raw deltas as they arrive.  In relative mode its deltas are
++       handed to the raw input thread (mouse.c) from a queue of our own, and
++       AppKit's moves are left out while it reports motion, so that nothing is
++       counted twice.  A device it does not report keeps AppKit's moves while
++       the ones it reports are at rest (-gameControllerMouseIsReporting).
++       GameController is loaded when relative
++       mode is first entered, so processes that never get there don't load it.
++
++       GCMouse deltas are device counts, not affected by the pointer speed
++       setting or acceleration, like Windows raw input; they are sent as they
++       are (times RawMouseGameControllerScale), without the Retina scale that
++       turns AppKit's points into pixels, and with y growing downwards like
++       Windows (GameController's grows upwards).  They don't include the jump
++       of a CGWarpMouseCursorPosition, which AppKit folds into the next event's
++       deltas: -consumeWarpDisplacementForEvent: still consumes it with the
++       AppKit move that is left out, so it cannot surface later. */
++    - (void) setUpGameControllerMice
++    {
++        NSString* const *connectNotification;
++        Class mouseClass;
++        void* lib;
++
++        if (gcMiceSetUp || !raw_mouse_game_controller || !macdrv_raw_input_thread_running())
++            return;
++        gcMiceSetUp = TRUE;
++
++        if (!(lib = dlopen("/System/Library/Frameworks/GameController.framework/GameController",
++                           RTLD_LAZY | RTLD_LOCAL)) ||
++            !(mouseClass = NSClassFromString(@"GCMouse")) ||
++            !(connectNotification = dlsym(lib, "GCMouseDidConnectNotification")))
++        {
++            ERR(@"GameController's GCMouse is not available\n");
++            return;
++        }
++
++        gcMouseQueue = dispatch_queue_create("org.winehq.wine.winemac.gcmouse",
++                                             dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,
++                                                                                     QOS_CLASS_USER_INTERACTIVE, 0));
++
++        /* The mice are announced shortly after, on the main queue. */
++        [[NSNotificationCenter defaultCenter] addObserverForName:*connectNotification
++                                                          object:nil
++                                                           queue:[NSOperationQueue mainQueue]
++                                                      usingBlock:^(NSNotification* note){
++            [self setUpGameControllerMouse:note.object];
++        }];
++        for (GCMouse* mouse in [mouseClass mice])
++            [self setUpGameControllerMouse:mouse];
++    }
++
++    - (void) setUpGameControllerMouse:(GCMouse*)mouse
++    {
++        /* A mouse can be both listed and announced. */
++        if (!mouse.mouseInput || mouse.mouseInput.mouseMovedHandler)
++            return;
++        mouse.handlerQueue = gcMouseQueue;
++        mouse.mouseInput.mouseMovedHandler = ^(GCMouseInput* input, float deltaX, float deltaY){
++            [self gameControllerMouseMovedX:deltaX y:deltaY timestamp:input.lastEventTimestamp];
++        };
++        macdrv_note_game_controller_mouse();
++    }
++
++    /* On gcMouseQueue. */
++    - (void) gameControllerMouseMovedX:(float)deltaX y:(float)deltaY timestamp:(NSTimeInterval)timestamp
++    {
++        uint64_t now_ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++        NSTimeInterval now = now_ns / (double)NSEC_PER_SEC;
++        int dx, dy;
++
++        __atomic_store_n(&gc_mouse_last_delta_ns, now_ns, __ATOMIC_RELAXED);
++
++        if (!__atomic_load_n(&gc_mouse_target_hwnd, __ATOMIC_ACQUIRE))
++        {
++            gcMouseRemainderX = gcMouseRemainderY = 0;
++            gcMouseHeldX = gcMouseHeldY = 0;
++            gcMouseHeldEvents = 0;
++            return;
++        }
++
++        gcMouseRemainderX += deltaX * raw_mouse_game_controller_scale;
++        gcMouseRemainderY -= deltaY * raw_mouse_game_controller_scale;
++        dx = gcMouseRemainderX;
++        dy = gcMouseRemainderY;
++        gcMouseRemainderX -= dx;
++        gcMouseRemainderY -= dy;
++
++        /* The event's time is on AppKit's clock (seconds of uptime); don't
++           trust one that isn't. */
++        if (timestamp <= 0 || timestamp > now + 0.001 || now - timestamp > 1)
++            timestamp = now;
++
++        gcMouseHeldX += dx;
++        gcMouseHeldY += dy;
++        gcMouseHeldEvents++;
++        gcMouseHeldTime = [self ticksForEventTime:timestamp];
++        [self sendGameControllerMouseMotion];
++    }
++
++    /* On gcMouseQueue.  Hand the motion collected so far over to the raw
++       input thread.  While a mouse event is on its way to the server (a
++       click) or the ring is full, keep it and try again shortly, also if the
++       mouse stops meanwhile. */
++    - (void) sendGameControllerMouseMotion
++    {
++        void* hwnd = __atomic_load_n(&gc_mouse_target_hwnd, __ATOMIC_ACQUIRE);
++        double scale = retina_on ? 2 : 1;
++
++        if (!gcMouseHeldX && !gcMouseHeldY)
++            return;
++
++        if (!hwnd || !macdrv_raw_input_thread_running())
++        {
++            gcMouseHeldX = gcMouseHeldY = 0;
++            gcMouseHeldEvents = 0;
++        }
++        else if (macdrv_post_raw_mouse_move(hwnd, gcMouseHeldX, gcMouseHeldY, FALSE, gcMouseHeldTime,
++                                            RAW_MOUSE_SOURCE_GCMOUSE, gcMouseHeldEvents))
++        {
++            /* For relativeModeCursorPosition, in points. */
++            os_unfair_lock_lock(&gcMouseMotionLock);
++            gcMouseMotion.x += gcMouseHeldX / scale;
++            gcMouseMotion.y += gcMouseHeldY / scale;
++            os_unfair_lock_unlock(&gcMouseMotionLock);
++
++            gcMouseHeldX = gcMouseHeldY = 0;
++            gcMouseHeldEvents = 0;
++        }
++        else if (!gcMouseRetryScheduled)
++        {
++            gcMouseRetryScheduled = TRUE;
++            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_MSEC), gcMouseQueue, ^{
++                gcMouseRetryScheduled = FALSE;
++                [self sendGameControllerMouseMotion];
++            });
++        }
++    }
++
++    /* Whether GCMouse reports the mouse's motion, so that AppKit's moves are
++       to be left out in relative mode: it reported some in the last seconds.
++       A short window would let AppKit's first move after a pause through
++       whenever it beats GameController's; a device GCMouse doesn't report
++       gets its motion through once the others have been still that long. */
++    - (BOOL) gameControllerMouseIsReporting
++    {
++        uint64_t last = __atomic_load_n(&gc_mouse_last_delta_ns, __ATOMIC_RELAXED);
++
++        return gcMouseQueue && last && clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - last < 5 * NSEC_PER_SEC;
++    }
++
++    /* Let relativeModeCursorPosition follow the motion GCMouse handed over. */
++    - (void) applyGameControllerMouseMotion
++    {
++        CGPoint motion;
++
++        os_unfair_lock_lock(&gcMouseMotionLock);
++        motion = gcMouseMotion;
++        gcMouseMotion = CGPointZero;
++        os_unfair_lock_unlock(&gcMouseMotionLock);
++
++        if (motion.x || motion.y)
++            [self trackRelativeMotionX:motion.x y:motion.y];
++    }
++
++    - (void) discardGameControllerMouseMotion
++    {
++        os_unfair_lock_lock(&gcMouseMotionLock);
++        gcMouseMotion = CGPointZero;
++        os_unfair_lock_unlock(&gcMouseMotionLock);
++    }
++
+     - (void) setCursor:(NSCursor*)newCursor
+     {
+         if (newCursor != cursor)
+@@ -1501,6 +1692,7 @@
+             // The server already moved the Windows cursor. Keep the macOS one
+             // still and keep the queued relative moves; remember the position
+             // so the cursor reappears there when relative mode ends.
++            [self discardGameControllerMouseMotion];
+             relativeModeCursorPosition = pos;
+             return TRUE;
+         }
+@@ -1814,6 +2006,14 @@
+                 }
+             }
+ 
++            if (relativeMouseMode)
++            {
++                /* GCMouse motion goes where AppKit's goes. */
++                __atomic_store_n(&gc_mouse_target_hwnd, macdrv_get_window_hwnd((macdrv_window)targetWindow),
++                                 __ATOMIC_RELEASE);
++                [self applyGameControllerMouseMotion];
++            }
++
+             if (absolute)
+             {
+                 if (self.clippingCursor)
+@@ -1828,9 +2028,20 @@
+                 mouseMoveDeltaX = 0;
+                 mouseMoveDeltaY = 0;
+             }
++            else if (relativeMouseMode && [self gameControllerMouseIsReporting])
++            {
++                double scale = retina_on ? 2 : 1;
++
++                /* GCMouse reports this motion (see -setUpGameControllerMice). */
++                macdrv_note_left_out_mouse_move(eventDeltaX * scale, eventDeltaY * scale);
++                mouseMoveDeltaX = 0;
++                mouseMoveDeltaY = 0;
++                event = NULL;
++            }
+             else
+             {
+                 double scale = retina_on ? 2 : 1;
++                int dx, dy;
+ 
+                 /* Add event delta to accumulated delta error */
+                 /* deltaY is already flipped */
+@@ -1839,16 +2050,30 @@
+                 if (relativeMouseMode)
+                     [self trackRelativeMotionX:eventDeltaX y:eventDeltaY];
+ 
+-                event = macdrv_create_event(MOUSE_MOVED_RELATIVE, targetWindow);
+-                event->mouse_moved.x = mouseMoveDeltaX * scale;
+-                event->mouse_moved.y = mouseMoveDeltaY * scale;
++                dx = mouseMoveDeltaX * scale;
++                dy = mouseMoveDeltaY * scale;
+ 
+                 /* Keep the remainder after integer truncation. */
+-                mouseMoveDeltaX -= event->mouse_moved.x / scale;
+-                mouseMoveDeltaY -= event->mouse_moved.y / scale;
++                mouseMoveDeltaX -= dx / scale;
++                mouseMoveDeltaY -= dy / scale;
++
++                /* In mouse-look, the raw input thread sends the move right away
++                   (see mouse.c), unless mouse events posted earlier are still
++                   on their way. */
++                if (relativeMouseMode && (dx || dy) &&
++                    macdrv_post_raw_mouse_move(macdrv_get_window_hwnd((macdrv_window)targetWindow),
++                                               dx, dy, drag, [self ticksForEventTime:[anEvent timestamp]],
++                                               RAW_MOUSE_SOURCE_NSEVENT, 1))
++                    event = NULL;
++                else
++                {
++                    event = macdrv_create_event(MOUSE_MOVED_RELATIVE, targetWindow);
++                    event->mouse_moved.x = dx;
++                    event->mouse_moved.y = dy;
++                }
+             }
+ 
+-            if (event->type == MOUSE_MOVED_ABSOLUTE || event->mouse_moved.x || event->mouse_moved.y)
++            if (event && (event->type == MOUSE_MOVED_ABSOLUTE || event->mouse_moved.x || event->mouse_moved.y))
+             {
+                 event->mouse_moved.time_ms = [self ticksForEventTime:[anEvent timestamp]];
+                 event->mouse_moved.drag = drag;
+@@ -1856,7 +2081,8 @@
+                 [targetWindow.queue postEvent:event];
+             }
+ 
+-            macdrv_release_event(event);
++            if (event)
++                macdrv_release_event(event);
+ 
+             lastTargetWindow = targetWindow;
+         }
+diff -ru a/dlls/winemac.drv/cocoa_event.m b/dlls/winemac.drv/cocoa_event.m
+--- a/dlls/winemac.drv/cocoa_event.m	2026-10-05 17:54:39
++++ b/dlls/winemac.drv/cocoa_event.m	2026-10-13 14:06:57
+@@ -627,7 +627,31 @@
+ }
+ }
+ 
++/* Mouse events in existence: created and not yet released for the last
++   time.  An event that is posted to a queue is released after its thread has
++   handled it, that is after it was sent to the server, or when it is discarded
++   from the queue; a move merged into a queued one is released right away. */
++static int mouse_events_pending;
++
++static inline BOOL is_mouse_event_type(int type)
++{
++    return type == MOUSE_BUTTON || type == MOUSE_MOVED_RELATIVE ||
++           type == MOUSE_MOVED_ABSOLUTE || type == MOUSE_SCROLL;
++}
++
+ /***********************************************************************
++ *              macdrv_mouse_events_pending
++ *
++ * Whether mouse events posted to event queues may not have reached the
++ * server yet.  Only the main thread creates mouse events, so for the main
++ * thread a zero result stays true until it creates the next one.
++ */
++int macdrv_mouse_events_pending(void)
++{
++    return OSAtomicAdd32Barrier(0, &mouse_events_pending) != 0;
++}
++
++/***********************************************************************
+  *              macdrv_create_event
+  */
+ macdrv_event* macdrv_create_event(int type, WineWindow* window)
+@@ -639,6 +663,8 @@
+     event->deliver = INT_MAX;
+     event->type = type;
+     event->window = (macdrv_window)[window retain];
++    if (is_mouse_event_type(type))
++        OSAtomicIncrement32Barrier(&mouse_events_pending);
+     return event;
+ }
+ 
+@@ -720,6 +746,10 @@
+                 release_window_set((NSMutableSet*)event->window_got_focus.tried_windows);
+                 break;
+         }
++
++        /* Merging moves only turns one mouse event type into another. */
++        if (is_mouse_event_type(event->type))
++            OSAtomicDecrement32Barrier(&mouse_events_pending);
+ 
+         release_window((WineWindow*)event->window);
+         free(event);
+diff -ru a/dlls/winemac.drv/dllmain.c b/dlls/winemac.drv/dllmain.c
+--- a/dlls/winemac.drv/dllmain.c
++++ b/dlls/winemac.drv/dllmain.c
+@@ -455,6 +455,21 @@
+ }
+ 
+ 
++/***********************************************************************
++ *              raw_input_thread
++ *
++ * Sends the relative mouse moves of mouse-look to the server as they
++ * arrive, independently of the threads owning the windows (see
++ * macdrv_raw_input_thread).  Returns only if that is disabled or fails.
++ */
++static DWORD WINAPI raw_input_thread(void *arg)
++{
++    SetThreadDescription(GetCurrentThread(), L"wine_macdrv_raw_input");
++    MACDRV_CALL(raw_input_thread, NULL);
++    return 0;
++}
++
++
+ static BOOL process_attach(void)
+ {
+     struct init_params params;
+@@ -490,6 +505,9 @@
+     params.regqueryvalueexa_callback = (UINT_PTR)macdrv_regqueryvalueexa;
+ 
+     if (MACDRV_CALL(init, &params)) return FALSE;
++
++    /* One per process; it starts running once the loader lock is released. */
++    CloseHandle(CreateThread(NULL, 0, raw_input_thread, NULL, 0, NULL));
+ 
+     return TRUE;
+ }
+diff -ru a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
+--- a/dlls/winemac.drv/macdrv.h
++++ b/dlls/winemac.drv/macdrv.h
+@@ -42,6 +42,7 @@
+ extern BOOL allow_vsync;
+ extern BOOL allow_set_gamma;
+ extern BOOL allow_software_rendering;
++extern BOOL raw_mouse_input_thread;
+ 
+ extern UINT64 app_icon_callback;
+ extern UINT64 app_quit_request_callback;
+@@ -161,6 +162,7 @@
+ extern void macdrv_SetCapture(HWND hwnd, UINT flags);
+ extern void macdrv_SetCursor(HWND hwnd, HCURSOR cursor);
+ extern BOOL macdrv_SetCursorPos(INT x, INT y);
++extern NTSTATUS macdrv_raw_input_thread(void *arg);
+ extern BOOL macdrv_RegisterHotKey(HWND hwnd, UINT mod_flags, UINT vkey);
+ extern void macdrv_UnregisterHotKey(HWND hwnd, UINT modifiers, UINT vkey);
+ extern SHORT macdrv_VkKeyScanEx(WCHAR wChar, HKL hkl);
+diff -ru a/dlls/winemac.drv/macdrv_cocoa.h b/dlls/winemac.drv/macdrv_cocoa.h
+--- a/dlls/winemac.drv/macdrv_cocoa.h
++++ b/dlls/winemac.drv/macdrv_cocoa.h
+@@ -141,6 +141,8 @@
+ extern bool use_confinement_cursor_clipping;
+ extern bool raw_mouse_when_cursor_hidden;
+ extern bool ignore_stale_cursor_warps;
++extern bool raw_mouse_game_controller;
++extern double raw_mouse_game_controller_scale;
+ extern bool cursor_clipping_locks_windows;
+ extern bool use_precise_scrolling;
+ extern int gl_surface_mode;
+@@ -236,6 +238,16 @@
+ extern void macdrv_set_cursor(CFStringRef name, CFArrayRef frames);
+ extern int macdrv_get_cursor_position(CGPoint *pos);
+ extern int macdrv_relative_mouse_mode_active(void);
++enum {
++    RAW_MOUSE_SOURCE_NSEVENT,
++    RAW_MOUSE_SOURCE_GCMOUSE,
++};
++extern int macdrv_raw_input_thread_running(void);
++extern int macdrv_post_raw_mouse_move(void *hwnd, int dx, int dy, int drag, unsigned long time_ms,
++                                      int source, unsigned int events);
++extern void macdrv_note_left_out_mouse_move(int dx, int dy);
++extern void macdrv_note_game_controller_mouse(void);
++extern int macdrv_mouse_events_pending(void);
+ extern int macdrv_set_cursor_position(CGPoint pos);
+ extern int macdrv_clip_cursor(CGRect rect);
+ 
+diff -ru a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
+--- a/dlls/winemac.drv/macdrv_main.c
++++ b/dlls/winemac.drv/macdrv_main.c
+@@ -57,6 +57,9 @@
+ bool use_confinement_cursor_clipping = true;
+ bool raw_mouse_when_cursor_hidden = true;
+ bool ignore_stale_cursor_warps = true;
++BOOL raw_mouse_input_thread = TRUE;
++bool raw_mouse_game_controller = true;
++double raw_mouse_game_controller_scale = 1.0;
+ bool cursor_clipping_locks_windows = true;
+ bool use_precise_scrolling = true;
+ int gl_surface_mode = GL_SURFACE_IN_FRONT_OPAQUE;
+@@ -376,6 +379,27 @@
+     if (!get_config_key(hkey, appkey, "IgnoreStaleCursorWarps", buffer, sizeof(buffer)))
+         ignore_stale_cursor_warps = IS_OPTION_TRUE(buffer[0]);
+ 
++    if (!get_config_key(hkey, appkey, "RawMouseInputThread", buffer, sizeof(buffer)))
++        raw_mouse_input_thread = IS_OPTION_TRUE(buffer[0]);
++
++    if (!get_config_key(hkey, appkey, "RawMouseGameController", buffer, sizeof(buffer)))
++        raw_mouse_game_controller = IS_OPTION_TRUE(buffer[0]);
++
++    /* Windows mickeys per GCMouse device count (a decimal number). */
++    if (!get_config_key(hkey, appkey, "RawMouseGameControllerScale", buffer, sizeof(buffer)))
++    {
++        char number[32];
++        unsigned int i;
++        double scale;
++
++        for (i = 0; i < sizeof(number) - 1 && buffer[i] && buffer[i] < 0x80; i++)
++            number[i] = buffer[i];
++        number[i] = 0;
++        scale = strtod(number, NULL);
++        if (scale > 0 && scale <= 100) raw_mouse_game_controller_scale = scale;
++        else WARN("ignoring RawMouseGameControllerScale %s\n", debugstr_a(number));
++    }
++
+     if (!get_config_key(hkey, appkey, "CursorClippingLocksWindows", buffer, sizeof(buffer)))
+         cursor_clipping_locks_windows = IS_OPTION_TRUE(buffer[0]);
+ 
+@@ -654,6 +678,7 @@
+ {
+     macdrv_init,
+     macdrv_quit_result,
++    macdrv_raw_input_thread,
+ };
+ 
+ C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
+@@ -686,6 +711,7 @@
+ {
+     wow64_init,
+     macdrv_quit_result,
++    macdrv_raw_input_thread,
+ };
+ 
+ C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );
+diff -ru a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
+--- a/dlls/winemac.drv/mouse.c
++++ b/dlls/winemac.drv/mouse.c
+@@ -26,6 +26,14 @@
+ 
+ #include "config.h"
+ 
++#include <errno.h>
++#include <fcntl.h>
++#include <pthread.h>
++#include <pthread/qos.h>
++#include <os/lock.h>
++#include <time.h>
++#include <unistd.h>
++
+ #define OEMRESOURCE
+ #include "macdrv.h"
+ #include "wine/server.h"
+@@ -175,6 +183,331 @@
+ 
+ 
+ /***********************************************************************
++ *              Raw mouse input thread
++ *
++ * While the mouse is disassociated for mouse-look (relativeMouseMode in
++ * cocoa_app.m), the relative moves are handed to a Wine thread of this
++ * process that does nothing else, and it sends them to the server right
++ * away, as Windows delivers input independently of the application's
++ * message loop.  Posted to the window's event queue instead, a move reaches
++ * the server, and with it the cursor position and raw input (DirectInput),
++ * only when the window's thread next processes events, which for a game is
++ * once per frame: depending on the phase of the game loop against the
++ * incoming moves, a frame then gets the motion of zero, one or two of them,
++ * and the camera turns unevenly.
++ *
++ * The moves come from two sources (see cocoa_app.m): GameController's
++ * GCMouse, which reports the device's raw deltas as they arrive, on a
++ * dispatch queue of our own; or, without one, AppKit's mouse events on the
++ * main thread, which AppKit coalesces to one per display refresh and
++ * delivers about a refresh late, so that they are quantised like a game
++ * loop that reads them once per frame.
++ *
++ * Threading:
++ *
++ * - The producers are the main thread (-handleMouseMove:) and the GCMouse
++ *   queue, neither of them a Wine thread.  They never wait for a Wine thread:
++ *   raw_moves_producer_lock is only taken by them, around filling a slot,
++ *   and a byte written to a non-blocking pipe wakes the input thread.  When
++ *   the input thread is not running or the ring is full, the main thread
++ *   posts the move to the event queue as before and the GCMouse queue holds
++ *   it back and tries again.
++ *
++ * - The consumers are the input thread and the threads about to send a mouse
++ *   event from their event queue (flush_raw_mouse_moves).  They take moves
++ *   from the ring and send them while holding raw_moves_mutex, so whoever gets
++ *   the mutex knows that every move taken from the ring before has reached
++ *   the server.  Sending a relative move neither calls back into the driver
++ *   nor waits for another thread (no SEND_HWMSG_INJECTED, no button flags,
++ *   so no cursor clipping either), and the producers never take the mutex,
++ *   so holding it across the server call cannot deadlock.
++ *
++ * - Order against the mouse events that still go through the event queues
++ *   (buttons, scrolling, absolute moves, moves while the ring is full): a move
++ *   is handed over only while no mouse event exists that has not reached the
++ *   server (macdrv_mouse_events_pending), so a move never overtakes one posted
++ *   before it; and a thread sends the moves in the ring before it sends a
++ *   mouse event from its queue, so an event never overtakes a move handed
++ *   over before it.  A click during mouse-look therefore holds the moves
++ *   after it back until the game has processed the click, typically one
++ *   frame.  Only the main thread creates mouse events; for the GCMouse queue
++ *   the check is the point at which its move counts as made.
++ *
++ * - The moves keep everything else the main thread does with them: the warp
++ *   displacement is taken out of AppKit's deltas, relativeModeCursorPosition
++ *   follows them and the sub-pixel remainder carries over, before they are
++ *   handed over.
++ */
++struct raw_mouse_move
++{
++    HWND          hwnd;
++    int           dx;
++    int           dy;
++    int           drag;
++    int           source;   /* RAW_MOUSE_SOURCE_* */
++    unsigned int  events;   /* device or AppKit events in this move */
++    unsigned long time_ms;
++    UINT64        posted_ns;
++};
++
++#define RAW_MOVES_SIZE 256  /* a power of two */
++
++static struct raw_mouse_move raw_moves[RAW_MOVES_SIZE];
++static unsigned int raw_moves_head;  /* next to take; written by the consumers */
++static unsigned int raw_moves_tail;  /* next to fill; written by the producers */
++static os_unfair_lock raw_moves_producer_lock = OS_UNFAIR_LOCK_INIT;
++static pthread_mutex_t raw_moves_mutex = PTHREAD_MUTEX_INITIALIZER;
++static int raw_moves_wake_fd = -1;
++static int raw_input_thread_state;  /* 0: not started, 1: starting, 2: running, 3: ended */
++
++static const char * const raw_mouse_source_names[] = { "nsevent", "gcmouse" };
++
++/* Per-source totals for the once-a-second trace line: handed over, and AppKit
++   moves left out because GCMouse reports the same motion. */
++static struct raw_mouse_stats
++{
++    unsigned int events;
++    int          dx;
++    int          dy;
++} raw_mouse_stats[3];
++static UINT64 raw_mouse_stats_ns;
++static int raw_mouse_gc_mice;  /* GCMouse devices set up */
++
++static void add_raw_mouse_stats(struct raw_mouse_stats *stats, int dx, int dy, unsigned int events)
++{
++    __atomic_fetch_add(&stats->events, events, __ATOMIC_RELAXED);
++    __atomic_fetch_add(&stats->dx, dx, __ATOMIC_RELAXED);
++    __atomic_fetch_add(&stats->dy, dy, __ATOMIC_RELAXED);
++}
++
++static void trace_raw_mouse_stats(void)
++{
++    static const char * const names[] = { "nsevent", "gcmouse", "nsevent left out" };
++    UINT64 now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++    char buf[256];
++    int i, len = 0;
++
++    if (!raw_mouse_stats_ns) raw_mouse_stats_ns = now;
++    if (now - raw_mouse_stats_ns < 1000000000) return;
++
++    for (i = 0; i < ARRAY_SIZE(raw_mouse_stats); i++)
++    {
++        unsigned int events = __atomic_exchange_n(&raw_mouse_stats[i].events, 0, __ATOMIC_RELAXED);
++        int dx = __atomic_exchange_n(&raw_mouse_stats[i].dx, 0, __ATOMIC_RELAXED);
++        int dy = __atomic_exchange_n(&raw_mouse_stats[i].dy, 0, __ATOMIC_RELAXED);
++        len += snprintf(buf + len, sizeof(buf) - len, "%s%s %u events (%d,%d)", i ? ", " : "",
++                        names[i], events, dx, dy);
++    }
++    TRACE("last %.2f s: %s; %d GCMouse device(s)\n", (now - raw_mouse_stats_ns) / 1e9, buf,
++          __atomic_load_n(&raw_mouse_gc_mice, __ATOMIC_RELAXED));
++    raw_mouse_stats_ns = now;
++}
++
++
++/***********************************************************************
++ *              send_raw_mouse_moves
++ *
++ * Send the moves waiting in the ring to the server.
++ */
++static void send_raw_mouse_moves(const char *sender)
++{
++    unsigned int head, tail;
++
++    pthread_mutex_lock(&raw_moves_mutex);
++
++    head = raw_moves_head;
++    tail = __atomic_load_n(&raw_moves_tail, __ATOMIC_ACQUIRE);
++    while (head != tail)
++    {
++        struct raw_mouse_move move = raw_moves[head++ % RAW_MOVES_SIZE];
++        unsigned int count = 1;
++
++        /* Moves that piled up for the same window go together; raw input
++           and the cursor end up the same. */
++        while (head != tail && raw_moves[head % RAW_MOVES_SIZE].hwnd == move.hwnd &&
++               raw_moves[head % RAW_MOVES_SIZE].drag == move.drag &&
++               raw_moves[head % RAW_MOVES_SIZE].source == move.source)
++        {
++            move.dx += raw_moves[head % RAW_MOVES_SIZE].dx;
++            move.dy += raw_moves[head % RAW_MOVES_SIZE].dy;
++            move.events += raw_moves[head % RAW_MOVES_SIZE].events;
++            move.time_ms = raw_moves[head % RAW_MOVES_SIZE].time_ms;
++            head++;
++            count++;
++        }
++        /* The slots are copied out; give them back to the producers. */
++        __atomic_store_n(&raw_moves_head, head, __ATOMIC_RELEASE);
++
++        TRACE("win %p relative (%d,%d) drag %d time %lu (%lu ticks ago) from %s, %u event(s) in %u move(s), "
++              "sent by %s %llu us after the first was handed over\n", move.hwnd, move.dx, move.dy, move.drag,
++              move.time_ms, (NtGetTickCount() - move.time_ms), raw_mouse_source_names[move.source],
++              move.events, count, sender,
++              (unsigned long long)((clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - move.posted_ns) / 1000));
++
++        send_mouse_input(move.hwnd, NULL, MOUSEEVENTF_MOVE, move.dx, move.dy, 0, move.drag, move.time_ms);
++
++        tail = __atomic_load_n(&raw_moves_tail, __ATOMIC_ACQUIRE);
++    }
++
++    if (TRACE_ON(cursor)) trace_raw_mouse_stats();
++
++    pthread_mutex_unlock(&raw_moves_mutex);
++}
++
++
++/***********************************************************************
++ *              flush_raw_mouse_moves
++ *
++ * Called before a mouse event from an event queue is sent, so that it
++ * does not overtake the moves that were handed to the input thread before
++ * the event was posted.
++ */
++static void flush_raw_mouse_moves(void)
++{
++    if (__atomic_load_n(&raw_input_thread_state, __ATOMIC_ACQUIRE) >= 2)
++        send_raw_mouse_moves("event thread");
++}
++
++
++/***********************************************************************
++ *              macdrv_raw_input_thread_running
++ *
++ * Whether moves can be handed over to the raw input thread.
++ */
++int macdrv_raw_input_thread_running(void)
++{
++    return __atomic_load_n(&raw_input_thread_state, __ATOMIC_ACQUIRE) == 2;
++}
++
++
++/***********************************************************************
++ *              macdrv_post_raw_mouse_move
++ *
++ * Called on the main thread or the GCMouse queue.  Hands a relative move
++ * made of the given number of device or AppKit events over to the input
++ * thread.  Returns zero if it cannot take it now (input thread not
++ * running, mouse events pending, ring full).
++ */
++int macdrv_post_raw_mouse_move(void *hwnd, int dx, int dy, int drag, unsigned long time_ms,
++                               int source, unsigned int events)
++{
++    struct raw_mouse_move *move;
++    unsigned int tail;
++    char wake = 1;
++
++    if (!macdrv_raw_input_thread_running())
++        return 0;
++    if (macdrv_mouse_events_pending())
++        return 0;
++
++    os_unfair_lock_lock(&raw_moves_producer_lock);
++    tail = raw_moves_tail;  /* only written under this lock */
++    if (tail - __atomic_load_n(&raw_moves_head, __ATOMIC_ACQUIRE) >= RAW_MOVES_SIZE)
++    {
++        os_unfair_lock_unlock(&raw_moves_producer_lock);
++        return 0;
++    }
++    move = &raw_moves[tail % RAW_MOVES_SIZE];
++    move->hwnd      = hwnd;
++    move->dx        = dx;
++    move->dy        = dy;
++    move->drag      = drag;
++    move->source    = source;
++    move->events    = events;
++    move->time_ms   = time_ms;
++    move->posted_ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++    __atomic_store_n(&raw_moves_tail, tail + 1, __ATOMIC_RELEASE);
++    os_unfair_lock_unlock(&raw_moves_producer_lock);
++
++    add_raw_mouse_stats(&raw_mouse_stats[source], dx, dy, events);
++
++    /* A full pipe already holds plenty of wake-ups. */
++    while (write(raw_moves_wake_fd, &wake, 1) < 0 && errno == EINTR);
++    return 1;
++}
++
++
++/***********************************************************************
++ *              macdrv_note_left_out_mouse_move
++ *
++ * Called on the main thread for an AppKit move that is not sent because
++ * GCMouse reports the same motion; for the trace, to compare the two.
++ */
++void macdrv_note_left_out_mouse_move(int dx, int dy)
++{
++    add_raw_mouse_stats(&raw_mouse_stats[2], dx, dy, 1);
++}
++
++
++/***********************************************************************
++ *              macdrv_note_game_controller_mouse
++ *
++ * Called on the main thread when a GCMouse device was set up; for the trace.
++ */
++void macdrv_note_game_controller_mouse(void)
++{
++    __atomic_fetch_add(&raw_mouse_gc_mice, 1, __ATOMIC_RELAXED);
++}
++
++
++/***********************************************************************
++ *              macdrv_raw_input_thread
++ *
++ * The body of the raw input thread, a Wine thread of this process created
++ * by the PE side when the driver is loaded.  Returns only if disabled or on
++ * failure; at process exit the thread is terminated with the others.
++ */
++NTSTATUS macdrv_raw_input_thread(void *arg)
++{
++    int fds[2], expected = 0;
++    char buf[64];
++    ssize_t len;
++
++    if (!raw_mouse_when_cursor_hidden || !raw_mouse_input_thread)
++    {
++        TRACE("disabled\n");
++        return STATUS_SUCCESS;
++    }
++    if (!__atomic_compare_exchange_n(&raw_input_thread_state, &expected, 1, FALSE,
++                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
++    {
++        WARN("already started\n");
++        return STATUS_SUCCESS;
++    }
++
++    if (pipe(fds) ||
++        fcntl(fds[0], F_SETFD, FD_CLOEXEC) == -1 ||
++        fcntl(fds[1], F_SETFD, FD_CLOEXEC) == -1 ||
++        fcntl(fds[1], F_SETFL, O_NONBLOCK) == -1)
++    {
++        ERR("failed to create the wake-up pipe: %s\n", strerror(errno));
++        __atomic_store_n(&raw_input_thread_state, 3, __ATOMIC_RELEASE);
++        return STATUS_UNSUCCESSFUL;
++    }
++
++    /* As responsive as the main thread that feeds it; it is idle otherwise. */
++    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
++
++    raw_moves_wake_fd = fds[1];
++    __atomic_store_n(&raw_input_thread_state, 2, __ATOMIC_RELEASE);
++    TRACE("running\n");
++
++    for (;;)
++    {
++        len = read(fds[0], buf, sizeof(buf));
++        if (len < 0 && errno == EINTR) continue;
++        if (len <= 0) break;
++        send_raw_mouse_moves("input thread");
++    }
++
++    /* Moves still in the ring are sent by the next queued mouse event. */
++    ERR("wake-up pipe failed: %s\n", len ? strerror(errno) : "closed");
++    __atomic_store_n(&raw_input_thread_state, 3, __ATOMIC_RELEASE);
++    return STATUS_UNSUCCESSFUL;
++}
++
++
++/***********************************************************************
+  *              copy_system_cursor_name
+  */
+ CFStringRef copy_system_cursor_name(ICONINFOEXW *info)
+@@ -900,6 +1233,8 @@
+           event->mouse_button.x, event->mouse_button.y,
+           event->mouse_button.time_ms, (NtGetTickCount() - event->mouse_button.time_ms));
+ 
++    flush_raw_mouse_moves();
++
+     if (event->mouse_button.pressed)
+     {
+         switch (event->mouse_button.button)
+@@ -952,6 +1287,8 @@
+           event->mouse_moved.x, event->mouse_moved.y, event->mouse_moved.drag,
+           event->mouse_moved.time_ms, (NtGetTickCount() - event->mouse_moved.time_ms));
+ 
++    flush_raw_mouse_moves();
++
+     if (event->type == MOUSE_MOVED_ABSOLUTE)
+         flags |= MOUSEEVENTF_ABSOLUTE;
+ 
+@@ -973,6 +1310,8 @@
+           event->window, event->mouse_scroll.x_scroll, event->mouse_scroll.y_scroll,
+           event->mouse_scroll.x, event->mouse_scroll.y,
+           event->mouse_scroll.time_ms, (NtGetTickCount() - event->mouse_scroll.time_ms));
++
++    flush_raw_mouse_moves();
+ 
+     if (event->mouse_scroll.y_scroll)
+         send_mouse_input(hwnd, event->window, MOUSEEVENTF_WHEEL | move,
+diff -ru a/dlls/winemac.drv/unixlib.h b/dlls/winemac.drv/unixlib.h
+--- a/dlls/winemac.drv/unixlib.h
++++ b/dlls/winemac.drv/unixlib.h
+@@ -23,6 +23,7 @@
+ {
+     unix_init,
+     unix_quit_result,
++    unix_raw_input_thread,
+     unix_funcs_count
+ };
+ 

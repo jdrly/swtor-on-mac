@@ -23,7 +23,7 @@
 // It also resumes the launcher if it is told to quit (SIGTERM/SIGINT/SIGHUP/SIGQUIT)
 // or kevent() fails, and does nothing if the launcher exited first (pid reuse).
 // Once the launcher has quit (within 2 min of the game), it ends the engine's Wine session
-// and whatever is left of it (see reap_leftovers).
+// and whatever is left of it (see end_session_after_launcher, reap_leftovers).
 //
 // --reap: only end leftover Wine processes of SWTOR_ENGINE (processes of the engine while
 // no wineserver of it runs), logging each to stderr. The wrapper runs it before it starts
@@ -44,6 +44,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/event.h>
+#include <sys/proc.h>
 #include <sys/proc_info.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -54,6 +55,12 @@ int hide_app(pid_t pid, double timeout);  // hide_app.m
 
 // executable of the launcher's main process (its CEF helpers are "... Launcher Helper")
 #define LAUNCHER_SUFFIX ".app/Contents/MacOS/Star Wars - The Old Republic Launcher"
+// Broadsword's Wine helper (registry token, graphics config): its Wine calls go through the
+// wrapper too, onto this engine. Only looked at, never signalled.
+#define MAC_WINE_SUFFIX ".app/Contents/MacOS/mac_wine"
+// after the launcher has quit: how long no wineserver may have come back, and the cap
+#define QUIET_MS 3000
+#define LINGER_MAX_MS 30000
 
 // log lines go to stderr; the wrapper points it at ~/Library/Logs/SWTOR on Mac/hold.log
 static void logf_(const char *fmt, ...)
@@ -69,12 +76,51 @@ static void logf_(const char *fmt, ...)
     fputc('\n', stderr);
 }
 
-static int is_launcher(pid_t pid)
+static int has_suffix(pid_t pid, const char *suffix)
 {
     char path[PROC_PIDPATHINFO_MAXSIZE];
     if (proc_pidpath(pid, path, sizeof(path)) <= 0) return 0;
-    size_t n = strlen(path), m = strlen(LAUNCHER_SUFFIX);
-    return n >= m && !strcmp(path + n - m, LAUNCHER_SUFFIX);
+    size_t n = strlen(path), m = strlen(suffix);
+    return n >= m && !strcmp(path + n - m, suffix);
+}
+
+static int is_launcher(pid_t pid) { return has_suffix(pid, LAUNCHER_SUFFIX); }
+
+static int bsdinfo(pid_t pid, struct proc_bsdinfo *bi);
+
+// Broadsword's mac_wine processes running now: *IDLE gets those without a Wine call in
+// flight; returns those with one (a child that is not a zombie: the wine64 it started, which
+// the wrapper turns into this engine's wine with the same pid). A mac_wine can stay long after
+// the launcher, idle, with its finished call unreaped.
+static int count_mac_wine(int *idle)
+{
+    *idle = 0;
+    int n = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
+    pid_t *all = n > 0 ? malloc(n) : NULL;
+    if (!all) return 0;
+    n = proc_listpids(PROC_ALL_PIDS, 0, all, n) / (int)sizeof(pid_t);
+    int busy = 0;
+    for (int i = 0; i < n; i++) {
+        if (all[i] <= 1 || !has_suffix(all[i], MAC_WINE_SUFFIX)) continue;
+        pid_t kids[64];
+        // (proc_listchildpids returns a count of pids, not bytes)
+        int k = proc_listchildpids(all[i], kids, sizeof(kids)), live = 0;
+        if (k > 64) k = 64;
+        for (int j = 0; j < k && !live; j++) {
+            struct proc_bsdinfo bi;
+            live = bsdinfo(kids[j], &bi) && bi.pbi_status != SZOMB;
+        }
+        if (live) busy++; else (*idle)++;
+    }
+    free(all);
+    return busy;
+}
+
+static long long now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
 }
 
 static int bsdinfo(pid_t pid, struct proc_bsdinfo *bi)
@@ -236,6 +282,61 @@ static void reap_leftovers(int quiet)
     }
 }
 
+// After the launcher has quit. Its last Wine calls go through Broadsword's mac_wine, a
+// separate process that can outlive it, and each of them brings the engine's wineserver up
+// again (the wrapper starts it with -p 10, so it stays 10 s and keeps Wine's system processes
+// alive): one -k is not enough. Every half second: while a mac_wine has a Wine call in flight,
+// wait (it is never cut short, and mac_wine itself is never touched); else, if a wineserver
+// of the engine runs, end the session (-k) again. Done once neither has been seen for
+// QUIET_MS, or at LINGER_MAX_MS (then one last -k). Then the leftovers go, if no server is left.
+static void end_session_after_launcher(void)
+{
+    long long start = now_ms(), quiet_from = start, t;
+    int rounds = 0, waited_for_mac_wine = 0, logged_idle = 0, idle;
+    pid_t server = 0;
+    for (;;) {
+        int mac_wine = count_mac_wine(&idle);
+        engine_procs(&server, NULL, 0);
+        t = now_ms();
+        if (idle && !logged_idle) {
+            logf_("mac_wine running without a Wine call (%d): not waiting for it", idle);
+            logged_idle = 1;
+        }
+        if (mac_wine) {
+            if (!waited_for_mac_wine)
+                logf_("mac_wine running a Wine call (%d): waiting for it before ending the session", mac_wine);
+            waited_for_mac_wine = 1;
+            quiet_from = t;
+        } else if (server) {
+            if (rounds) logf_("wineserver %d came back %.1f s after the launcher quit", server, (t - start) / 1000.0);
+            stop_wine_session();
+            rounds++;
+            // (it can take a moment to go)
+            if ((server = wait_no_server(5)))
+                logf_("wineserver %d still running 5 s after -k", server);
+            quiet_from = now_ms();
+        } else if (t - quiet_from >= QUIET_MS) {
+            logf_("no wineserver for %.1f s (%.1f s after the launcher quit, %d time(s) -k)",
+                  QUIET_MS / 1000.0, (t - start) / 1000.0, rounds);
+            break;
+        }
+        if (t - start >= LINGER_MAX_MS) {
+            logf_("still %s %d s after the launcher quit: ending the session once more",
+                  mac_wine ? "a mac_wine Wine call running" : "a wineserver coming back", LINGER_MAX_MS / 1000);
+            stop_wine_session();
+            server = wait_no_server(5);
+            break;
+        }
+        usleep(500000);
+    }
+    if (server) {
+        logf_("wineserver %d still running: leaving the engine's processes alone", server);
+        return;
+    }
+    sleep(1);  // let the session's clients exit on their own first
+    reap_leftovers(0);
+}
+
 static void resume(pid_t launcher, const char *why)
 {
     if (kill(launcher, SIGCONT) == 0)
@@ -322,19 +423,10 @@ static int hold(pid_t game, int ready)
                 while (kevent(kq, NULL, 0, &e, 1, NULL) < 0 && errno == EINTR)
                     ;
                 if (e.filter == EVFILT_PROC && e.ident == (uintptr_t)launcher) {
-                    // The launcher's last Wine call (on this engine too) may have left a
-                    // session running: end it as well. Its wineserver can take a moment
-                    // to go after -k, and a client still starting may bring up a new one:
-                    // wait for that (bounded), then end what is left of the engine.
-                    stop_wine_session();
-                    pid_t server = wait_no_server(10);
-                    if (server) {
-                        logf_("wineserver %d still running 10 s after the launcher quit: "
-                              "leaving the engine's processes alone", server);
-                    } else {
-                        sleep(1);  // let the session's clients exit on their own first
-                        reap_leftovers(0);
-                    }
+                    // The launcher's last Wine calls (on this engine too) may have left a
+                    // session running, and more may come: end it until it stays gone.
+                    logf_("launcher %d quit", launcher);
+                    end_session_after_launcher();
                 } else if (e.filter == EVFILT_TIMER) {
                     logf_("launcher %d still open 2 min after the game: leftover Wine processes "
                           "are ended at the next Wine start or by SWTOR on Mac", launcher);

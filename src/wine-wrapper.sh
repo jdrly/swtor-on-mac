@@ -71,6 +71,14 @@ if [ -n "$SWTOR_ENGINE" ]; then
   export WINEPREFIX="$SWTOR_PREFIX"
   export DYLD_FALLBACK_LIBRARY_PATH="${SWTOR_FRAMEWORKS:+$SWTOR_FRAMEWORKS:}/usr/lib"
   mkdir -p "$LOG_DIR"
+  # One line in hold.log per Wine start that is not the game: the time, the command's first
+  # word only (the rest can hold the account token) and who started it (the launcher, or
+  # Broadsword's mac_wine), next to hold-launcher's lines about ending the session.
+  case " $* " in
+    *swtor.exe*) ;;
+    *) printf '%s [wrapper %d] wine start: %s (parent %d %s)\n' "$(date '+%Y-%m-%d %H:%M:%S')" $$ \
+         "${1##*[/\\]}" "$PPID" "$(ps -o comm= -p "$PPID" 2>/dev/null | sed 's|.*/||')" >>"$LOG_DIR/hold.log" 2>/dev/null ;;
+  esac
   # Start this engine's wineserver ourselves, in its own session, so it is not in the
   # launcher's process group; a no-op if one is already running. Not enough on its own:
   # when the launcher exits, this wineserver still dies (see hold-launcher below).
@@ -84,6 +92,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
   ( setsid_exec "$SWTOR_ENGINE/bin/wineserver" -p 10 ) </dev/null >/dev/null 2>>"$LOG_DIR/wineserver.log"
   case " $* " in
     *swtor.exe*)
+      # Debug Logging: Wine debug channels for the game only (RAWMOUSE, THREADCPU lines)
+      [ -z "$SWTOR_GAME_WINEDEBUG" ] || export WINEDEBUG="$SWTOR_GAME_WINEDEBUG"
       { date; env | grep -E '^(WINE|DYLD_|SWTOR_|DXVK_|MTL_|D9MT_)' | sort; } > "$LOG_DIR/effective-env.txt"
       # Is there a newer SWTOR on Mac? At most once a day, in a detached process (the game
       # does not wait for it; offline it just fails).

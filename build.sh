@@ -10,8 +10,10 @@
 #   Contents/Resources/wine-wrapper.sh the wrapper template installed into Broadsword's Wine
 #   Contents/Resources/helpers/        hold-launcher, setsid-exec (universal)
 #   Contents/Resources/d9mt/           prebuilt d9mt (scripts/build-d9mt.sh)
-#   Contents/Resources/wine/winemac.so Wine's Mac driver with the PhysicalKeyboard option
-#                                      (scripts/build-winemac.sh, patches/), for the engine
+#   Contents/Resources/wine/           Wine's Mac driver with the PhysicalKeyboard and raw
+#                                      mouse-look options: winemac.so, x86_64-windows/ and
+#                                      i386-windows/winemac.drv (scripts/build-winemac.sh,
+#                                      patches/), for the engine
 #   Contents/Resources/Licenses/       licenses of the app and the bundled components
 # The Wine engine is not bundled: som.sh downloads it at install time from athei's wine-build
 # releases (CrossOver 26.3, the engine SWGL on Mac uses; pinned URL + sha256 in src/som.sh).
@@ -30,7 +32,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # SWTOR_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.0-dev.1}
+APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.0-dev.2}
 
 # Development builds: a version with a prerelease suffix, X.Y.Z-dev.N. They are published only
 # as GitHub pre-releases, never in the appcast. CFBundleShortVersionString is the version as is;
@@ -88,8 +90,15 @@ for f in d3d9.dll winemetal.dll winemetal.so VERSION LICENSE THIRD_PARTY_NOTICES
   [ -f "$D9/$f" ] || { echo "Missing $D9/$f; run scripts/build-d9mt.sh" >&2; exit 1; }
 done
 WM=prebuilt/winemac
-for f in winemac.so VERSION COPYING.LIB LICENSE; do
+WINEMAC_FILES="winemac.so x86_64-windows/winemac.drv i386-windows/winemac.drv"
+WINEMAC_PATCHES="$(sed -n 's/^PATCHES="\(.*\)"$/\1/p' scripts/build-winemac.sh)"
+for f in $WINEMAC_FILES VERSION COPYING.LIB LICENSE; do
   [ -f "$WM/$f" ] || { echo "Missing $WM/$f; run scripts/build-winemac.sh" >&2; exit 1; }
+done
+# the build must be of the patches as they are now
+for p in $WINEMAC_PATCHES; do
+  grep -q "patches/$p.patch sha256 $(shasum -a 256 "patches/$p.patch" | cut -d' ' -f1)" "$WM/VERSION" ||
+    { echo "$WM was not built from patches/$p.patch as it is now; run scripts/build-winemac.sh" >&2; exit 1; }
 done
 WINEMAC_COMMIT="$(sed -n 's/^WINE_COMMIT=//p' scripts/build-winemac.sh)"
 
@@ -150,10 +159,13 @@ install -m 644 "$D9/winemetal.dll" "$R/d9mt/winemetal.dll"
 install -m 755 "$D9/winemetal.so" "$R/d9mt/winemetal.so"
 install -m 644 "$D9/VERSION" "$R/d9mt/VERSION"
 
-# Wine's Mac driver with the PhysicalKeyboard option; the installer puts it into its engine
-# copy while "Game keys by keyboard position" is on
-mkdir -p "$R/wine"
+# Wine's Mac driver with the PhysicalKeyboard and raw mouse-look options; the installer puts
+# it into its engine copy while "Game keys by keyboard position" or "Raw mouse-look" is on
+mkdir -p "$R/wine/x86_64-windows" "$R/wine/i386-windows"
 install -m 755 "$WM/winemac.so" "$R/wine/winemac.so"
+for a in x86_64 i386; do
+  install -m 644 "$WM/$a-windows/winemac.drv" "$R/wine/$a-windows/winemac.drv"
+done
 
 # Licenses: the app's own (zlib), the overview of what is bundled and what is downloaded
 # (THIRD_PARTY_NOTICES.md), d9mt's (zlib; its bridge LGPL-2.1-or-later; third parties), Sparkle's
@@ -166,7 +178,8 @@ cp "$D9/bridge/LICENSE" "$D9/bridge/COPYING.LIB" "$L/d9mt/bridge/"
 mkdir -p "$L/sparkle"
 cp "$SPARKLE/LICENSE" "$L/sparkle/LICENSE"
 mkdir -p "$L/winemac"
-cp "$WM/COPYING.LIB" "$WM/LICENSE" "$WM/VERSION" patches/winemac-physical-keys.patch "$L/winemac/"
+cp "$WM/COPYING.LIB" "$WM/LICENSE" "$WM/VERSION" "$L/winemac/"
+for p in $WINEMAC_PATCHES; do cp "patches/$p.patch" "$L/winemac/"; done
 cat >"$L/README.txt" <<EOF
 SWTOR on Mac $APP_VERSION - licenses
 
@@ -183,13 +196,15 @@ licenses: d9mt/THIRD_PARTY_NOTICES.md and d9mt/LICENSES/.
 Sparkle $SPARKLE_VERSION (app updates), https://sparkle-project.org: MIT-style license, see
 sparkle/LICENSE.
 
-wine/winemac.so: Wine's Mac driver (dlls/winemac.drv, x86_64 unix side) from the sources of
-the app's Wine engine (CodeWeavers' CrossOver 26.3 with athei's patches, athei/wine
-$WINEMAC_COMMIT), with SWTOR on Mac's patch for the PhysicalKeyboard option ("Game keys by
-keyboard position"): LGPL-2.1-or-later, see winemac/COPYING.LIB and winemac/LICENSE. The patch
-is winemac/winemac-physical-keys.patch (also
-$REPO_URL/blob/v$APP_VERSION/patches/winemac-physical-keys.patch); the
-sources it applies to: https://github.com/athei/wine/tree/$WINEMAC_COMMIT (CodeWeavers'
+wine/: Wine's Mac driver (dlls/winemac.drv: winemac.so, the x86_64 unix side, and its PE sides
+x86_64-windows/ and i386-windows/winemac.drv) from the sources of the app's Wine engine
+(CodeWeavers' CrossOver 26.3 with athei's patches, athei/wine $WINEMAC_COMMIT), with the
+patches in winemac/, applied in this order: $(echo $WINEMAC_PATCHES | sed 's/\([^ ]*\)/\1.patch/g; s/ /, /g')
+(SWTOR on Mac's PhysicalKeyboard option, "Game keys by keyboard position"; SWGL on
+Mac's two mouse-look patches, https://github.com/jdrly/swgl-on-mac; SWTOR on Mac's changes
+to them, "Raw mouse-look"): LGPL-2.1-or-later, see winemac/COPYING.LIB and winemac/LICENSE.
+The patches are also in $REPO_URL/tree/v$APP_VERSION/patches; the
+sources they apply to: https://github.com/athei/wine/tree/$WINEMAC_COMMIT (CodeWeavers'
 CrossOver sources: https://www.codeweavers.com/crossover/source); build script:
 $REPO_URL/blob/v$APP_VERSION/scripts/build-winemac.sh.
 
@@ -206,7 +221,8 @@ printf 'version=%s\nbuild=%s\nchannel=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s
   "$CHANNEL" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" "$(plutil -extract SUFeedURL raw src/Info.plist)" >"$R/app.properties"
 printf 'app %s\nd9mt %s\nengine %s\nwinemac %s\nsparkle %s\nsdk %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
   "$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)" \
-  "physical-keys patch $(shasum -a 256 patches/winemac-physical-keys.patch | cut -c1-12)" "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
+  "$(for p in $WINEMAC_PATCHES; do printf '%s %s ' "${p#winemac-}" "$(shasum -a 256 "patches/$p.patch" | cut -c1-12)"; done | sed 's/ $//')" \
+  "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
 
 iconset="$CACHE/AppIcon.iconset"
 rm -rf "$iconset"
