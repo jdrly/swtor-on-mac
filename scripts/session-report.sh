@@ -14,7 +14,8 @@
 # Sources, all optional (SWTOR on Mac 0.0.5 logs have no STATS lines; then the frame numbers
 # come from what there is):
 #   STATS     once a second (d9mt 0.0.6 dev and later): fps, frame times, slow frames, passes,
-#             attachment loads/stores, compiles, Metal's allocated memory
+#             attachment loads/stores, compiles, Metal's allocated memory; from 0.0.6-dev.3 also
+#             the render thread's CPU time in the attachment optimization and the clears
 #   HITCH     each frame over 50 ms: d9mt's time in it and by what, or the game's
 #   COMPILE   render-thread frames with compiles or over 33 ms (shader/pipeline waits)
 #   DIAG MEM  every 256 frames: Metal's allocated memory
@@ -83,6 +84,10 @@ analyze() {
       rp += num(field("rp")) * fps; skp += num(field("skip")) * fps; cb += num(field("cb")) * fps
       dr += num(field("draws")) * fps; rst += num(field("restore")) * fps
       saved += num(field("savedMiB")) * fps
+      if (field("attMs") != "") {
+        na++; v = num(field("attMs")); attMs += v; if (v > attMax) attMax = v
+        cfold += num(field("clrFold")) * fps; cpass += num(field("clrPass")) * fps
+      }
       sh += num(field("sh")); pso += num(field("pso"))
       split(field("wait"), w, "/"); waits += num(w[1]); waitMs += num(w[2])
       a = num(field("allocMiB")); if (a > memPeak) memPeak = a
@@ -164,6 +169,10 @@ analyze() {
         }
         printf "compiles=%d shaders, %d pipelines\n", sh, pso
         printf "compile_waits=%d / %.0f ms\n", waits, waitMs
+        if (na) {
+          printf "att_cpu=%.2f ms/s (worst second %.2f)\n", attMs / na, attMax
+          if (frames) printf "clears=%.1f folded, %.1f own pass\n", cfold / frames, cpass / frames
+        }
         if (memPeak) printf "mem_peak=%d\n", memPeak
         printf "att=%s\n", att
       } else {
@@ -254,6 +263,8 @@ report() {
   row "Attachment traffic saved (MiB/frame)" saved_mib_frame
   row "  over the session (GiB)" saved_gib
   row "  re-clears per frame" restore
+  row "  its render-thread CPU time" att_cpu
+  row "Clears per frame" clears
   row "Attachment optimization" att
   row "Memory profile" memory_profile
   row "Pipeline wait budget" wait_budget

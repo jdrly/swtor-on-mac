@@ -162,7 +162,9 @@ they differ from releases in three ways:
 - frames over 33 ms and 50 ms;
 - hitches, split into d9mt's and the game's, and d9mt's top causes;
 - compile waits and the memory peak;
-- render passes and the attachment traffic d9mt saved;
+- render passes and the attachment traffic d9mt saved, and (0.0.6-dev.3 and later) the
+  render thread's CPU time in that optimization and the clears per frame, to tell its cost
+  apart from compile waits (a cold shader cache);
 - the attachment re-clears by cause, from the `RESTORE` lines (d9mt 0.0.6-dev.2 and later):
   image format and size, the aspects re-cleared, why and the D3D9 call, per frame.
 
