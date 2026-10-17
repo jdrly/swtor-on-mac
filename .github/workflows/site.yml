@@ -1,0 +1,33 @@
+# Rebuilds swonmac.com when a release is published, changed or deleted, so its versions,
+# downloads and release notes follow this repo's releases. It sends a `release`
+# repository_dispatch to jdrly/sw-on-mac (its Deploy workflow); development builds
+# (pre-releases) and drafts don't show on the site, so they're skipped.
+#
+# Needs the secret SITE_DISPATCH_TOKEN: a fine-grained token with access to jdrly/sw-on-mac only
+# and the permission Contents: Read and write. Without it the job only logs a notice.
+name: Site
+
+on:
+  release:
+    types: [published, edited, deleted]
+
+permissions: {}
+
+jobs:
+  dispatch:
+    if: ${{ !github.event.release.prerelease && !github.event.release.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rebuild swonmac.com
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          ACTION: ${{ github.event.action }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::SITE_DISPATCH_TOKEN is not set; swonmac.com was not rebuilt"
+            exit 0
+          fi
+          gh api "repos/jdrly/sw-on-mac/dispatches" -f event_type=release \
+            -f "client_payload[repo]=$GITHUB_REPOSITORY" -f "client_payload[tag]=$TAG" -f "client_payload[action]=$ACTION"
+          echo "Asked jdrly/sw-on-mac to rebuild for $GITHUB_REPOSITORY $TAG ($ACTION)"
