@@ -52,6 +52,11 @@ jobs:
           if [ "$DRY_RUN" = false ]; then
             [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "Tag $GITHUB_REF_NAME does not match build.sh ($version)"; exit 1; }
             [ -f "release-notes/$version.md" ] || { echo "Missing release-notes/$version.md"; exit 1; }
+            # The format swonmac.com reads (release-notes/README.md): the title, then a summary
+            notes="release-notes/$version.md"
+            [ "$(head -n 1 "$notes")" = "## SWTOR on Mac $version" ] || { echo "$notes must start with: ## SWTOR on Mac $version"; exit 1; }
+            summary="$(awk 'NR > 1 && NF { print; exit }' "$notes")"
+            case "$summary" in ''|'#'*|'- '*|'* '*) echo "$notes needs a one-sentence summary right after the title"; exit 1 ;; esac
           fi
 
       - name: Cache downloads
