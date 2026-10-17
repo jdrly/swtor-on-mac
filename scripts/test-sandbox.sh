@@ -4,16 +4,24 @@
 # (the app and Broadsword's Wine folder, not the game data), put back to stock if a wrapper is
 # installed, under $SANDBOX (SWTOR_ON_MAC_ROOT). Downloads the real engine and runs Wine
 # (wineboot, reg) on the sandbox prefix only, then checks that no Wine process is left.
+# Then the way from and back to 0.0.6 (sections 11-13, with OLD_APP): an install of 0.0.6
+# upgraded by this one (and a failed upgrade rolled back), this one replaced by 0.0.6 again
+# (Reinstall of the older app), and upgraded once more.
 #
 #   scripts/test-sandbox.sh [path/to/SWTOR on Mac.app]
 #
 # Needs the official SWTOR Mac app installed on this Mac (it is only read). Quit SWTOR first.
-# Env: SANDBOX (default /tmp/som-sandbox), KEEP=1 (leave the sandbox for a look afterwards)
+# Env: SANDBOX (default /tmp/som-sandbox), KEEP=1 (leave the sandbox for a look afterwards),
+#      OLD_APP (default release/0.0.6/SWTOR on Mac.app; missing: sections 11-13 are skipped)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 APP="$(cd "${1:-dist/SWTOR on Mac.app}" && pwd)"
 SOMSH="$APP/Contents/Resources/som.sh"
 [ -x "$SOMSH" ] || { echo "no $SOMSH; run ./build.sh" >&2; exit 1; }
+HL_APP="$APP/Contents/Resources/helpers/hold-launcher"
+OLD_APP="${OLD_APP:-release/0.0.6/SWTOR on Mac.app}"
+[ ! -d "$OLD_APP" ] || OLD_APP="$(cd "$OLD_APP" && pwd)"
+REPO="$PWD"
 SANDBOX="${SANDBOX:-/tmp/som-sandbox}"
 REAL_APP="/Applications/Star Wars - The Old Republic.app"
 REAL_WINE="$HOME/Library/Application Support/com.broadsword.swtor/Star Wars - The Old Republic/swtor-precompiled/Libraries/Wine"
@@ -53,11 +61,22 @@ AGENT_PLIST="$H/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist"
 # the watch job as launchd would start it (the sandbox never loads it into launchd)
 watch() { SWTOR_ON_MAC_SETTLE="${SETTLE:-1}" /bin/bash "$SOM/agent/som.sh" watch; }
 notes() { if [ -f "$LOGS/notifications.log" ]; then wc -l <"$LOGS/notifications.log" | tr -d ' '; else echo 0; fi; }
-# Wine processes of the sandbox (its engine, or anything with the sandbox in its path)
+# the engine's loader: lib/wine/x86_64-unix/wine (CrossOver 26), or bin/wine-preloader (0.0.x)
+loader_of() { if [ -f "$1/bin/wine-preloader" ]; then echo "$1/bin/wine-preloader"; else echo "$1/lib/wine/x86_64-unix/wine"; fi; }
+# Wine processes of the sandbox (its engine, or anything with the sandbox in its path), "<pid>
+# <program>": by real executable (Wine 11 shows C:\... names in ps) and by ps's name
 sandbox_wine() {
-  local tag=/nonexistent/
-  [ -f "$SOM/engine/bin/wine-preloader" ] && tag="/winetemp-$(stat -f '%i-%z' "$SOM/engine/bin/wine-preloader")-"
-  ps -axww -o pid=,comm= | grep -F -e "$SANDBOX/" -e "$tag" | grep -v grep || true
+  local tag=/nonexistent/ pre
+  pre=$(loader_of "$SOM/engine")
+  [ -f "$pre" ] && tag="/winetemp-$(stat -f '%i-%z' "$pre")-"
+  { "$HL_APP" --paths 2>/dev/null; ps -axww -o pid=,comm= | sed 's/^ *//'; } |
+    grep -F -e "$SANDBOX/" -e "$tag" | grep -v -e grep -e "$$ " | awk '!seen[$1]++' || true
+}
+# sbx_wine <args>: Wine of the sandbox's engine with its env file (0.0.x's needs its libraries)
+sbx_wine() {
+  ( set -a; [ ! -f "$SOM/env" ] || . "$SOM/env"; set +a; unset WINEDLLPATH
+    export WINEPREFIX="$SOM/prefix" WINEDEBUG=-all DYLD_FALLBACK_LIBRARY_PATH="$SOM/frameworks:/usr/lib"
+    exec "$SOM/engine/bin/wine" "$@" )
 }
 cleanup_wine() {
   local ws="$SOM/engine/bin/wineserver"
@@ -183,23 +202,28 @@ orphan() { ( "$@" </dev/null >/dev/null 2>&1 & echo $! >"$SANDBOX/orphan.pid" );
 alive() { local s; s=$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' '); [ -n "$s" ] && [ "${s#Z}" = "$s" ]; }
 all_alive() { local p; for p; do alive "$p" || return 1; done; }
 all_gone() { local p; for p; do ! alive "$p" || return 1; done; }
+# (the engine's layout: the loader lib/wine/x86_64-unix/wine, bin/wineserver)
 EB="$SOM/engine/bin"
-mkdir -p "$EB"
-cp "$SANDBOX/fake" "$EB/wine-preloader"
+EL="$SOM/engine/lib/wine/x86_64-unix/wine"
+mkdir -p "$EB" "${EL%/*}"
+cp "$SANDBOX/fake" "$EL"
 cp "$SANDBOX/fake" "$EB/wineserver"
-# CrossOver's re-exec names: hard links of the preloader in winetemp-<inode>-<size>-...
-WT="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$EB/wine-preloader")-1-2"
-mkdir -p "$WT" && ln "$EB/wine-preloader" "$WT/winedevice.exe"
+# CrossOver's start names: hard links of the loader in winetemp-<inode>-<size>-...
+WT="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$EL")-1-2"
+mkdir -p "$WT" && ln "$EL" "$WT/winedevice.exe"
+# orphan_as <argv0> <program> [args]: like orphan, with argv[0] rewritten as Wine 11 does (ps
+# then shows C:\windows\...)
+orphan_as() { ( bash -c 'exec -a "$0" "$@"' "$@" </dev/null >/dev/null 2>&1 & echo $! >"$SANDBOX/orphan.pid" ); cat "$SANDBOX/orphan.pid"; }
 # decoys: the same program elsewhere (another file, also in a winetemp-like folder)
 mkdir -p "$SANDBOX/decoy/winetemp-1-2-3-4"
 cp "$SANDBOX/fake" "$SANDBOX/decoy/wine-preloader"
 cp "$SANDBOX/fake" "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe"
 d1=$(orphan "$SANDBOX/decoy/wine-preloader")
-d2=$(orphan "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe")
-l1=$(orphan "$WT/winedevice.exe")
-l2=$(orphan "$EB/wine-preloader")
+d2=$(orphan_as 'C:\windows\system32\winedevice.exe' "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe")
+l1=$(orphan_as 'C:\windows\system32\winedevice.exe' "$WT/winedevice.exe")
+l2=$(orphan_as 'C:\windows\system32\services.exe' "$EL")
 # one whose parent still runs and is not Wine (a winedevice.exe whose services.exe is alive)
-( "$EB/wine-preloader" & echo $! >"$SANDBOX/child.pid"; "$SANDBOX/decoy/wine-preloader" 60 ) </dev/null >/dev/null 2>&1 &
+( "$EL" & echo $! >"$SANDBOX/child.pid"; "$SANDBOX/decoy/wine-preloader" 60 ) </dev/null >/dev/null 2>&1 &
 p3=$!
 sleep 0.5
 l3=$(cat "$SANDBOX/child.pid")
@@ -223,8 +247,8 @@ check "end-leftovers: the non-Wine parent left alone" alive "$p3"
 check "end-leftovers: logged" grep -q 'Ended leftover Wine processes' "$LOGS/install.log"
 check "end-leftovers: status busy=none" test "$(st busy)" = none
 # the game and Broadsword's Wine are not leftovers, and keep leftovers from ending
-cp "$SANDBOX/fake" "$SANDBOX/decoy/swtor.exe"
-g=$(orphan "$SANDBOX/decoy/swtor.exe"); l4=$(orphan "$WT/winedevice.exe"); sleep 0.3
+cp "$SANDBOX/fake" "$SANDBOX/decoy/game"
+g=$(orphan_as 'C:\Program Files\SWTOR\retailclient\swtor.exe' "$SANDBOX/decoy/game"); l4=$(orphan "$WT/winedevice.exe"); sleep 0.3
 check "game: status busy=game" test "$(st busy)" = game
 check "game: end-leftovers refuses" eval '! som end-leftovers >/dev/null 2>&1'
 check "game: nothing ended" all_alive "$l4" "$g"
@@ -250,6 +274,7 @@ check "install: the leftover is gone" all_gone "$l4"
 rm -rf "$WT"
 check "fail: official install unchanged" test "$STOCK" = "$(snap "$BS_WINE")"
 check "fail: no engine/prefix left" test ! -e "$SOM/engine" -a ! -e "$SOM/prefix" -a ! -e "$SOM/install-manifest.json"
+check "fail: no engine download left half-done" eval '! ls -d "$SOM"/*.new >/dev/null 2>&1'
 check "fail: no Wine left running" test -z "$(sandbox_wine)"
 
 echo "== 4. install"
@@ -267,9 +292,14 @@ check "install: wrapper reads the sandbox env" grep -qF "CONF=\"$SOM/env\"" "$BS
 check "install: helpers" test -x "$BS_WINE/bin-real/hold-launcher" -a -x "$BS_WINE/bin-real/setsid-exec"
 check "install: bridge .so" cmp -s "$APP/Contents/Resources/d9mt/winemetal.so" "$SOM/engine/lib/wine/x86_64-unix/winemetal.so"
 check "install: bridge .dll" cmp -s "$APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll"
+check "install: the dxgi/dxmt tree's winemetal.so is the bridge too" cmp -s "$APP/Contents/Resources/d9mt/winemetal.so" "$SOM/engine/lib/wine/dxgi/dxmt/x86_64-unix/winemetal.so"
+check "install: engine $(sed -n 's/^ENGINE_NAME=//p' "$SOMSH") (Wine $(sbx_wine --version 2>/dev/null))" test "$(sbx_wine --version 2>/dev/null)" = wine-11.0
+check "install: engine without its SDK (include, tests)" test ! -e "$SOM/engine/include" -a ! -e "$SOM/engine/lib/wine/tests"
+check "install: no engine libraries folder (self-contained engine)" test ! -e "$SOM/frameworks"
+check "install: manifest engine_id cx26" test "$(plutil -extract engine_id raw -o - "$SOM/install-manifest.json")" = cx26
 sys="$SOM/prefix/drive_c/windows/system32"
 check "install: d9mt d3d9.dll" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
-check "install: Wine's d3d9 kept" test "$(dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=12 2>/dev/null)" = "Wine builtin"
+check "install: Wine's d3d9 kept ($(dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=20 2>/dev/null))" eval 'dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=20 2>/dev/null | grep -q -e "Wine builtin" -e "Wine placeholder"'
 check "install: RetinaMode=y" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
 WM="$SOM/engine/lib/wine/x86_64-unix"
 WM_STOCK=$(sed -n 's/^ENGINE_WINEMAC_SHA256=//p' "$SOMSH")
@@ -280,9 +310,12 @@ check "install: PhysicalKeyboard=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.
 check "install: manifest winemac stock" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = stock
 check "install: GrabPointer=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\X11 Driver' '"GrabPointer"="n"'
 check "install: d3d9 override" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\DllOverrides' '"d3d9"="native,builtin"'
-check "install: gamemode exe = engine preloader" cmp -s "$SOM/engine/bin/wine-preloader" "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe"
+check "install: gamemode exe = engine loader" cmp -s "$SOM/engine/lib/wine/x86_64-unix/wine" "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe"
+check "install: gamemode ntdll.so link (relative) to the engine's" eval 'cmp -s "$SOM/gamemode/SWTOR.app/Contents/MacOS/ntdll.so" "$SOM/engine/lib/wine/x86_64-unix/ntdll.so" && [ "$(readlink "$SOM/gamemode/SWTOR.app/Contents/MacOS/ntdll.so")" = ../../../../engine/lib/wine/x86_64-unix/ntdll.so ]'
 check "install: gamemode plist" plutil -lint -s "$SOM/gamemode/SWTOR.app/Contents/Info.plist"
 check "install: env" grep -q '^SWTOR_ENGINE=' "$SOM/env"
+check "install: env engine id, no engine libraries" eval 'grep -qx SWTOR_ENGINE_ID=cx26 "$SOM/env" && ! grep -q "^SWTOR_FRAMEWORKS" "$SOM/env"'
+check "install: env compatdb rule (DXGI on wined3d)" eval '(set -a; . "$SOM/env"; [ "$WINE_COMPATDB" = "$(printf "v=5\nname=swtor-on-mac;exe=*;dxgi=wined3d")" ])'
 check "install: dxvk.conf" grep -q 'presentInterval = 1' "$SOM/dxvk.conf"
 check "install: manifest is JSON" plutil -convert json -o /dev/null "$SOM/install-manifest.json"
 check "install: manifest records the real preloader" test "$(plutil -extract original_preloaders_sha256.wine64-preloader raw -o - "$SOM/install-manifest.json")" = "$(shasum -a 256 "$BS_WINE/bin-real/wine64-preloader" | cut -d" " -f1)"
@@ -342,8 +375,7 @@ check "set: bad value refused" eval '! som set memory huge >/dev/null 2>&1'
 check "set: bad key refused" eval '! som set foo on >/dev/null 2>&1'
 cp "$SANDBOX/fake" "$SOM/engine/bin/test-leftover"; l5=$(orphan "$SOM/engine/bin/test-leftover"); sleep 0.3
 som set retina off >/dev/null && check "set retina off: user.reg" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="n"'
-out=$(env -u WINEPREFIX WINEPREFIX="$SOM/prefix" WINEDEBUG=-all DYLD_FALLBACK_LIBRARY_PATH="$SOM/frameworks:/usr/lib" \
-  "$SOM/engine/bin/wine" reg query 'HKCU\Software\Wine\Mac Driver' /v RetinaMode 2>/dev/null | tr -d '\r' || true)
+out=$(sbx_wine reg query 'HKCU\Software\Wine\Mac Driver' /v RetinaMode 2>/dev/null | tr -d '\r' || true)
 cleanup_wine
 check "set retina: ended a leftover first" all_gone "$l5"
 rm -f "$SOM/engine/bin/test-leftover"
@@ -363,8 +395,7 @@ check "set physkeys on: PhysicalKeyboard=y" reg_has 'Software\\Wine\\AppDefaults
 check "set physkeys on: manifest" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = physical-keys
 check "set physkeys on: manifest sha" test "$(plutil -extract winemac_sha256 raw -o - "$SOM/install-manifest.json")" = "$(wm_sha)"
 check "set physkeys on: RetinaMode kept" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
-out=$(env -u WINEPREFIX WINEPREFIX="$SOM/prefix" WINEDEBUG=-all DYLD_FALLBACK_LIBRARY_PATH="$SOM/frameworks:/usr/lib" \
-  "$SOM/engine/bin/wine" reg query 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v PhysicalKeyboard 2>/dev/null | tr -d '\r' || true)
+out=$(sbx_wine reg query 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v PhysicalKeyboard 2>/dev/null | tr -d '\r' || true)
 cleanup_wine
 check "set physkeys on: Wine reads y ($(echo "$out" | awk '/PhysicalKeyboard/ { print $NF }'))" test "$(echo "$out" | awk '/PhysicalKeyboard/ { print $NF }')" = y
 clang -o "$BS_APP/Contents/MacOS/test-sleep2" "$SANDBOX/sleep2.c" && { "$BS_APP/Contents/MacOS/test-sleep2" & sleeper=$!; sleep 0.5; }
@@ -379,8 +410,7 @@ if command -v x86_64-w64-mingw32-gcc >/dev/null; then
   # probe <input source ID>: the driver reads that keyboard layout (WINEMAC_TEST_KEYBOARD_LAYOUT,
   # the patch's test hook), not the Mac's current one; the input source is never changed
   probe() {
-    WINEMAC_TEST_KEYBOARD_LAYOUT="$1" WINEPREFIX="$SOM/prefix" WINEDEBUG=-all \
-      DYLD_FALLBACK_LIBRARY_PATH="$SOM/frameworks:/usr/lib" "$SOM/engine/bin/wine" "$SANDBOX/probe/swtor.exe" 2>/dev/null | tr -d '\r'
+    WINEMAC_TEST_KEYBOARD_LAYOUT="$1" sbx_wine "$SANDBOX/probe/swtor.exe" 2>/dev/null | tr -d '\r'
   }
   line() { sed -n "s/^$1: //p" <<<"$2"; }
   cz=$(probe com.apple.keylayout.Czech); de=$(probe com.apple.keylayout.German); us=$(probe com.apple.keylayout.US)
@@ -394,6 +424,9 @@ if command -v x86_64-w64-mingw32-gcc >/dev/null; then
   check "keys on, German: key at US Y is VK_Y named Y, types z" test "$(line key-0x15 "$de")" = "vk Y name Y plain z"
   check "keys on, US: number row" test "$(line numrow-name "$us")/$(line numrow-plain "$us")" = "1 2 3 4 5 6 7 8 9 0/1 2 3 4 5 6 7 8 9 0"
   check "keys on, current layout: number row named 1-0" test "$(line numrow-name "$cur")" = "1 2 3 4 5 6 7 8 9 0"
+  # the probes' Wine session ends by itself a few seconds later (wineserver's linger), as after
+  # a game; until then the setting refuses (Wine keeps the registry in its wineserver)
+  WINEPREFIX="$SOM/prefix" "$SOM/engine/bin/wineserver" -w 2>/dev/null || true
   som set physkeys off >/dev/null && check "set physkeys off: the engine's own Mac driver" test "$(wm_sha)" = "$WM_STOCK"
   check "set physkeys off: PhysicalKeyboard=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="n"'
   # the engine's own driver has no test hook: the Mac's current layout only
@@ -411,14 +444,14 @@ fi
 
 echo "== 5. the wrapper hands Wine calls to the app's engine"
 out=$("$BS_WINE/bin/wine64-preloader" "$BS_WINE/bin/wine64" --version 2>&1 || true)
-check "wrapper: engine wine answers ($out)" test "${out#*9.0}" != "$out"
+check "wrapper: engine wine answers ($out)" test "$out" = wine-11.0
 cleanup_wine
 check "wrapper: no Wine left running" test -z "$(sandbox_wine)"
 
 echo "== 6. reinstall is idempotent"
-ino=$(stat -f %i "$SOM/engine/bin/wine-preloader")
+ino=$(stat -f %i "$SOM/engine/lib/wine/x86_64-unix/wine")
 som install >"$SANDBOX/reinstall.txt" 2>&1 || { tail -20 "$SANDBOX/reinstall.txt"; bad "reinstall exit"; }
-check "reinstall: engine kept" test "$ino" = "$(stat -f %i "$SOM/engine/bin/wine-preloader")"
+check "reinstall: engine kept" test "$ino" = "$(stat -f %i "$SOM/engine/lib/wine/x86_64-unix/wine")"
 check "reinstall: prefix kept" grep -q 'Updating the existing Wine prefix' "$SANDBOX/reinstall.txt"
 check "reinstall: wrapper ours" test "$(st wrapper)" = ours
 check "reinstall: no Wine left running" test -z "$(sandbox_wine)"
@@ -455,9 +488,10 @@ SWTOR_NOTIFY_LOG="$U/notifications.log"
 ENV
 sed "s|@CONF@|$U/env|" "$APP/Contents/Resources/wine-wrapper.sh" >"$U/bin/wine64-preloader"; chmod +x "$U/bin/wine64-preloader"
 game() { "$U/bin/wine64-preloader" "$U/bin/wine64" 'C:\swtor\retailclient\swtor.exe' -set username TESTACCOUNT >/dev/null 2>&1; sleep 1.5; }
-cp "$SANDBOX/fake" "$U/engine/bin/wine-preloader"
-UWT="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$U/engine/bin/wine-preloader")-7-8"
-mkdir -p "$UWT" && ln "$U/engine/bin/wine-preloader" "$UWT/winedevice.exe"
+mkdir -p "$U/engine/lib/wine/x86_64-unix"
+cp "$SANDBOX/fake" "$U/engine/lib/wine/x86_64-unix/wine"
+UWT="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$U/engine/lib/wine/x86_64-unix/wine")-7-8"
+mkdir -p "$UWT" && ln "$U/engine/lib/wine/x86_64-unix/wine" "$UWT/winedevice.exe"
 l6=$(orphan "$UWT/winedevice.exe"); d6=$(orphan "$SANDBOX/fake" 60); sleep 0.3
 feed 0.0.2; game
 check "wrapper: ended a leftover of the engine before starting Wine" all_gone "$l6"
@@ -477,6 +511,12 @@ touch -t 202001010000 "$U/app/last-update-check"; feed 0.0.5; game
 check "update check: 0.0.5 is not newer than 0.0.6-dev.1" test "$(wc -l <"$U/notifications.log")" = "$n" -a ! -e "$U/app/update-available"
 touch -t 202001010000 "$U/app/last-update-check"; feed 0.0.6; game
 check "update check: 0.0.6 is newer than 0.0.6-dev.1" test "$(cat "$U/app/update-available" 2>/dev/null)" = 0.0.6
+sed -i '' 's|^SWTOR_ON_MAC_VERSION=.*|SWTOR_ON_MAC_VERSION=0.1.0-dev.1|' "$U/env"
+rm -f "$U/app/update-available"; n=$(wc -l <"$U/notifications.log")
+touch -t 202001010000 "$U/app/last-update-check"; feed 0.0.6; game
+check "update check: 0.0.6 is not newer than 0.1.0-dev.1" test "$(wc -l <"$U/notifications.log")" = "$n" -a ! -e "$U/app/update-available"
+touch -t 202001010000 "$U/app/last-update-check"; feed 0.1.0; game
+check "update check: 0.1.0 is newer than 0.1.0-dev.1" test "$(cat "$U/app/update-available" 2>/dev/null)" = 0.1.0
 sed -i '' 's|^SWTOR_ON_MAC_VERSION=.*|SWTOR_ON_MAC_VERSION=0.0.1|' "$U/env"
 n=$(wc -l <"$U/notifications.log"); rm -f "$U/app/update-available"
 touch -t 202001010000 "$U/app/last-update-check"; sed -i '' 's|^SWTOR_UPDATE_FEED=.*|SWTOR_UPDATE_FEED="http://127.0.0.1:9/appcast.xml"|' "$U/env"
@@ -488,18 +528,19 @@ check "update check: no account in the logs" eval '! grep -rq TESTACCOUNT "$U/lo
 echo "== 6d. hold-launcher ends what is left of the engine's Wine once the launcher quits (dummies)"
 T="$SANDBOX/hold-test"
 TE="$T/engine/bin"
+TL="$T/engine/lib/wine/x86_64-unix/wine"   # the engine's loader
 FL="$T/Fake.app/Contents/MacOS/Star Wars - The Old Republic Launcher"
 HL="$APP/Contents/Resources/helpers/hold-launcher"
-mkdir -p "$TE" "${FL%/*}" "$T/logs"
-cp "$SANDBOX/fake" "$TE/wine-preloader"
+mkdir -p "$TE" "${TL%/*}" "${FL%/*}" "$T/logs"
+cp "$SANDBOX/fake" "$TL"
 cp "$SANDBOX/fake" "$TE/wineserver"
-TWT="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$TE/wine-preloader")-5-6"
-mkdir -p "$TWT" && ln "$TE/wine-preloader" "$TWT/winedevice.exe" && ln "$TE/wine-preloader" "$TWT/services.exe"
+TWT="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$TL")-5-6"
+mkdir -p "$TWT" && ln "$TL" "$TWT/winedevice.exe" && ln "$TL" "$TWT/services.exe"
 mkdir -p "$SANDBOX/decoy/winetemp-1-2-3-4"
 cp "$SANDBOX/fake" "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe"
 d7=$(orphan "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe")
 # --reap (what the wrapper runs): nothing while a wineserver of the engine runs
-srv=$(orphan "$TE/wineserver"); r1=$(orphan "$TWT/winedevice.exe"); r2=$(orphan "$TE/wine-preloader"); sleep 0.3
+srv=$(orphan "$TE/wineserver"); r1=$(orphan "$TWT/winedevice.exe"); r2=$(orphan_as 'C:\windows\system32\services.exe' "$TL"); sleep 0.3
 SWTOR_ENGINE="$T/engine" "$HL" --reap 2>>"$T/logs/reap.log"
 check "hold --reap: leaves a running session alone" all_alive "$r1" "$r2" "$srv"
 kill "$srv"; sleep 0.3
@@ -514,7 +555,7 @@ check "hold --reap: decoy left alone" alive "$d7"
 # "wineserver -k" (the old hold-launcher gave up on that: it saw the server and left all).
 printf '#include <stdlib.h>\n#include <sys/wait.h>\n#include <unistd.h>\nint main(int argc, char **argv) { if (argc < 2) return 2; pid_t p = fork(); if (p == 0) { execv(argv[1], argv + 1); _exit(127); } int st; waitpid(p, &st, 0); if (getenv("FAKE_AFTER")) system(getenv("FAKE_AFTER")); return 0; }\n' >"$T/launcher.c"
 clang -o "$FL" "$T/launcher.c"
-printf '#!/bin/bash\n"%s" $$ </dev/null >/dev/null 2>>"%s"\nexec "%s" 3\n' "$HL" "$T/logs/hold.log" "$TE/wine-preloader" >"$T/game.sh"
+printf '#!/bin/bash\n"%s" $$ </dev/null >/dev/null 2>>"%s"\nexec "%s" 3\n' "$HL" "$T/logs/hold.log" "$TL" >"$T/game.sh"
 cat >"$T/after.sh" <<AFTER
 #!/bin/bash
 ( "$TE/wineserver" </dev/null >/dev/null 2>&1 & )
@@ -605,10 +646,12 @@ if [ -f "$zip" ]; then
   check "logs: no user name in paths" eval '! grep -rq "/Users/$(id -un)/" "$SANDBOX/zip"'
   check "logs: system info has the Mac" grep -q '^Mac: ' "$SANDBOX"/zip/*/system-info.txt
 fi
-# the Game Mode link the wrapper would have made at game start
-pre="$SOM/engine/bin/wine-preloader"; m=$(stat -f '%Fm' "$pre")
-link="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$pre")-${m%.*}-$((10#${m#*.}))/swtor.exe"
-mkdir -p "$(dirname "$link")" && ln -sf "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe" "$link"
+# the Game Mode links the wrapper would have made at game start ("wine", or "swtor.exe" for a
+# start.exe command)
+pre="$SOM/engine/lib/wine/x86_64-unix/wine"; m=$(stat -f '%Fm' "$pre")
+link="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$pre")-${m%.*}-$((10#${m#*.}))/wine"
+mkdir -p "$(dirname "$link")" && ln -sf "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe" "$link" &&
+  ln -sf "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe" "${link%/*}/swtor.exe"
 cp "$SANDBOX/fake" "$SOM/engine/bin/test-leftover"; l8=$(orphan "$SOM/engine/bin/test-leftover"); sleep 0.3
 check "before uninstall: status shows the leftover" test "$(st busy)" = leftovers
 som uninstall >"$SANDBOX/uninstall.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall.txt"; bad "uninstall exit"; }
@@ -621,7 +664,7 @@ check "play: unavailable after uninstall" test "$(play_target)" = "unavailable I
 for c in engine frameworks prefix gamemode env dxvk.conf install-manifest.json; do
   check "uninstall: $c removed" test ! -e "$SOM/$c"
 done
-check "uninstall: Game Mode link removed" test ! -L "$link"
+check "uninstall: Game Mode links removed" test ! -L "$link" -a ! -L "${link%/*}/swtor.exe"
 check "uninstall: launchd job removed" test ! -e "$AGENT_PLIST" -a ! -e "$SOM/agent"
 if [ -d "$GS_BS" ]; then
   check "uninstall: game settings copied back" grep -q test-change "$GS_BS/client_settings_test.ini"
@@ -657,6 +700,143 @@ if [ -d "$PERSONAL_WRAPPER" ]; then
   check "force: no Wine left running" test -z "$(sandbox_wine)"
   som uninstall >"$SANDBOX/force-un.txt" 2>&1 || bad "uninstall after takeover"
   check "force: uninstall gives stock" like_stock force-uninstall
+fi
+
+if [ -x "$OLD_APP/Contents/Resources/som.sh" ]; then
+  OLDSOM="$OLD_APP/Contents/Resources/som.sh"
+  OLDV=$(sed -n 's/^version=//p' "$OLD_APP/Contents/Resources/app.properties")
+  oldsom() { "$OLDSOM" "$@"; }
+  oldst() { oldsom status | sed -n "s/^$1=//p"; }
+  # The engines' downloads, verified, from the repository's cache (fetched once): the installs
+  # below take them from the sandbox's download cache instead of downloading them each time.
+  cached() { # <url> <sha256>: the path of the verified download in .cache
+    local f="$REPO/.cache/$2/${1##*/}"
+    if [ ! -f "$f" ]; then mkdir -p "${f%/*}"; curl -fsSL -o "$f.part" "$1" && mv "$f.part" "$f"; fi
+    [ "$(shasum -a 256 "$f" | cut -d' ' -f1)" = "$2" ] && echo "$f"
+  }
+  val() { sed -n "s/^$1=//p" "$2" | head -1; }
+  OLD_ENGINE=$(cached "$(val ENGINE_URL "$OLDSOM")" "$(val ENGINE_SHA256 "$OLDSOM")")
+  OLD_FW=$(cached "$(val FW_URL "$OLDSOM")" "$(val FW_SHA256 "$OLDSOM")")
+  NEW_ENGINE=$(cached "$(val ENGINE_URL "$SOMSH")" "$(val ENGINE_SHA256 "$SOMSH")")
+  DLC="$H/Library/Caches/SWTOR on Mac/downloads"
+  seed() { mkdir -p "$DLC"; cp -c "$@" "$DLC/"; }
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  OLD_SHA=$(val ENGINE_SHA256 "$OLDSOM")
+  GS="$SOM/prefix/drive_c/users/crossover/AppData/Local/SWTOR/swtor/settings"
+  echo "== 11. upgrade from $OLDV: an install of $OLDV ($OLD_APP), then this version over it"
+  seed "$OLD_ENGINE" "$OLD_FW"
+  t0=$SECONDS
+  oldsom install >"$SANDBOX/old-install.txt" 2>&1 || { tail -20 "$SANDBOX/old-install.txt"; bad "$OLDV install exit"; }
+  echo "  ($OLDV install took $((SECONDS - t0)) s)"
+  check "$OLDV: installed, CrossOver 24.0.7 with its libraries" test -f "$SOM/engine/bin/wine-preloader" -a -d "$SOM/frameworks" -a "$(oldst installed_version)" = "$OLDV"
+  oldsom set physkeys on >/dev/null; oldsom set memory high >/dev/null; oldsom set retina off >/dev/null
+  check "$OLDV: settings changed (physkeys on, memory high, Retina off)" eval 'grep -qx physkeys=on "$SOM/settings.conf" && grep -qx memory=high "$SOM/settings.conf" && reg_has "Software\\\\Wine\\\\Mac Driver" "\"RetinaMode\"=\"n\""'
+  mkdir -p "$GS" && echo "keybinds-from-$OLDV" >"$GS/upgrade-marker.ini"
+  check "$OLDV: no Wine left running" test -z "$(sandbox_wine)"
+  check "this version sees the old engine (engine_current=$(st engine_current), installed_engine=$(st installed_engine))" test "$(st engine_current)" = no -a "$(st installed_engine)" = WS12WineCX24.0.7_7
+  check "settings refused until Reinstall" eval '! som set hud on >"$SANDBOX/set-old.txt" 2>&1 && grep -q "Click Reinstall" "$SANDBOX/set-old.txt" && grep -q "^SWTOR_FRAMEWORKS=" "$SOM/env"'
+  OLD_STATE="$(cd "$SOM" && shasum -a 256 env settings.conf dxvk.conf prefix/system.reg prefix/user.reg prefix/userdef.reg engine/.som-source)"
+
+  echo "== 11b. a failed upgrade puts $OLDV back (bin not writable: fails after wineboot, at the wrapper)"
+  seed "$NEW_ENGINE"
+  chmod a-w "$BS_WINE/bin"
+  if som install >"$SANDBOX/upgrade-fail.txt" 2>&1; then bad "upgrade with read-only bin succeeded"; fi
+  chmod u+w "$BS_WINE/bin"
+  check "failed upgrade: got as far as the prefix update" grep -q "Updating the prefix for the new engine" "$SANDBOX/upgrade-fail.txt"
+  check "failed upgrade: the old prefix was kept as a clone" grep -q "Keeping the prefix as it is" "$SANDBOX/upgrade-fail.txt"
+  check "failed upgrade: engine, libraries, env, settings and prefix as before" test "$OLD_STATE" = "$(cd "$SOM" && shasum -a 256 env settings.conf dxvk.conf prefix/system.reg prefix/user.reg prefix/userdef.reg engine/.som-source 2>&1)"
+  check "failed upgrade: CrossOver 24.0.7 back, with its libraries" test -f "$SOM/engine/bin/wine-preloader" -a -d "$SOM/frameworks" -a ! -e "$SOM/upgrade-backup"
+  check "failed upgrade: Game Mode bundle is the old preloader again" cmp -s "$SOM/engine/bin/wine-preloader" "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe"
+  check "failed upgrade: $OLDV's wrapper still in place" test "$(oldst wrapper)" = ours
+  out=$("$BS_WINE/bin/wine64-preloader" "$BS_WINE/bin/wine64" --version 2>&1 || true)
+  check "failed upgrade: the wrapper runs CrossOver 24.0.7 ($out)" test "${out#*9.0}" != "$out"
+  out=$(sbx_wine reg query 'HKCU\Software\Wine\Mac Driver' /v RetinaMode 2>/dev/null | tr -d '\r' || true)
+  cleanup_wine
+  check "failed upgrade: Wine 9 reads the prefix (RetinaMode $(echo "$out" | awk '/RetinaMode/ { print $NF }'))" test "$(echo "$out" | awk '/RetinaMode/ { print $NF }')" = n
+  check "failed upgrade: no Wine left running" test -z "$(sandbox_wine)"
+
+  echo "== 11c. upgrade"
+  seed "$NEW_ENGINE"
+  t0=$SECONDS
+  som install >"$SANDBOX/upgrade.txt" 2>&1 || { tail -20 "$SANDBOX/upgrade.txt"; bad "upgrade exit"; }
+  echo "  (upgrade took $((SECONDS - t0)) s)"
+  check "upgrade: @done" grep -q '^@done' "$SANDBOX/upgrade.txt"
+  check "upgrade: said so" grep -q "^Upgrading SWTOR on Mac $OLDV" "$SANDBOX/upgrade.txt"
+  check "upgrade: the new engine (engine_current=$(st engine_current), installed_engine=$(st installed_engine))" test "$(st engine_current)" = yes -a "$(st installed_engine)" = "$(val ENGINE_NAME "$SOMSH")"
+  check "upgrade: Wine $(sbx_wine --version 2>/dev/null)" test "$(sbx_wine --version 2>/dev/null)" = wine-11.0
+  check "upgrade: old engine, its libraries and the copies removed" test ! -e "$SOM/engine/bin/wine-preloader" -a ! -e "$SOM/frameworks" -a ! -e "$SOM/upgrade-backup"
+  check "upgrade: manifest version $APPV, engine_id cx26" test "$(plutil -extract version raw -o - "$SOM/install-manifest.json")/$(plutil -extract engine_id raw -o - "$SOM/install-manifest.json")" = "$APPV/cx26"
+  check "upgrade: settings kept" eval 'grep -qx physkeys=on "$SOM/settings.conf" && grep -qx memory=high "$SOM/settings.conf" && grep -qx retina=off "$SOM/settings.conf" && grep -qx D9MT_MEMORY_PROFILE=high "$SOM/env"'
+  check "upgrade: RetinaMode=n kept" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="n"'
+  check "upgrade: PhysicalKeyboard=y kept, the app's Mac driver" eval 'reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"y\"" && cmp -s "$APP/Contents/Resources/wine/winemac.so" "$WM/winemac.so"'
+  check "upgrade: GrabPointer=n and the d3d9 override kept" eval 'reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\X11 Driver" "\"GrabPointer\"=\"n\"" && reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\DllOverrides" "\"d3d9\"=\"native,builtin\""'
+  check "upgrade: game settings kept" grep -qx "keybinds-from-$OLDV" "$GS/upgrade-marker.ini"
+  check "upgrade: d9mt's d3d9.dll" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
+  check "upgrade: bridge in the new engine" cmp -s "$APP/Contents/Resources/d9mt/winemetal.so" "$SOM/engine/lib/wine/x86_64-unix/winemetal.so"
+  check "upgrade: Game Mode bundle from the new loader" eval 'cmp -s "$SOM/engine/lib/wine/x86_64-unix/wine" "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe" && test -e "$SOM/gamemode/SWTOR.app/Contents/MacOS/ntdll.so"'
+  check "upgrade: env for the new engine" eval 'grep -qx SWTOR_ENGINE_ID=cx26 "$SOM/env" && grep -q "^WINE_COMPATDB=" "$SOM/env" && ! grep -q "^SWTOR_FRAMEWORKS" "$SOM/env"'
+  check "upgrade: wrapper and helpers of this version" eval 'cmp -s "$APP/Contents/Resources/helpers/hold-launcher" "$BS_WINE/bin-real/hold-launcher" && diff -q <(sed "s|@CONF@|$SOM/env|" "$APP/Contents/Resources/wine-wrapper.sh") "$BS_WINE/bin/wine64-preloader" >/dev/null'
+  out=$("$BS_WINE/bin/wine64-preloader" "$BS_WINE/bin/wine64" --version 2>&1 || true)
+  check "upgrade: the wrapper runs the new engine ($out)" test "$out" = wine-11.0
+  out=$(sbx_wine reg query 'HKCU\Software\Wine\Mac Driver' /v RetinaMode 2>/dev/null | tr -d '\r' || true)
+  cleanup_wine
+  check "upgrade: Wine 11 reads the prefix (RetinaMode $(echo "$out" | awk '/RetinaMode/ { print $NF }'))" test "$(echo "$out" | awk '/RetinaMode/ { print $NF }')" = n
+  check "upgrade: settings can change again" eval 'som set hud on >/dev/null && som set hud off >/dev/null'
+  check "upgrade: download cache removed" test ! -e "$DLC"
+  check "upgrade: no Wine left running" test -z "$(sandbox_wine)"
+
+  echo "== 12. downgrade: $OLDV's Reinstall over this version"
+  seed "$OLD_ENGINE" "$OLD_FW"
+  t0=$SECONDS
+  oldsom install >"$SANDBOX/downgrade.txt" 2>&1 || { tail -20 "$SANDBOX/downgrade.txt"; bad "downgrade exit"; }
+  echo "  (downgrade took $((SECONDS - t0)) s)"
+  check "downgrade: @done" grep -q '^@done' "$SANDBOX/downgrade.txt"
+  check "downgrade: CrossOver 24.0.7 with its libraries again" eval 'test -f "$SOM/engine/bin/wine-preloader" -a -d "$SOM/frameworks" && [ "$(cat "$SOM/engine/.som-source")" = "$OLD_SHA" ]'
+  check "downgrade: manifest $OLDV" test "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$OLDV"
+  check "downgrade: Wine $(sbx_wine --version 2>/dev/null)" eval 'sbx_wine --version 2>/dev/null | grep -q "^wine-9.0"'
+  check "downgrade: settings kept" eval 'grep -qx physkeys=on "$SOM/settings.conf" && grep -qx memory=high "$SOM/settings.conf" && grep -qx retina=off "$SOM/settings.conf"'
+  check "downgrade: $OLDV's Mac driver (game keys by position)" cmp -s "$OLD_APP/Contents/Resources/wine/winemac.so" "$SOM/engine/lib/wine/x86_64-unix/winemac.so"
+  check "downgrade: game settings kept" grep -qx "keybinds-from-$OLDV" "$GS/upgrade-marker.ini"
+  check "downgrade: d9mt's d3d9.dll" cmp -s "$OLD_APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
+  check "downgrade: Game Mode bundle from the old preloader" cmp -s "$SOM/engine/bin/wine-preloader" "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe"
+  out=$("$BS_WINE/bin/wine64-preloader" "$BS_WINE/bin/wine64" --version 2>&1 || true)
+  check "downgrade: the wrapper runs CrossOver 24.0.7 ($out)" test "${out#*9.0}" != "$out"
+  out=$(sbx_wine reg query 'HKCU\Software\Wine\Mac Driver' /v RetinaMode 2>/dev/null | tr -d '\r' || true)
+  check "downgrade: Wine 9 reads the prefix Wine 11 updated (RetinaMode $(echo "$out" | awk '/RetinaMode/ { print $NF }'))" test "$(echo "$out" | awk '/RetinaMode/ { print $NF }')" = n
+  out=$(sbx_wine cmd /c echo downgrade-ok 2>/dev/null | tr -d '\r' || true)
+  check "downgrade: Wine 9 runs a program in it (cmd: $out)" test "$out" = downgrade-ok
+  if [ -f "$SANDBOX/probe/swtor.exe" ]; then
+    out=$(WINEMAC_TEST_KEYBOARD_LAYOUT=com.apple.keylayout.Czech sbx_wine "$SANDBOX/probe/swtor.exe" 2>/dev/null | tr -d '\r' | sed -n 's/^numrow-name: //p')
+    check "downgrade: $OLDV's game keys by position work (Czech number row: $out)" test "$out" = "1 2 3 4 5 6 7 8 9 0"
+  fi
+  cleanup_wine
+  check "downgrade: no Wine left running" test -z "$(sandbox_wine)"
+
+  echo "== 13. upgrade again (a prefix Wine 11, then Wine 9 updated), then uninstall"
+  seed "$NEW_ENGINE"
+  som install >"$SANDBOX/upgrade2.txt" 2>&1 || { tail -20 "$SANDBOX/upgrade2.txt"; bad "second upgrade exit"; }
+  check "upgrade again: @done, the new engine" eval 'grep -q "^@done" "$SANDBOX/upgrade2.txt" && [ "$(st engine_current)" = yes ] && [ ! -e "$SOM/frameworks" ]'
+  out=$(sbx_wine cmd /c echo upgrade-ok 2>/dev/null | tr -d '\r' || true)
+  check "upgrade again: Wine 11 runs a program in it (cmd: $out)" test "$out" = upgrade-ok
+  if [ -f "$SANDBOX/probe/swtor.exe" ]; then
+    out=$(WINEMAC_TEST_KEYBOARD_LAYOUT=com.apple.keylayout.Czech sbx_wine "$SANDBOX/probe/swtor.exe" 2>/dev/null | tr -d '\r' | sed -n 's/^numrow-name: //p')
+    check "upgrade again: game keys by position (Czech number row: $out)" test "$out" = "1 2 3 4 5 6 7 8 9 0"
+  fi
+  cleanup_wine
+  check "upgrade again: no Wine left running" test -z "$(sandbox_wine)"
+  som uninstall >"$SANDBOX/uninstall2.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall2.txt"; bad "uninstall after upgrade"; }
+  check "uninstall after upgrade: official install identical to stock" like_stock uninstall2
+  check "uninstall after upgrade: app files gone" eval 'for c in engine frameworks upgrade-backup prefix gamemode env install-manifest.json; do [ ! -e "$SOM/$c" ] || exit 1; done'
+
+  echo "== 14. this version's Uninstall of a $OLDV install (app updated, not reinstalled)"
+  seed "$OLD_ENGINE" "$OLD_FW"
+  oldsom install >"$SANDBOX/old-install2.txt" 2>&1 || bad "$OLDV install exit"
+  som uninstall >"$SANDBOX/uninstall3.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall3.txt"; bad "uninstall of $OLDV"; }
+  check "uninstall of $OLDV: official install identical to stock" like_stock uninstall3
+  check "uninstall of $OLDV: engine and its libraries gone" test ! -e "$SOM/engine" -a ! -e "$SOM/frameworks" -a ! -e "$SOM/install-manifest.json"
+  check "uninstall of $OLDV: no Wine left running" test -z "$(sandbox_wine)"
+else
+  echo "== 11-14 skipped: no older app at $OLD_APP (OLD_APP)"
 fi
 
 cleanup_wine

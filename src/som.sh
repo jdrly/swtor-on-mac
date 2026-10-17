@@ -48,24 +48,32 @@ FEED_URL="${FEED_URL:-https://github.com/jdrly/swtor-on-mac/releases/latest/down
 
 # --- Components: downloaded at install time from their official sources (never bundled).
 # Bump name, URL, size and sha256 together.
-# Wine engine: Sikarugir's build of CrossOver 24.0.7 (Wine 9, x86_64).
-ENGINE_NAME=WS12WineCX24.0.7_7
-ENGINE_URL=https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS12WineCX24.0.7_7.tar.xz
-ENGINE_SIZE=172348356
-ENGINE_SHA256=203f9e9fd6c2cc77e6525d798a434ced326145db34a356355e05659d3445fd1c
+# Wine engine: athei's build of CodeWeavers' CrossOver 26.3 (Wine 11.0, x86_64 WoW64;
+# https://github.com/athei/wine-build), the engine SWGL on Mac uses. Self-contained (its
+# libraries are in lib/external, found via @loader_path) and without a wine-preloader: every
+# Wine process runs from its loader, lib/wine/x86_64-unix/wine.
+ENGINE_ID=cx26
+ENGINE_NAME=cx-26.3.0-8
+ENGINE_TITLE="CrossOver 26.3 (Wine 11.0)"
+ENGINE_URL=https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz
+ENGINE_SIZE=234978748
+ENGINE_SHA256=1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d
 # two of its files, checked after unpacking (the known-good engine)
-ENGINE_PRELOADER_SHA256=e2d7662ccb7e81ebb2d3f9ed8d76a73e75bb24caec41aa8016c168bfb8e48ec4
-ENGINE_NTDLL_SHA256=81f81cf1bb70069e94fa89d53fb7327cfb52fb9629c5b84134c851e681a20235
+ENGINE_LOADER_SHA256=2100dea802b2c560ba5d719c20ba1fcc1c8a09daf66580a4da6dd48e552d5a05
+ENGINE_NTDLL_SHA256=f1ca0f092c9435299bb06f2e6e9c92b52b4b0ab5016a42c1a4ce01ccc18c9f4a
 # its Mac driver (lib/wine/x86_64-unix/winemac.so): the app's patched build
 # (Resources/wine/winemac.so, scripts/build-winemac.sh) replaces only this one
-ENGINE_WINEMAC_SHA256=b8a0d3211182f2de2161ad5d08c9804ded76f7a92faa96cf911e54e9295e51ed
-# The libraries that engine is built against (FreeType, GnuTLS, SDL, GStreamer, ...): the
-# Contents/Frameworks folder of Sikarugir's wrapper template, used via
-# DYLD_FALLBACK_LIBRARY_PATH. Its renderer/ folder (D3DMetal, DXVK, DXMT) is not needed.
-FW_NAME=Template-1.0.21
-FW_URL=https://github.com/Sikarugir-App/Template/releases/download/v1.0/Template-1.0.21.tar.xz
-FW_SIZE=95883080
-FW_SHA256=bbe996e4e4375318485953d0c7818b7b4b0a4dc1f13303bcc584f99f7602f78d
+ENGINE_WINEMAC_SHA256=e0ed7ac7405c21ae5644370aec778ff333c8ef6c27e45e6dd739ee83ad422001
+# Its compatdb (the per-process Direct3D tree picker) defaults 64-bit processes to Apple's
+# D3DMetal for DXGI, and the DXMT tree it falls back to brings its own winemetal.dll, which
+# would not match d9mt's bridge. SWTOR is Direct3D 9 (d9mt from the prefix): DXGI stays on
+# wined3d for every process.
+ENGINE_COMPATDB='v=5
+name=swtor-on-mac;exe=*;dxgi=wined3d'
+# The engine of SWTOR on Mac 0.0.1-0.0.6 (Sikarugir's CrossOver 24.0.7, with Sikarugir's
+# template libraries in $SOM/frameworks): an install over it upgrades the prefix and removes
+# both once it has gone through (upgrade_from_old_engine).
+OLD_ENGINE_SHA256=203f9e9fd6c2cc77e6525d798a434ced326145db34a356355e05659d3445fd1c
 
 # --- Paths
 ROOT="${SWTOR_ON_MAC_ROOT:-}"
@@ -98,9 +106,22 @@ HELPERS="setsid-exec hold-launcher"
 AGENT_LABEL=cz.jandrly.swtoronmac.watch
 AGENT_PLIST="$H/Library/LaunchAgents/$AGENT_LABEL.plist"
 AGENT_DIR="$SOM/agent"
-# What SWTOR on Mac keeps in $SOM (removed by uninstall; backup/ stays)
-APP_FILES="engine frameworks prefix gamemode dxvk.conf env settings.conf agent last-update-check update-available dev-defaults"
+# What SWTOR on Mac keeps in $SOM (removed by uninstall; backup/ stays). frameworks: the old
+# engine's libraries (0.0.x installs, until an install upgrades them); upgrade-backup: what an
+# upgrade from 0.0.x keeps until it has gone through (begin_upgrade)
+APP_FILES="engine prefix gamemode dxvk.conf env settings.conf agent last-update-check update-available dev-defaults frameworks upgrade-backup"
 LOGFILE=/dev/null
+
+# The engine (one at a time) and the file every Wine process of it runs from: its loader
+# (CrossOver's ntdll names its winetemp-<inode>-<size>-... links after that file).
+# engine_loader <engine dir>: lib/wine/x86_64-unix/wine, or bin/wine-preloader in the CrossOver
+# 24 engine of an install from 0.0.x that has not been upgraded yet
+ENG="$SOM/engine"
+engine_loader() {
+  if [ -f "$1/bin/wine-preloader" ]; then echo "$1/bin/wine-preloader"; else echo "$1/lib/wine/x86_64-unix/wine"; fi
+}
+# Is the installed engine this version's? (no: SWTOR on Mac 0.0.x's, until Reinstall)
+engine_current() { [ "$(cat "$ENG/.som-source" 2>/dev/null || true)" = "$ENGINE_SHA256" ]; }
 
 # --- Output and logging
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOGFILE"; }
@@ -190,16 +211,24 @@ wrapper_state() {
 #   wine      Broadsword's Wine
 #   session   a wineserver of SWTOR on Mac's engine: a Wine session of it is running
 #   engine    any other process of SWTOR on Mac's engine (its folder, or CrossOver's
-#             winetemp-<preloader inode>-... hard links of its preloader)
+#             winetemp-<loader inode>-... hard links of its loader)
+# Programs are matched by their real executable (proc_pidpath, from hold-launcher --paths):
+# Wine 11 rewrites argv[0], so ps shows C:\...\name.exe for its processes. The game is still
+# found by that name (C:\...\swtor.exe, or a winetemp/... or Game Mode .../swtor.exe path).
 proc_list() {
-  ps -axww -o pid=,comm= 2>/dev/null | awk -v a="$BS_APP/" -v w="$BS_WINE/" -v e="$SOM/engine/" \
-    -v s="$SOM/engine/bin/wineserver" -v t="$(winetemp_tag)" '
-    { pid = $1; prog = $0; sub(/^ *[0-9]+ /, "", prog) }
-    index(prog, a) || prog ~ /\/Star Wars - The Old Republic Launcher$/ { print "launcher", pid, prog; next }
-    prog ~ /\/swtor\.exe$/ { print "game", pid, prog; next }
-    index(prog, w) { print "wine", pid, prog; next }
-    prog == s { print "session", pid, prog; next }
-    index(prog, e) == 1 || (t != "" && index(prog, t)) { print "engine", pid, prog }' || true
+  local helper="$RES/helpers/hold-launcher"
+  { if [ -x "$helper" ]; then "$helper" --paths 2>/dev/null | sed 's/^/P /'; fi
+    ps -axww -o pid=,comm= 2>/dev/null | sed 's/^ */C /'; } |
+  awk -v a="$BS_APP/" -v w="$BS_WINE/" -v e="$ENG/" -v s="$ENG/bin/wineserver" -v t="$(winetemp_tag)" '
+    $1 == "P" { x = $0; sub(/^P [0-9]+ /, "", x); real[$2] = x; next }
+    { pid = $2; prog = $0; sub(/^C [0-9]+ /, "", prog)
+      exe = (pid in real) ? real[pid] : prog
+      sub(/\/lib\/wine\/\.\.\/\.\.\/bin\//, "/bin/", exe) }   # a wineserver started by wine
+    index(prog, a) || index(exe, a) || prog ~ /\/Star Wars - The Old Republic Launcher$/ { print "launcher", pid, prog; next }
+    tolower(prog) ~ /[\/\\]swtor\.exe$/ || tolower(exe) ~ /\/swtor\.exe$/ { print "game", pid, prog; next }
+    index(exe, w) { print "wine", pid, prog; next }
+    exe == s { print "session", pid, prog; next }
+    index(exe, e) == 1 || (t != "" && index(exe, t)) { print "engine", pid, prog }' || true
 }
 
 # busy_of <proc_list output>: what keeps install/uninstall from going ahead, the first of
@@ -215,7 +244,7 @@ busy_of() {
 
 # proc_names <proc_list output> <kind>: the programs' names, "a, b"
 proc_names() {
-  printf '%s\n' "$1" | awk -v k="$2" '$1 == k { $1 = ""; $2 = ""; sub(/^ +/, ""); n = split($0, p, "/"); print p[n] }' |
+  printf '%s\n' "$1" | awk -v k="$2" '$1 == k { $1 = ""; $2 = ""; sub(/^ +/, ""); n = split($0, p, /[\/\\]/); print p[n] }' |
     sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g'
 }
 
@@ -236,7 +265,7 @@ running_now() { case "$(busy_of "$(proc_list)")" in launcher|game|wine|session) 
 # Ends leftover Wine processes of SWTOR on Mac's engine: only when nothing else of SWTOR runs
 # (no launcher, game, Broadsword's Wine, or wineserver of the engine), so they cannot belong
 # to a Wine session. Only processes running from the engine's folder or from hard links of
-# its preloader; each is logged.
+# its loader; each is logged.
 end_leftovers() {
   local l pids names
   l=$(proc_list)
@@ -249,10 +278,13 @@ end_leftovers() {
   say "Ended leftover Wine processes of SWTOR on Mac's engine (no Wine session was running): $names (pids ${pids% })"
 }
 
-# CrossOver's ntdll runs every Wine process of an engine from hard links in
-# winetemp-<preloader inode>-<size>-...: the part of that name that is this engine's
+# CrossOver's ntdll runs Wine processes of an engine from hard links in
+# winetemp-<loader inode>-<size>-... (CrossOver 26: only while WINEDLLPATH is set, as the
+# wrapper does for the game with Game Mode on; CrossOver 24: always): the part of that name
+# that is this engine's (nothing if there is no engine)
 winetemp_tag() {
-  local pre="$SOM/engine/bin/wine-preloader"
+  local pre
+  pre=$(engine_loader "$ENG")
   if [ -f "$pre" ]; then echo "/winetemp-$(stat -f '%i-%z' "$pre")-"; fi
 }
 
@@ -262,7 +294,10 @@ status() {
   local s l b
   echo "version=$VERSION"
   echo "d9mt=$D9MT_VERSION"
+  # this version's engine (what Install puts in place)
   echo "engine=$ENGINE_NAME"
+  echo "engine_id=$ENGINE_ID"
+  echo "engine_title=$ENGINE_TITLE"
   echo "root=${ROOT:-/}"
   echo "official_app=$([ -d "$BS_APP" ] && echo yes || echo no)"
   echo "official_app_path=$BS_APP"
@@ -277,6 +312,9 @@ status() {
     echo "installed=yes"
     echo "installed_version=$(json_get "$MANIFEST" version)"
     echo "installed_d9mt=$(json_get "$MANIFEST" d9mt)"
+    # the engine in place (an install from 0.0.x: CrossOver 24.0.7 until Reinstall upgrades it)
+    echo "installed_engine=$(json_get "$MANIFEST" engine)"
+    echo "engine_current=$(engine_current && echo yes || echo no)"
     echo "watch_agent=$([ -f "$AGENT_PLIST" ] && [ -f "$AGENT_DIR/som.sh" ] && echo yes || echo no)"
     # a newer version the wrapper's daily check found (the app then offers it through Sparkle)
     echo "update_available=$(head -1 "$SOM/update-available" 2>/dev/null || true)"
@@ -391,6 +429,9 @@ cmd_set() {
   local key="${1:-}" value="${2:-}"
   setting_valid "$key" "$value" || { echo "@error Unknown setting: $key=$value"; exit 2; }
   [ -f "$MANIFEST" ] || die "SWTOR on Mac is not installed."
+  # an install from 0.0.x runs on its own engine until Reinstall upgrades it: settings written
+  # for this version's engine would break it
+  engine_current || die "SWTOR on Mac $(json_get "$MANIFEST" version) is installed. Click Reinstall to update it to $VERSION (with its new Wine engine) first, then change the settings."
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
   log "---- set $key=$value"
   case "$key" in
@@ -497,41 +538,58 @@ fetch() {
   log "verified $f (sha256 $sha)"
 }
 
-# The winetemp name CrossOver's ntdll re-execs swtor.exe from, for the engine's preloader
+# winetemp_link <loader> <name>: a link in the winetemp folder CrossOver's ntdll starts Wine
+# processes from, for that loader
 winetemp_link() {
   local pre=$1 m
   m=$(stat -f '%Fm' "$pre")
-  echo "${USER_TMP}winetemp-$(stat -f '%i-%z' "$pre")-${m%.*}-$((10#${m#*.}))/swtor.exe"
+  echo "${USER_TMP}winetemp-$(stat -f '%i-%z' "$pre")-${m%.*}-$((10#${m#*.}))/$2"
 }
+# The Game Mode links of the engine in place (symlinks only: ntdll's own entries are hard
+# links): "wine" (the game as the first process of the wrapper's wine command) or "swtor.exe"
+# (started through start.exe; CrossOver 24 always), see the wrapper
 remove_gamemode_link() {
-  local pre="$SOM/engine/bin/wine-preloader" l
+  local pre n l
+  pre=$(engine_loader "$ENG")
   [ -f "$pre" ] || return 0
-  l=$(winetemp_link "$pre")
-  if [ -L "$l" ]; then run rm -f "$l"; say "Removed the Game Mode link $l"; fi
+  for n in swtor.exe wine; do
+    l=$(winetemp_link "$pre" "$n")
+    if [ -L "$l" ]; then run rm -f "$l"; say "Removed the Game Mode link $l"; fi
+  done
 }
 
 install_engine() {
-  local dst="$SOM/engine" w
-  if [ "$(cat "$dst/.som-source" 2>/dev/null || true)" = "$ENGINE_SHA256" ] && [ -x "$dst/bin/wine" ]; then
-    say "Wine engine $ENGINE_NAME is already in place"
+  local dst="$ENG" w
+  if engine_current && [ -x "$dst/bin/wine" ]; then
+    say "Wine engine $ENGINE_TITLE ($ENGINE_NAME) is already in place"
   else
     fetch "$ENGINE_URL" "$ENGINE_SHA256" "$ENGINE_SIZE" "Wine engine"
-    say "Unpacking the Wine engine"
+    say "Unpacking the Wine engine ($ENGINE_TITLE)"
     run rm -rf "$dst.new"
     run mkdir -p "$dst.new"
-    run tar -xJf "$FETCHED" -C "$dst.new" --strip-components 1 wswine.bundle
+    run tar -xJf "$FETCHED" -C "$dst.new" --strip-components 1 wine
     if [ -z "$DRY" ]; then
-      [ "$(sha256 "$dst.new/bin/wine-preloader")" = "$ENGINE_PRELOADER_SHA256" ] &&
+      [ "$(sha256 "$dst.new/lib/wine/x86_64-unix/wine")" = "$ENGINE_LOADER_SHA256" ] &&
         [ "$(sha256 "$dst.new/lib/wine/x86_64-unix/ntdll.so")" = "$ENGINE_NTDLL_SHA256" ] ||
         die "The unpacked Wine engine does not match the expected build."
+      # its SDK (headers, Wine's conformance tests, man pages) is not needed to run it
+      rm -rf "$dst.new/include" "$dst.new/lib/wine/tests" "$dst.new/share/man"
       echo "$ENGINE_SHA256" >"$dst.new/.som-source"
     fi
-    remove_gamemode_link   # it names the old engine's preloader
-    run rm -rf "$dst"
+    remove_gamemode_link   # it names the old engine's loader
+    if [ -n "${UPGRADE:-}" ] && [ -d "$dst" ]; then
+      # 0.0.x's engine waits in upgrade-backup until the install has gone through
+      run mv "$dst" "$SOM/upgrade-backup/engine"
+    else
+      run rm -rf "$dst"
+    fi
     run mv "$dst.new" "$dst"
     CREATED="$CREATED engine"
   fi
-  # d9mt's winemetal bridge replaces the engine's builtin winemetal (this copy only)
+  # d9mt's winemetal bridge replaces the engine's builtin winemetal (this copy only). Its
+  # x86_64-windows winemetal.dll is only a placeholder (the real DXMT one lives in the
+  # dxgi/dxmt tree, which DXGI never gets here: ENGINE_COMPATDB); the dxgi/dxmt tree's
+  # winemetal.so is a link to the x86_64-unix one.
   w="$dst/lib/wine"
   say "Installing the d9mt bridge (winemetal) into the engine"
   copy_atomic "$RES/d9mt/winemetal.so" "$w/x86_64-unix/winemetal.so" 755
@@ -545,7 +603,7 @@ install_engine() {
 # engine's own, kept next to it as winemac.so.stock. Only over the engine build the patched
 # one was made from (ENGINE_WINEMAC_SHA256), so another engine never gets a mismatched driver.
 install_winemac() {
-  local u="$SOM/engine/lib/wine/x86_64-unix" src
+  local u="$ENG/lib/wine/x86_64-unix" src
   if [ -n "$DRY" ]; then echo "[dry-run] engine's Mac driver: $([ "$1" = on ] && echo "the app's (PhysicalKeyboard)" || echo "the engine's own")"; return; fi
   if [ ! -f "$u/winemac.so.stock" ]; then
     [ "$(sha256 "$u/winemac.so")" = "$ENGINE_WINEMAC_SHA256" ] ||
@@ -570,50 +628,30 @@ install_winemac() {
   fi
 }
 
-install_frameworks() {
-  local dst="$SOM/frameworks"
-  if [ "$(cat "$dst/.som-source" 2>/dev/null || true)" = "$FW_SHA256" ]; then
-    say "Engine libraries ($FW_NAME) are already in place"
-    return
-  fi
-  fetch "$FW_URL" "$FW_SHA256" "$FW_SIZE" "Engine libraries"
-  say "Unpacking the engine libraries"
-  run rm -rf "$dst.new"
-  run mkdir -p "$dst.new"
-  run tar -xJf "$FETCHED" -C "$dst.new" --strip-components 3 \
-    --exclude "$FW_NAME.app/Contents/Frameworks/renderer" "$FW_NAME.app/Contents/Frameworks"
-  if [ -z "$DRY" ]; then
-    [ -f "$dst.new/libfreetype.6.dylib" ] || die "The engine libraries are incomplete."
-    echo "$FW_SHA256" >"$dst.new/.som-source"
-  fi
-  run rm -rf "$dst"
-  run mv "$dst.new" "$dst"
-  CREATED="$CREATED frameworks"
-}
-
-# wine <args...> with SWTOR on Mac's engine and prefix (output goes to the log)
+# wine <args...> with SWTOR on Mac's engine and prefix (output goes to the log). The engine is
+# self-contained (no library path); its compatdb rule as in the env file.
 wine_do() {
   if [ -n "$DRY" ]; then echo "[dry-run] wine $*"; return; fi
   log "+ wine $*"
-  env -u WINELOADER -u WINESERVER -u WINEDLLOVERRIDES -u SWTOR_WRAPPED \
-    WINEPREFIX="$SOM/prefix" WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" \
-    DYLD_FALLBACK_LIBRARY_PATH="$SOM/frameworks:/usr/lib" \
-    "$SOM/engine/bin/wine" "$@" </dev/null >>"$LOGFILE" 2>&1
+  env -u WINELOADER -u WINESERVER -u WINEDLLOVERRIDES -u WINEDLLPATH -u SWTOR_WRAPPED -u DYLD_FALLBACK_LIBRARY_PATH \
+    WINEPREFIX="$SOM/prefix" WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" WINE_COMPATDB="$ENGINE_COMPATDB" \
+    "$ENG/bin/wine" "$@" </dev/null >>"$LOGFILE" 2>&1
 }
 
 # End this prefix's Wine session and make sure nothing of it stays running: a leftover
 # wineserver started from here would break the next game start from the launcher.
 stop_wine() {
   [ -n "$DRY" ] && { echo "[dry-run] wineserver -k"; return; }
-  [ -x "$SOM/engine/bin/wineserver" ] || return 0
-  # (wineserver needs the engine libraries too: libinotify)
-  local fb="$SOM/frameworks:/usr/lib"
-  WINEPREFIX="$SOM/prefix" DYLD_FALLBACK_LIBRARY_PATH="$fb" "$SOM/engine/bin/wineserver" -k >>"$LOGFILE" 2>&1 || true
-  WINEPREFIX="$SOM/prefix" DYLD_FALLBACK_LIBRARY_PATH="$fb" "$SOM/engine/bin/wineserver" -w >>"$LOGFILE" 2>&1 || true
+  [ -x "$ENG/bin/wineserver" ] || return 0
+  # (0.0.x's engine, until upgraded, needs its libraries for wineserver: libinotify)
+  local fb=/usr/lib
+  [ ! -d "$SOM/frameworks" ] || fb="$SOM/frameworks:/usr/lib"
+  WINEPREFIX="$SOM/prefix" DYLD_FALLBACK_LIBRARY_PATH="$fb" "$ENG/bin/wineserver" -k >>"$LOGFILE" 2>&1 || true
+  WINEPREFIX="$SOM/prefix" DYLD_FALLBACK_LIBRARY_PATH="$fb" "$ENG/bin/wineserver" -w >>"$LOGFILE" 2>&1 || true
   local left
   for _ in 1 2 3 4 5; do
-    left=$(ps -axww -o pid=,comm= | awk -v e="$SOM/engine/" -v t="$(winetemp_tag)" \
-      'index($0, e) || (t != "" && index($0, t)) { print $1 }')
+    # (by real executable: Wine 11's processes show C:\... names in ps)
+    left=$(proc_list | awk '$1 == "engine" || $1 == "session" { print $2 }')
     [ -z "$left" ] && return 0
     sleep 1
   done
@@ -667,7 +705,9 @@ install_prefix() {
   say "Installing d9mt ($D9MT_VERSION) as the game's Direct3D 9"
   if [ -z "$DRY" ] && [ ! -e "$sys/d3d9.dll.wine" ]; then
     [ -f "$sys/d3d9.dll" ] || die "Wine's d3d9.dll is missing in the prefix."
-    if dd if="$sys/d3d9.dll" bs=1 skip=64 count=16 2>/dev/null | grep -q 'Wine builtin'; then
+    # (Wine's own: a builtin copy, or the engine's "Wine placeholder DLL", its compatdb picks
+    # the d3d9 tree)
+    if dd if="$sys/d3d9.dll" bs=1 skip=64 count=24 2>/dev/null | grep -q 'Wine builtin\|Wine placeholder'; then
       run mv "$sys/d3d9.dll" "$sys/d3d9.dll.wine"
     else
       warn "system32/d3d9.dll is not Wine's own; replacing it without keeping a copy"
@@ -676,8 +716,13 @@ install_prefix() {
   copy_atomic "$RES/d9mt/d3d9.dll" "$sys/d3d9.dll" 644
 }
 
+# The Game Mode bundle (as SWGL on Mac makes it for this engine): a clone of the engine's loader
+# as the bundle's executable, and an ntdll.so link next to it (the loader looks for ntdll.so
+# beside its resolved path; ntdll then finds the rest of the engine from its own real path).
+# No LSUIElement (the loader has its own embedded Info.plist anyway).
 install_gamemode() {
-  local app="$SOM/gamemode/SWTOR.app" new pre="$SOM/engine/bin/wine-preloader"
+  local app="$SOM/gamemode/SWTOR.app" new pre
+  pre=$(engine_loader "$ENG")
   say "Creating the Game Mode bundle"
   new="$SOM/gamemode/.SWTOR.app.new.$$"
   run rm -rf "$new"
@@ -697,14 +742,14 @@ install_gamemode() {
 	<key>LSApplicationCategoryType</key><string>public.app-category.role-playing-games</string>
 	<key>LSSupportsGameMode</key><true/>
 	<key>GCSupportsGameMode</key><true/>
-	<key>LSUIElement</key><true/>
 </dict>
 </plist>
 EOF
-  # An APFS clone of the preloader, not a re-signed copy: the same bytes keep the same code
-  # identity and Rosetta cache. (Its signature does not cover this Info.plist; exec does not
-  # check that.) Must stay byte-identical to the engine's preloader: the wrapper checks.
+  # An APFS clone of the loader, not a re-signed copy: the same bytes keep the same code
+  # identity and Rosetta cache. Must stay byte-identical to the engine's loader: the wrapper
+  # checks. (relative link: Contents/MacOS -> $SOM/engine/lib/wine/x86_64-unix/ntdll.so)
   run cp -c "$pre" "$new/Contents/MacOS/swtor.exe"
+  run ln -s "../../../../engine/lib/wine/x86_64-unix/ntdll.so" "$new/Contents/MacOS/ntdll.so"
   run rm -rf "$app"
   run mv "$new" "$app"
 }
@@ -746,11 +791,15 @@ DXVK_LOG_LEVEL=warn"
 WINEMSYNC=1
 WINEDEBUG=-all
 
-# SWTOR on Mac's Wine engine (CrossOver 24.0.7), prefix and engine libraries
-SWTOR_ENGINE="$SOM/engine"
+# SWTOR on Mac's Wine engine ($ENGINE_TITLE, self-contained) and prefix
+SWTOR_ENGINE="$ENG"
+SWTOR_ENGINE_ID=$ENGINE_ID
+SWTOR_ENGINE_NAME=$ENGINE_NAME
 SWTOR_PREFIX="$SOM/prefix"
-SWTOR_FRAMEWORKS="$SOM/frameworks"
-# macOS Game Mode: the game runs from a bundle copy of the engine's preloader
+SWTOR_D9MT=$D9MT_VERSION
+# the engine's compatdb: DXGI on wined3d for every process (no D3DMetal, no DXMT winemetal)
+WINE_COMPATDB='$ENGINE_COMPATDB'
+# macOS Game Mode: the game runs from a bundle copy of the engine's loader
 $gm
 SWTOR_LOG_DIR="$LOGS"
 SWTOR_LOG_FILTER=.
@@ -871,12 +920,11 @@ write_manifest() {
   "version": "$VERSION",
   "installed": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "d9mt": "$D9MT_VERSION",
+  "engine_id": "$ENGINE_ID",
   "engine": "$ENGINE_NAME",
   "engine_sha256": "$ENGINE_SHA256",
   "winemac": "$([ "$(setting physkeys)" = on ] && echo physical-keys || echo stock)",
-  "winemac_sha256": "$([ -n "$DRY" ] || sha256 "$SOM/engine/lib/wine/x86_64-unix/winemac.so")",
-  "frameworks": "$FW_NAME",
-  "frameworks_sha256": "$FW_SHA256",
+  "winemac_sha256": "$([ -n "$DRY" ] || sha256 "$ENG/lib/wine/x86_64-unix/winemac.so")",
   "broadsword_wine": "$BS_WINE",
   "previous_wrapper": "$WRAPPER_STATE",
   "bin_real_created": $([ "$BIN_REAL_EXISTED" = false ] && echo true || echo false),
@@ -1104,6 +1152,65 @@ cmd_end_leftovers() {
   esac
 }
 
+# --- Upgrade from SWTOR on Mac 0.0.x (its engine: Sikarugir's CrossOver 24.0.7, with its
+# libraries in $SOM/frameworks). An install over it puts this version's engine in place and
+# updates the existing prefix for it (wineboot -u; the game settings, key bindings, the d9mt
+# files and the Wine options in it stay), then rebuilds the Game Mode bundle, env and wrapper as
+# every install does. What it replaces waits in $SOM/upgrade-backup until the install has gone
+# through, and goes back if it fails: 0.0.x's engine (moved), its env, dxvk.conf, settings.conf,
+# dev-defaults and Game Mode bundle (copies), and the prefix as it was, an APFS clone (no extra disk space)
+# made only while the prefix is small: it holds Wine's own files, the game settings and d9mt's
+# folder, not the game, which lives in Broadsword's folder (else the prefix stays as it is; 0.0.x
+# can take a prefix back from Wine 11, tested). After success the old engine and its libraries
+# go.
+UPGRADE_PREFIX_MAX_KB=1048576
+UPGRADE_FILES="env dxvk.conf settings.conf dev-defaults gamemode"
+begin_upgrade() {
+  local kb f
+  UPGRADE=""
+  [ -f "$MANIFEST" ] && [ -d "$ENG" ] && ! engine_current || return 0
+  UPGRADE=1
+  if [ "$(cat "$ENG/.som-source" 2>/dev/null)" = "$OLD_ENGINE_SHA256" ]; then OLD_LABEL="CrossOver 24.0.7"; else OLD_LABEL="an engine of another version"; fi
+  say "Upgrading SWTOR on Mac $(json_get "$MANIFEST" version) ($OLD_LABEL) to $VERSION: the new Wine engine is $ENGINE_TITLE ($ENGINE_NAME); the prefix is updated for it"
+  run rm -rf "$SOM/upgrade-backup"
+  run mkdir -p "$SOM/upgrade-backup"
+  for f in $UPGRADE_FILES; do
+    if [ -e "$SOM/$f" ]; then run cp -c -R -P -p "$SOM/$f" "$SOM/upgrade-backup/$f"; fi
+  done
+  if [ -d "$SOM/prefix" ]; then
+    kb=$(du -sk "$SOM/prefix" 2>/dev/null | cut -f1)
+    if [ "${kb:-0}" -gt 0 ] && [ "$kb" -le "$UPGRADE_PREFIX_MAX_KB" ]; then
+      say "Keeping the prefix as it is ($((kb / 1024)) MB, an APFS clone) until the upgrade has gone through"
+      run cp -c -R -P -p "$SOM/prefix" "$SOM/upgrade-backup/prefix"
+    else
+      say "The prefix is large ($((${kb:-0} / 1024)) MB): no copy of it is kept"
+    fi
+  fi
+}
+
+# The upgrade went through: the old engine, its libraries and the copies go
+finish_upgrade() {
+  if [ -d "$SOM/upgrade-backup" ]; then
+    run rm -rf "$SOM/upgrade-backup"
+    [ -z "${UPGRADE:-}" ] || say "Removed the previous Wine engine (${OLD_LABEL:-CrossOver 24.0.7})"
+  fi
+  if [ -d "$SOM/frameworks" ]; then run rm -rf "$SOM/frameworks"; say "Removed the previous engine's libraries"; fi
+}
+
+# The upgrade failed: 0.0.x's install as it was (the new engine has gone already, CREATED)
+rollback_upgrade() {
+  local b="$SOM/upgrade-backup" f
+  # (failed before the old engine moved: nothing of the install was changed yet)
+  [ -d "$b/engine" ] || { rm -rf "$b"; return 0; }
+  rm -rf "$SOM/engine" && mv "$b/engine" "$SOM/engine" && log "rolled back the engine"
+  if [ -d "$b/prefix" ]; then rm -rf "$SOM/prefix" && mv "$b/prefix" "$SOM/prefix" && log "rolled back the prefix"; fi
+  for f in $UPGRADE_FILES; do
+    rm -rf "${SOM:?}/$f"
+    if [ -e "$b/$f" ]; then mv "$b/$f" "$SOM/$f" && log "rolled back $f"; fi
+  done
+  rm -rf "$b"
+}
+
 on_install_exit() {
   local st=$?
   if [ $st -ne 0 ] && [ -z "$DRY" ]; then
@@ -1112,10 +1219,11 @@ on_install_exit() {
     [ -n "${WRAPPER_PHASE:-}" ] && rollback_wrapper
     # all or nothing: what this run created goes again (a previous install stays)
     local c
-    [ -n "${FIRST_INSTALL:-}" ] && CREATED="engine frameworks prefix gamemode dxvk.conf env settings.conf dev-defaults"
+    [ -n "${FIRST_INSTALL:-}" ] && CREATED="engine prefix gamemode dxvk.conf env settings.conf dev-defaults"
     for c in $CREATED; do
       if [ -e "$SOM/$c" ]; then rm -rf "${SOM:?}/$c"; log "removed $c (install failed)"; fi
     done
+    [ -z "${UPGRADE:-}" ] || rollback_upgrade
     rm -rf "$SOM"/*.new "$SOM/gamemode"/.SWTOR.app.new.* 2>/dev/null || true
     log "install failed (status $st)"
   fi
@@ -1129,10 +1237,10 @@ lock() {
 }
 
 cmd_install() {
-  CREATED="" MOVED="" WRAPPER_PHASE="" NEW_PREFIX="" WRAPPER_STATE="" FIRST_INSTALL="" SETTINGS_USER=""
+  CREATED="" MOVED="" WRAPPER_PHASE="" NEW_PREFIX="" WRAPPER_STATE="" FIRST_INSTALL="" SETTINGS_USER="" UPGRADE=""
   [ -f "$MANIFEST" ] || FIRST_INSTALL=1
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
-  log "---- install $VERSION (d9mt $D9MT_VERSION) root=${ROOT:-/} dry=${DRY:-0} force=${FORCE:-0}"
+  log "---- install $VERSION (d9mt $D9MT_VERSION, engine $ENGINE_ID $ENGINE_NAME) root=${ROOT:-/} dry=${DRY:-0} force=${FORCE:-0}"
   phase 1
   step "Checking your Mac"
   preflight
@@ -1145,9 +1253,8 @@ cmd_install() {
   trap 'exit 143' TERM INT HUP   # Cancel in the app: roll back through the EXIT trap
   [ -n "$DRY" ] || mkdir -p "$SOM"
   step "Wine engine"
+  begin_upgrade
   install_engine
-  step "Engine libraries"
-  install_frameworks
   phase 2
   step "Wine prefix and d9mt"
   install_prefix
@@ -1161,6 +1268,7 @@ cmd_install() {
   step "Hooking into the official launcher"
   install_wrapper
   write_manifest
+  finish_upgrade
   # not part of the all-or-nothing install: without it, everything else still works
   install_agent || warn "The launcher-update guard (a launchd job) could not be set up; after a launcher update, open SWTOR on Mac and click Reinstall."
   [ -n "$DRY" ] || rm -rf "$CACHE/downloads"

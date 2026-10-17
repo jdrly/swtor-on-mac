@@ -13,9 +13,9 @@
 #   Contents/Resources/wine/winemac.so Wine's Mac driver with the PhysicalKeyboard option
 #                                      (scripts/build-winemac.sh, patches/), for the engine
 #   Contents/Resources/Licenses/       licenses of the app and the bundled components
-# The Wine engine and its libraries are not bundled: som.sh downloads them at install time
-# from Sikarugir's official releases (pinned URL + sha256 in src/som.sh). Only the engine's
-# Mac driver comes in a patched build of its own (Resources/wine).
+# The Wine engine is not bundled: som.sh downloads it at install time from athei's wine-build
+# releases (CrossOver 26.3, the engine SWGL on Mac uses; pinned URL + sha256 in src/som.sh).
+# Only the engine's Mac driver comes in a patched build of its own (Resources/wine).
 #
 # Built with the macOS 27 SDK (Xcode 27; the design follows the SDK the app links against)
 # for macOS 26.0 and later.
@@ -30,14 +30,15 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # SWTOR_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.0.6}
+APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.0-dev.1}
 
 # Development builds: a version with a prerelease suffix, X.Y.Z-dev.N. They are published only
 # as GitHub pre-releases, never in the appcast. CFBundleShortVersionString is the version as is;
 # CFBundleVersion (what Sparkle compares) is numeric and sorts above the previous release and
-# below X.Y.Z: 0.0.6-dev.N -> 0.0.5.(1000+N). Sparkle's standard comparator orders
-# 0.0.5 < 0.0.5.1001 < 0.0.5.1002 < 0.0.6, so a dev build is never offered 0.0.5 again and
-# is offered the public 0.0.6 once that is out. Releases: CFBundleVersion = the version.
+# below X.Y.Z: 0.0.6-dev.N -> 0.0.5.(1000+N), 0.1.0-dev.N -> 0.0.9999.(1000+N). Sparkle's
+# standard comparator orders 0.0.5 < 0.0.5.1001 < 0.0.5.1002 < 0.0.6 (and 0.0.6 <
+# 0.0.9999.1001 < 0.1.0), so a dev build is never offered the previous release again and is
+# offered the public X.Y.Z once that is out. Releases: CFBundleVersion = the version.
 bundle_version() {
   local v=$1 core n x y z
   case "$v" in
@@ -90,6 +91,7 @@ WM=prebuilt/winemac
 for f in winemac.so VERSION COPYING.LIB LICENSE; do
   [ -f "$WM/$f" ] || { echo "Missing $WM/$f; run scripts/build-winemac.sh" >&2; exit 1; }
 done
+WINEMAC_COMMIT="$(sed -n 's/^WINE_COMMIT=//p' scripts/build-winemac.sh)"
 
 # Sparkle (app updates, as in SWGL on Mac): the framework goes into the app, its tools
 # (generate_appcast, BinaryDelta, generate_keys) are used from here by scripts/release.sh.
@@ -181,18 +183,20 @@ licenses: d9mt/THIRD_PARTY_NOTICES.md and d9mt/LICENSES/.
 Sparkle $SPARKLE_VERSION (app updates), https://sparkle-project.org: MIT-style license, see
 sparkle/LICENSE.
 
-wine/winemac.so: Wine's Mac driver (dlls/winemac.drv, x86_64 unix side) from CodeWeavers'
-CrossOver 24.0.7 sources, with SWTOR on Mac's patch for the PhysicalKeyboard option ("Game keys
-by keyboard position"): LGPL-2.1-or-later, see winemac/COPYING.LIB and winemac/LICENSE. The
-patch is winemac/winemac-physical-keys.patch (also
+wine/winemac.so: Wine's Mac driver (dlls/winemac.drv, x86_64 unix side) from the sources of
+the app's Wine engine (CodeWeavers' CrossOver 26.3 with athei's patches, athei/wine
+$WINEMAC_COMMIT), with SWTOR on Mac's patch for the PhysicalKeyboard option ("Game keys by
+keyboard position"): LGPL-2.1-or-later, see winemac/COPYING.LIB and winemac/LICENSE. The patch
+is winemac/winemac-physical-keys.patch (also
 $REPO_URL/blob/v$APP_VERSION/patches/winemac-physical-keys.patch); the
-sources it applies to: https://media.codeweavers.com/pub/crossover/source/crossover-sources-24.0.7.tar.gz
-(https://www.codeweavers.com/crossover/source); build script:
+sources it applies to: https://github.com/athei/wine/tree/$WINEMAC_COMMIT (CodeWeavers'
+CrossOver sources: https://www.codeweavers.com/crossover/source); build script:
 $REPO_URL/blob/v$APP_VERSION/scripts/build-winemac.sh.
 
-Not included in this app: the Wine engine (CrossOver 24.0.7 sources by CodeWeavers, built by
-Sikarugir, LGPL-2.1-or-later) and its libraries are downloaded at install time from
-https://github.com/Sikarugir-App (Engines and Template releases).
+Not included in this app: the Wine engine (CodeWeavers' CrossOver 26.3 sources with athei's
+patches, Wine 11.0, LGPL-2.1-or-later; built by athei/wine-build, which also bundles the
+components listed in its release) is downloaded at install time from
+https://github.com/athei/wine-build/releases/tag/$(sed -n 's/^ENGINE_NAME=//p' src/som.sh).
 EOF
 
 # feed: Sparkle's feed, also read by the Wine wrapper's daily update check (via som.sh)
@@ -200,8 +204,8 @@ EOF
 # update checks; som.sh and the app read it)
 printf 'version=%s\nbuild=%s\nchannel=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s\n' "$APP_VERSION" "$BUNDLE_VERSION" \
   "$CHANNEL" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" "$(plutil -extract SUFeedURL raw src/Info.plist)" >"$R/app.properties"
-printf 'app %s\nd9mt %s\nengine %s\nframeworks %s\nwinemac %s\nsparkle %s\nsdk %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
-  "$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)" "$(sed -n 's/^FW_NAME=//p' src/som.sh)" \
+printf 'app %s\nd9mt %s\nengine %s\nwinemac %s\nsparkle %s\nsdk %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
+  "$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)" \
   "physical-keys patch $(shasum -a 256 patches/winemac-physical-keys.patch | cut -c1-12)" "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
 
 iconset="$CACHE/AppIcon.iconset"

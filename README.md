@@ -3,8 +3,8 @@
 A small macOS app that makes the official [Star Wars: The Old Republic](https://www.swtor.com)
 Mac app run faster on Apple Silicon. It installs a performance setup on top of your existing
 official install: the game's Direct3D 9 goes straight to Metal with
-[d9mt](https://github.com/jdrly/d9mt), on a newer Wine (CrossOver 24.0.7), with macOS Game
-Mode. You start the game with **Play SWTOR** in its window, or from the official app as usual.
+[d9mt](https://github.com/jdrly/d9mt), on a newer Wine (CrossOver 26.3 with Wine 11, the
+engine SWGL on Mac uses), with macOS Game Mode. You start the game with **Play SWTOR** in its window, or from the official app as usual.
 
 > **SWTOR on Mac is an unofficial community project.** It is not made, endorsed or supported
 > by Broadsword Games, Electronic Arts, Lucasfilm or Disney. Broadsword doesn't support
@@ -26,7 +26,7 @@ Mode. You start the game with **Play SWTOR** in its window, or from the official
 
 ## Features
 
-- **d9mt**: the game's Direct3D 9 goes straight to Metal, on CrossOver 24.0.7 Wine, with
+- **d9mt**: the game's Direct3D 9 goes straight to Metal, on CrossOver 26.3 (Wine 11), with
   macOS **Game Mode** and Retina rendering.
 - **Settings** (SWTOR on Mac > Settings…, ⌘,): Retina mode, vsync, d9mt's video memory
   profile, Game Mode, the Metal HUD, game keys by keyboard position (for non-US layouts),
@@ -54,7 +54,7 @@ window).
   game; without the official install it refuses to do anything.
 - Rosetta (macOS offers it when you first start the official app).
 - About 2 GB of free space and an internet connection for the install (it downloads the Wine
-  engine and its libraries, ~270 MB, from their official source).
+  engine, ~235 MB, from its official source).
 
 1. Download `SWTOR-on-Mac-<version>.dmg` from
    [Releases](https://github.com/jdrly/swtor-on-mac/releases), open it and drag
@@ -139,6 +139,14 @@ Reinstall.
   app to update*, and the app then offers the update when it is opened.
 - After an app update, click **Update to &lt;version&gt;** in the window: it brings the
   installed setup (wrapper, d9mt) up to the app's version.
+- **From 0.0.x to 0.1** the Wine engine changes from CrossOver 24.0.7 (Wine 9) to CrossOver
+  26.3 (Wine 11): that first Reinstall downloads the new engine (~235 MB) and updates the
+  existing prefix for it (`wineboot -u`, under a minute; your game settings, key bindings and
+  SWTOR on Mac's settings stay). Until then the game keeps running on the old engine, and the
+  Settings window asks for the Reinstall first. If anything in it fails, the old engine,
+  prefix and settings are put back as they were; the old engine and its libraries are removed
+  only once it has gone through. Going back is a Reinstall with the older app: 0.0.6 takes
+  the updated prefix back (tested).
 
 ### Development builds
 
@@ -153,8 +161,9 @@ they differ from releases in three ways:
 - **No automatic update checks**, neither Sparkle's nor the wrapper's at game start; the
   setting is shown off. **Check for Updates…** still works. A dev build's `CFBundleVersion`
   (what Sparkle compares) sorts between the previous release and its own:
-  `0.0.6-dev.N` is `0.0.5.(1000+N)`. So the feed's 0.0.5 is never offered as an update, and the
-  public 0.0.6 is offered once it is out. `CFBundleShortVersionString` stays `0.0.6-dev.N`.
+  `0.0.6-dev.N` is `0.0.5.(1000+N)`, `0.1.0-dev.N` is `0.0.9999.(1000+N)`. So the feed's
+  previous release is never offered as an update, and the public X.Y.Z is offered once it is
+  out. `CFBundleShortVersionString` stays `X.Y.Z-dev.N`.
 
 ### Debug Logging, session reports and live d9mt flags
 
@@ -166,6 +175,9 @@ performance. A setting you choose is kept through updates and Reinstall.
 **Session report.** `"/Applications/SWTOR on Mac.app/Contents/Resources/session-report.sh"`
 (`scripts/session-report.sh`) sums up the last game session from
 `~/Library/Logs/SWTOR on Mac/wine.log`:
+- the app version, Wine engine and d9mt the session ran on (0.1.0-dev.1 and later: the
+  wrapper's first line in `wine.log`; also in `effective-env.txt`, and Collect Logs'
+  `system-info.txt` names the engine in place);
 - duration, median and 1%-low fps, the seconds below 58 fps;
 - frames over 33 ms and 50 ms;
 - hitches, split into d9mt's and the game's, and d9mt's top causes;
@@ -231,8 +243,12 @@ and the game's command line (the launcher passes the account on it) is never inc
 **Settings > Debug Logging** only when asked: it makes the logs much more detailed for the next
 game start, at some cost in performance, so turn it off again afterwards.
 
-## Known issues (0.0.x test versions)
+## Known issues (test versions)
 
+- **The new Wine engine (0.1.0 development builds)**: CrossOver 26.3 with Wine 11 is new for
+  SWTOR on Mac. If the game doesn't start or behaves worse than on 0.0.6, please report it
+  (Debug Logging on, then **Collect Logs…**), and go back to 0.0.6 if you need to: copy it
+  over the app and click Reinstall.
 - **Stutter the first time** you see an area or effect, while d9mt compiles and caches its
   shaders (see [Install](#install)). It gets smooth after that.
 - **Retina Mode** can only be changed while the launcher and the game are closed (it is in the
@@ -298,14 +314,16 @@ The game files, the launcher app and Broadsword's Wine prefix are only read (the
 cloned once). Everything else lives in SWTOR on Mac's own folders:
 
 - `~/Library/Application Support/SWTOR on Mac/`
-  - `engine/` – the Wine engine, with d9mt's winemetal bridge (and, while *Game keys by
-    keyboard position* is on, SWTOR on Mac's build of its Mac driver `winemac.so`; the
-    engine's own is kept as `winemac.so.stock`)
-  - `frameworks/` – the engine's libraries
+  - `engine/` – the Wine engine (self-contained: its libraries are inside it), with d9mt's
+    winemetal bridge (and, while *Game keys by keyboard position* is on, SWTOR on Mac's build
+    of its Mac driver `winemac.so`; the engine's own is kept as `winemac.so.stock`)
+  - `frameworks/` – only in installs of 0.0.x: the old engine's libraries (removed by the
+    Reinstall that upgrades it); `upgrade-backup/` – only while that Reinstall runs
   - `prefix/` – the game's Wine prefix: an APFS clone of Broadsword's, updated for the engine,
     with d9mt's `d3d9.dll` in `system32` (Wine's own kept as `d3d9.dll.wine`) and the settings
     below; your existing game settings are taken over once
-  - `gamemode/SWTOR.app` – the bundle that gets the game macOS Game Mode
+  - `gamemode/SWTOR.app` – the bundle that gets the game macOS Game Mode (a clone of the
+    engine's loader and a link to its `ntdll.so`)
   - `settings.conf` – the Settings window's settings; `env` – what the wrapper applies,
     `dxvk.conf` – d9mt's options (both made from `settings.conf`)
   - `install-manifest.json` – what was changed, for Uninstall
@@ -315,8 +333,8 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
 - `~/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist` – the launchd job (see
   [Launcher updates](#launcher-updates-the-launchd-job))
 - `~/Library/Caches/SWTOR on Mac/downloads` – the engine downloads, only during an install
-- `winetemp-…/swtor.exe` in your per-user temporary folder (`$TMPDIR`) – the Game Mode link,
-  made at each game start
+- `winetemp-…/wine` (or `winetemp-…/swtor.exe`) in your per-user temporary folder
+  (`$TMPDIR`) – the Game Mode link, made at each game start
 - `~/Library/Logs/SWTOR on Mac/` – `install.log`, `watch.log`, and per game start `wine.log`
   (d9mt warnings), `hold.log`, `launch-env.txt`, `effective-env.txt`
 
@@ -365,12 +383,21 @@ game (`swtor.exe`) it also:
   has quit (within 2 minutes of the game), it ends the engine's Wine session
   (`wineserver -k`), waits up to 10 s for its wineserver to go, and then ends whatever is left
   of the engine, each logged in `hold.log`;
-- links CrossOver's re-exec name for the game (`winetemp-…/swtor.exe`) to
-  `gamemode/SWTOR.app`, a bundle with `LSSupportsGameMode` around an identical clone of the
-  engine's preloader, so macOS turns Game Mode on.
+- links the name CrossOver's ntdll starts the game from to `gamemode/SWTOR.app`, a bundle
+  with `LSSupportsGameMode` around an identical clone of the engine's loader
+  (`lib/wine/x86_64-unix/wine`; the engine has no `wine-preloader`) and a link to its
+  `ntdll.so`, so macOS turns Game Mode on. As SWGL on Mac does it for this engine: ntdll uses
+  those links only while `WINEDLLPATH` is set, which the wrapper does for the game only, and
+  the name is `winetemp-…/wine` when the game is the first process of the command, or
+  `winetemp-…/swtor.exe` when the command is `start.exe /exec …` (the wrapper picks by the
+  command and logs it in `gamemode.log`);
+- sets `WINE_COMPATDB` for the engine's compatdb (its per-process choice of Direct3D
+  backends): DXGI stays on wined3d, so neither Apple's D3DMetal nor the DXMT tree with its own
+  winemetal is used next to d9mt's bridge.
 
-Leftover Wine processes are processes of SWTOR on Mac's engine (its preloader, or CrossOver's
-`winetemp-<inode>-…` hard links of it) while no wineserver of the engine runs: what is left of
+Leftover Wine processes are processes of SWTOR on Mac's engine (its loader, or CrossOver's
+`winetemp-<inode>-…` hard links of it, found by their real executable: Wine 11 shows
+`C:\…\name.exe` in `ps`) while no wineserver of the engine runs: what is left of
 a session whose server is gone, such as a `winedevice.exe` that would wait forever. They don't
 block anything: the window says so and offers **End Leftover Wine Processes**, and Install,
 Uninstall and the Retina setting end them first (logged in `install.log`). The launcher, the
@@ -410,8 +437,13 @@ driver and the registry value, and what the game sees: a probe program run as `s
 with Czech, German and US layouts, picked through the driver's `WINEMAC_TEST_KEYBOARD_LAYOUT`
 test hook without changing the Mac's input source), the conflict cases and uninstall end to end, checking that uninstall
 restores Broadsword's folder byte for byte, copies the game settings back and that no Wine
-process is left behind. `scripts/test-update.sh` tests app updates with two Developer ID builds
-and a local feed, as in SWGL on Mac.
+process is left behind. With an older app (`OLD_APP`, default `release/0.0.6`) it then tests the
+way from 0.0.6 and back: a 0.0.6 install upgraded (a failed upgrade rolled back first: engine,
+libraries, env and prefix as before, and Wine 9 still reads the prefix), everything kept and
+the new engine in use; 0.0.6's Reinstall over it (Wine 9 runs programs in the prefix Wine 11
+updated, game keys by position work); the upgrade again; and this version's Uninstall of a
+0.0.6 install. `scripts/test-update.sh` tests app updates with two Developer ID builds and a
+local feed, as in SWGL on Mac.
 
 ## Building
 
@@ -432,12 +464,13 @@ and a local feed, as in SWGL on Mac.
   `.github/workflows/release.yml` signs and notarizes on a `v*` tag. Both build on GitHub's
   `xcode-27` image (macOS 27 with Xcode 27, a public preview; there is no `macos-27` label).
 
-- `scripts/build-winemac.sh` builds Wine's Mac driver (`winemac.so`, x86_64) from CodeWeavers'
-  CrossOver 24.0.7 sources (pinned sha256; the engine download pinned in `src/som.sh` for
+- `scripts/build-winemac.sh` builds Wine's Mac driver (`winemac.so`, x86_64) from the sources
+  the engine is built from (athei/wine at the commit athei/wine-build's release names, pinned
+  sha256; configured like athei's build; the engine download pinned in `src/som.sh` for
   linking) with `patches/winemac-physical-keys.patch` into `prebuilt/winemac`, together with an
   unpatched build: `scripts/winemac-compare.py` checks that one against the engine's own file
   and that the patch changes only the keyboard functions and the option (Xcode, Rosetta,
-  Homebrew bison and mingw-w64). The build is reproducible.
+  Homebrew bison; llvm-mingw pinned as in athei's build). The build is reproducible.
 
 `prebuilt/` holds the d9mt binaries and the Mac driver, so `build.sh` works from a fresh clone. Build outputs
 (`dist/`, `release/`) are not committed; DMGs, deltas and `appcast.xml` are release assets.
@@ -472,11 +505,11 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 
 | Component | Source | sha256 |
 |---|---|---|
-| Wine engine `WS12WineCX24.0.7_7` (CrossOver 24.0.7, Wine 9.0, x86_64) | [Sikarugir-App/Engines v1.0](https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS12WineCX24.0.7_7.tar.xz) | `203f9e9fd6c2cc77e6525d798a434ced326145db34a356355e05659d3445fd1c` |
-| Engine libraries (`Template-1.0.21.app/Contents/Frameworks`, without `renderer/`) | [Sikarugir-App/Template v1.0](https://github.com/Sikarugir-App/Template/releases/download/v1.0/Template-1.0.21.tar.xz) | `bbe996e4e4375318485953d0c7818b7b4b0a4dc1f13303bcc584f99f7602f78d` |
+| Wine engine `cx-26.3.0-8` (CrossOver 26.3, Wine 11.0, x86_64 WoW64; the one SWGL on Mac uses) | [athei/wine-build cx-26.3.0-8](https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
 | Sparkle 2.10.0 (bundled) | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
 | d9mt `68c7190` (bundled, `prebuilt/d9mt`) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/68c7190d670d199227513b02a792ecbad5e43571) | see `prebuilt/d9mt` |
-| CrossOver 24.0.7 sources (for the Mac driver, `prebuilt/winemac`) | [CodeWeavers](https://media.codeweavers.com/pub/crossover/source/crossover-sources-24.0.7.tar.gz) | `56749e926df9f0437dbcea259cf0bff6657a43871af50182887fe15a84fc2e4e` |
+| The engine's Wine sources (for the Mac driver, `prebuilt/winemac`): athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0) (codeload tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
+| llvm-mingw 20261006 (only for configuring that build) | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
 ## Credits and licenses
 
@@ -486,12 +519,14 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
   [d9mt-v2](https://github.com/neo773/d9mt-v2), with DXVK and DXMT code: zlib, its winemetal
   bridge LGPL-2.1-or-later (source: `bridge/` of the pinned commit). Licenses and third-party
   notices ship in the app under `Resources/Licenses/d9mt`.
-- [Wine](https://www.winehq.org) (LGPL-2.1-or-later) from CodeWeavers' CrossOver 24.0.7
-  sources, built by [Sikarugir](https://github.com/Sikarugir-App), with the libraries of
-  Sikarugir's wrapper template; the engine and its libraries are downloaded from Sikarugir's
-  releases at install time, not redistributed.
-- Wine's Mac driver (`winemac.so`, LGPL-2.1-or-later), built from CodeWeavers' CrossOver
-  24.0.7 sources with SWTOR on Mac's patch for *Game keys by keyboard position*
+- [Wine](https://www.winehq.org) (LGPL-2.1-or-later) from CodeWeavers'
+  [CrossOver 26.3 sources](https://www.codeweavers.com/crossover/source) with athei's patches
+  ([athei/wine](https://github.com/athei/wine)), built and bundled by
+  [athei/wine-build](https://github.com/athei/wine-build) (the components it bundles are listed
+  in its releases); the engine is downloaded from that release at install time, not
+  redistributed.
+- Wine's Mac driver (`winemac.so`, LGPL-2.1-or-later), built from the engine's Wine sources
+  (athei/wine, CrossOver 26.3) with SWTOR on Mac's patch for *Game keys by keyboard position*
   ([`patches/winemac-physical-keys.patch`](patches/winemac-physical-keys.patch), by Jan Drlý):
   bundled in the app, with Wine's license and the patch under `Resources/Licenses/winemac`.
 - [Sparkle](https://sparkle-project.org) for app updates (MIT, with bsdiff and other notices;

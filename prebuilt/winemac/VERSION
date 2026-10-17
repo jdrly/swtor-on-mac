@@ -1,3 +1,3 @@
-winemac.so: Wine's Mac driver (x86_64 unix side) for the WS12WineCX24.0.7_7 engine
-sources: crossover-sources-24.0.7.tar.gz sha256 56749e926df9f0437dbcea259cf0bff6657a43871af50182887fe15a84fc2e4e
-patch: patches/winemac-physical-keys.patch sha256 7546e2f5bed8bc650dd3da7ecb8c88319fee0195c7e4bf15a77897887a26b9c6
+winemac.so: Wine's Mac driver (x86_64 unix side) for the cx-26.3.0-8 engine
+sources: athei/wine d23b39774528237cafe49f9a073286f854b779c0 (codeload tar.gz sha256 7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e)
+patch: patches/winemac-physical-keys.patch sha256 bf7e2ee26d2dc60b37e339886d2cdf0b8dc30d6bec2232840b5c8fab129353ae

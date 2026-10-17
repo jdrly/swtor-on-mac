@@ -429,9 +429,14 @@ struct StatusTiles: View {
     }
   }
 
-  // WS12WineCX24.0.7_7 -> CrossOver 24.0.7
+  // The engine in place (this version's if not installed): cx-26.3.0-8 -> CrossOver 26.3,
+  // WS12WineCX24.0.7_7 (an install of 0.0.x until Reinstall) -> CrossOver 24.0.7
   private var engineName: String {
-    let name = installer.status["engine"] ?? ""
+    let installed = installer.installed ? installer.status["installed_engine"] ?? "" : ""
+    let name = installed.isEmpty ? installer.status["engine"] ?? "" : installed
+    if let r = name.range(of: #"^cx-[0-9]+\.[0-9]+"#, options: .regularExpression) {
+      return "Wine · CrossOver " + name[r].dropFirst(3)
+    }
     if let r = name.range(of: #"CX[0-9.]+"#, options: .regularExpression) {
       return "Wine · CrossOver " + name[r].dropFirst(2)
     }

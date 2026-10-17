@@ -3,8 +3,8 @@ patched rebuild (scripts/build-winemac.sh runs it before stripping).
 
     python3 -I scripts/winemac-compare.py ENGINE_SO STOCK_SO PATCHED_SO
 
-Engine vs stock (is the toolchain right?): the engine's file has no local symbols, so it
-compares what survives stripping: exports, imported symbols, linked libraries, load-command
+Engine vs stock (is the toolchain right?): it compares what survives stripping (the engine's
+file may have no local symbols): exports, imported symbols, linked libraries, load-command
 facts, every Objective-C method (by class and selector, with its code size from
 LC_FUNCTION_STARTS) and the registry option names (UTF-16 strings).
 Stock vs patched (does the patch change only what it should?): every function by name with
@@ -44,9 +44,14 @@ def info(path):
         elif line.startswith("            name "):
             sel = line.split()[2]
         elif line.startswith("            imp "):
-            addr = int(line.split()[1], 16)
+            # relative method lists (minos 11 and later): "imp <offset> (<address>) -[Class sel]",
+            # the selector only in the symbol; else "imp <address> [symbol]"
+            m = re.match(r"\s+imp\s+\S+\s+\((0x[0-9a-fA-F]+)\)\s*(.*)$", line)
+            addr = int(m.group(1), 16) if m else int(line.split()[1], 16)
+            sym = (m.group(2) if m else " ".join(line.split()[2:])).strip()
+            key = sym if re.match(r"^[-+]\[.* .*\]$", sym) else f"{meta}[{cls} {sel}]"
             i = bisect.bisect_right(starts, addr)
-            methods[f"{meta}[{cls} {sel}]"] = starts[i] - addr if i < len(starts) else 0
+            methods[key] = starts[i] - addr if i < len(starts) else 0
     # functions by name (local symbols too, if there are any): size up to the next function
     syms = []
     for line in run("nm", "-n", "--defined-only", path).splitlines():
@@ -73,8 +78,9 @@ def info(path):
         "minos": re.findall(r"minos (\S+)", lc),
         "methods": methods,
         "funcs": funcs,
-        # (the names are inlined as UTF-16 stores, in pieces: look for their start)
-        "options": {k: k[:8].encode("utf-16-le") in data for k in OPTIONS},
+        # (optimized builds inline the names as UTF-16 stores, in pieces: look for their start;
+        # unoptimized ones keep the C strings)
+        "options": {k: k.encode() + b"\0" in data or k[:8].encode("utf-16-le") in data for k in OPTIONS},
     }
 
 

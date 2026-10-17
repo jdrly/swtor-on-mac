@@ -1,5 +1,6 @@
 // hold-launcher GAME_PID
 // hold-launcher --reap
+// hold-launcher --paths
 //
 // Freezes the SWTOR launcher (SIGSTOP) while the game runs on another Wine engine
 // (SWTOR_ENGINE) and lets it go on (SIGCONT) once the game has exited.
@@ -8,8 +9,9 @@
 // A stopped launcher cannot quit; resumed after the game, it just finishes its
 // shutdown.
 //
-// GAME_PID is the wrapper's own pid: the wrapper then execs the engine's wine, which
-// becomes `start.exe /exec swtor.exe` and stays until the game process exits.
+// GAME_PID is the wrapper's own pid: the wrapper then execs the engine's wine, which becomes
+// the game itself or `start.exe /exec swtor.exe` (the exec keeps the pid) and stays until the
+// game process exits.
 // The launcher is looked up among GAME_PID's ancestors (then its process-group
 // leader) by executable path, so nothing else is ever stopped. Not found: log, exit.
 //
@@ -26,6 +28,10 @@
 // --reap: only end leftover Wine processes of SWTOR_ENGINE (processes of the engine while
 // no wineserver of it runs), logging each to stderr. The wrapper runs it before it starts
 // the engine's wineserver.
+//
+// --paths: "<pid> <executable>" for every process whose executable can be read (the real
+// file, from proc_pidpath), for som.sh: Wine 11 rewrites argv[0], so ps shows C:\...\name.exe
+// instead of the program for its processes.
 //
 // build: clang -O2 -arch x86_64 -arch arm64 -fobjc-arc -framework AppKit \
 //          -o hold-launcher hold_launcher.c hide_app.m
@@ -134,20 +140,28 @@ static void stop_wine_session(void)
 }
 
 // The engine's processes at this moment. Sets *SERVER to a live wineserver of the engine (0:
-// none) and puts up to MAX of the others into PIDS; returns how many. Wine runs them from
-// bin/wine-preloader or from hard links of it (CrossOver's winetemp-<inode>-.../<name>.exe),
-// so they are matched by that file: its path, or the same inode. Nothing else matches (the
-// game's Game Mode copy in SWTOR.app is an APFS clone, another inode; this process neither).
+// none) and puts up to MAX of the others into PIDS; returns how many. Wine runs them from the
+// engine's loader or from hard links of it (CrossOver's winetemp-<inode>-.../<name>.exe), so
+// they are matched by that file: its path, or the same inode. The loader is
+// lib/wine/x86_64-unix/wine (CrossOver 26), or bin/wine-preloader where there is one (the
+// CrossOver 24 engine of SWTOR on Mac 0.0.x). Nothing else matches (the game's Game Mode copy
+// in SWTOR.app is an APFS clone, another inode; this process neither).
 static int engine_procs(pid_t *server, pid_t *pids, int max)
 {
     *server = 0;
     const char *engine = getenv("SWTOR_ENGINE");
     if (!engine || !*engine) return 0;
-    char pre[1024], srv[1024];
+    char pre[1024], srv[1024], srv2[1024];
     snprintf(pre, sizeof(pre), "%s/bin/wine-preloader", engine);
     snprintf(srv, sizeof(srv), "%s/bin/wineserver", engine);
+    // (a wineserver Wine starts itself runs from <engine>/lib/wine/../../bin/wineserver)
+    snprintf(srv2, sizeof(srv2), "%s/lib/wine/../../bin/wineserver", engine);
     struct stat ps;
     int have_ino = stat(pre, &ps) == 0;
+    if (!have_ino) {
+        snprintf(pre, sizeof(pre), "%s/lib/wine/x86_64-unix/wine", engine);
+        have_ino = stat(pre, &ps) == 0;
+    }
     int n = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
     pid_t *all = n > 0 ? malloc(n) : NULL;
     if (!all) return 0;
@@ -157,7 +171,7 @@ static int engine_procs(pid_t *server, pid_t *pids, int max)
         char path[PROC_PIDPATHINFO_MAXSIZE];
         struct stat st;
         if (all[i] <= 1 || all[i] == getpid() || proc_pidpath(all[i], path, sizeof(path)) <= 0) continue;
-        if (!strcmp(path, srv)) {
+        if (!strcmp(path, srv) || !strcmp(path, srv2)) {
             *server = all[i];
             continue;
         }
@@ -337,6 +351,21 @@ static int hold(pid_t game, int ready)
     }
 }
 
+// --paths: every process's real executable, "<pid> <path>" lines
+static void print_paths(void)
+{
+    int n = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
+    pid_t *all = n > 0 ? malloc(n) : NULL;
+    if (!all) return;
+    n = proc_listpids(PROC_ALL_PIDS, 0, all, n) / (int)sizeof(pid_t);
+    for (int i = 0; i < n; i++) {
+        char path[PROC_PIDPATHINFO_MAXSIZE];
+        if (all[i] > 0 && proc_pidpath(all[i], path, sizeof(path)) > 0)
+            printf("%d %s\n", (int)all[i], path);
+    }
+    free(all);
+}
+
 int main(int argc, char **argv)
 {
     // --reap: end leftover processes of the engine (none if its wineserver runs), at once
@@ -344,9 +373,13 @@ int main(int argc, char **argv)
         reap_leftovers(1);
         return 0;
     }
+    if (argc == 2 && !strcmp(argv[1], "--paths")) {
+        print_paths();
+        return 0;
+    }
     pid_t game = argc == 2 ? (pid_t)atoi(argv[1]) : 0;
     if (game <= 1) {
-        fprintf(stderr, "usage: hold-launcher GAME_PID | hold-launcher --reap\n");
+        fprintf(stderr, "usage: hold-launcher GAME_PID | hold-launcher --reap | hold-launcher --paths\n");
         return 2;
     }
     int fds[2];

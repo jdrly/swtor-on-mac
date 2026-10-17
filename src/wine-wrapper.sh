@@ -5,9 +5,11 @@
 # official SWTOR Mac install; Broadsword's real preloaders live in Wine/bin-real. Every Wine
 # process the official launcher starts goes through the preloader (bin/wine64 itself stays
 # the real Mach-O: the preloader loads it by path). This script reads the settings in $CONF
-# and hands the process over to SWTOR on Mac's own Wine engine (CrossOver 24 with the d9mt
-# Direct3D 9 -> Metal driver) and prefix. Without $CONF, or if the engine is gone, it runs
-# Broadsword's real preloader unchanged, so the official setup keeps working.
+# and hands the process over to SWTOR on Mac's own Wine engine (CrossOver 26.3, Wine 11, with
+# the d9mt Direct3D 9 -> Metal driver) and prefix. Without $CONF, or if the engine is gone, it
+# runs Broadsword's real preloader unchanged, so the official setup keeps working. (It still
+# runs an install of 0.0.x, CrossOver 24.0.7 with SWTOR_FRAMEWORKS, the same way: a failed
+# upgrade puts that back.)
 # Runs once per process start; nothing stays behind.
 #
 # The line below is filled in by SWTOR on Mac's installer (src/som.sh).
@@ -63,7 +65,9 @@ if [ -n "$SWTOR_ENGINE" ]; then
   # Run this process on SWTOR on Mac's engine with its own prefix. $1 is Broadsword's
   # bin/wine64 (the loader the preloader would map); the rest is the command.
   shift
-  unset WINELOADER WINELOADERNOEXEC WINEPRELOADRESERVE WINEPRELOADERDUMMYVAR WINESERVERSOCKET
+  # (WINEDLLPATH: CrossOver 26 starts processes from winetemp links only while it is set; the
+  # game gets it below, with Game Mode on)
+  unset WINELOADER WINELOADERNOEXEC WINEPRELOADRESERVE WINEPRELOADERDUMMYVAR WINESERVERSOCKET WINEDLLPATH
   export WINEPREFIX="$SWTOR_PREFIX"
   export DYLD_FALLBACK_LIBRARY_PATH="${SWTOR_FRAMEWORKS:+$SWTOR_FRAMEWORKS:}/usr/lib"
   mkdir -p "$LOG_DIR"
@@ -92,6 +96,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
       # SWTOR_LOG_FILTER set: keep the game's Wine/d9mt output in wine.log.
       if [ -n "$SWTOR_LOG_FILTER" ]; then
         exec >/dev/null 2>"$LOG_DIR/wine.log"
+        # what this session runs on (session-report.sh shows it)
+        echo "SWTOR on Mac ${SWTOR_ON_MAC_VERSION:-?}: engine ${SWTOR_ENGINE_ID:-cx24} ${SWTOR_ENGINE_NAME:-${SWTOR_ENGINE##*/}}, d9mt ${SWTOR_D9MT:-?}, started $(date '+%Y-%m-%d %H:%M:%S')" >&2
       else
         exec >/dev/null 2>/dev/null
       fi
@@ -102,16 +108,39 @@ if [ -n "$SWTOR_ENGINE" ]; then
       # this pid). Returns once the launcher is stopped; does nothing if it cannot find it.
       # After the launcher has quit, it ends the engine's session and its leftovers.
       "$(dirname "$REAL")/hold-launcher" $$ </dev/null >/dev/null 2>>"$LOG_DIR/hold.log"
-      # macOS Game Mode: point the name CrossOver's ntdll re-execs the game from (a hard link
-      # of bin/wine-preloader in winetemp-<ino>-<size>-<mtime_s>-<mtime_ns>/, reused if
+      # macOS Game Mode: point the name CrossOver's ntdll starts the game from (a hard link
+      # of the engine's loader in winetemp-<ino>-<size>-<mtime_s>-<mtime_ns>/, reused if
       # present) at the identical copy inside SWTOR.app, so gamepolicyd sees a bundle
       # executable with LSSupportsGameMode. Skipped if that copy no longer matches.
+      #   CrossOver 26 (no wine-preloader; as SWGL on Mac does it): the loader is
+      #   lib/wine/x86_64-unix/wine, ntdll uses the links only while WINEDLLPATH is set (to a
+      #   harmless value: Wine's own lib/wine), and the first process of a wine command gets
+      #   the name "wine": that is the game, unless the command is start.exe /exec <game>,
+      #   whose child gets "swtor.exe". The other name must not point at the bundle.
+      #   CrossOver 24 (0.0.x): the loader is bin/wine-preloader, the game always swtor.exe.
       gm_exe="$SWTOR_GAMEMODE_APP/Contents/MacOS/swtor.exe"
-      gm_pre="$SWTOR_ENGINE/bin/wine-preloader"
+      if [ -f "$SWTOR_ENGINE/bin/wine-preloader" ]; then
+        gm_pre="$SWTOR_ENGINE/bin/wine-preloader" gm_name=swtor.exe gm_other="" gm_dllpath=""
+      else
+        gm_pre="$SWTOR_ENGINE/lib/wine/x86_64-unix/wine" gm_dllpath="$SWTOR_ENGINE/lib/wine"
+        case " $* " in
+          *" start.exe "*|*[/\\]start.exe" "*|*" start "*) gm_name=swtor.exe gm_other=wine ;;
+          *) gm_name=wine gm_other=swtor.exe ;;
+        esac
+      fi
       if [ -n "$SWTOR_GAMEMODE_APP" ] && cmp -s "$gm_pre" "$gm_exe" 2>/dev/null; then
         gm_m=$(stat -f '%Fm' "$gm_pre")
         gm_dir="$(getconf DARWIN_USER_TEMP_DIR)winetemp-$(stat -f '%i-%z' "$gm_pre")-${gm_m%.*}-$((10#${gm_m#*.}))"
-        mkdir -p -m 700 "$gm_dir" && ln -sf "$gm_exe" "$gm_dir/swtor.exe" 2>>"$LOG_DIR/gamemode.log"
+        if mkdir -p -m 700 "$gm_dir" && ln -sf "$gm_exe" "$gm_dir/$gm_name" 2>>"$LOG_DIR/gamemode.log"; then
+          if [ -n "$gm_other" ] && [ -L "$gm_dir/$gm_other" ]; then rm -f "$gm_dir/$gm_other"; fi
+          if [ -n "$gm_dllpath" ]; then
+            export WINEDLLPATH="$gm_dllpath"
+            echo "WINEDLLPATH=$WINEDLLPATH   (Game Mode)" >>"$LOG_DIR/effective-env.txt"
+          fi
+          # (the command's first word only: the rest has the account)
+          gm_first=${1##*[/\\]}
+          { date; echo "game mode: $gm_dir/$gm_name -> $gm_exe (command: $gm_first ...)${gm_dllpath:+, WINEDLLPATH=$gm_dllpath}"; } >>"$LOG_DIR/gamemode.log"
+        fi
       elif [ -n "$SWTOR_GAMEMODE_APP" ]; then
         { date; echo "game mode skipped: $gm_exe missing or differs from $gm_pre"; } >>"$LOG_DIR/gamemode.log"
       fi

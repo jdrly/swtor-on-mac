@@ -1,13 +1,16 @@
-PhysicalKeyboard: game keys by their position on a US keyboard, for CrossOver 24.0.7's Mac
-driver (Wine 9.0, dlls/winemac.drv). Part of SWTOR on Mac, https://github.com/jdrly/swtor-on-mac.
+PhysicalKeyboard: game keys by their position on a US keyboard, for the Mac driver of the
+CrossOver 26.3 engine SWTOR on Mac uses (athei's wine-build cx-26.3.0-8, Wine 11.0,
+dlls/winemac.drv). Part of SWTOR on Mac, https://github.com/jdrly/swtor-on-mac.
 
 This patch changes Wine's Mac driver, which is licensed under the GNU Lesser General Public
 License 2.1 or later (see the copyright headers of the files it changes); the patch and the
 winemac.so built with it are under the same license. Changed by Jan Drlý, 2026-10. Applies to
-CodeWeavers' published sources:
-  https://media.codeweavers.com/pub/crossover/source/crossover-sources-24.0.7.tar.gz
-  sha256 56749e926df9f0437dbcea259cf0bff6657a43871af50182887fe15a84fc2e4e  (sources/wine)
-Built by scripts/build-winemac.sh.
+the sources that engine is built from (CodeWeavers' CrossOver 26.3 with athei's patches):
+  https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0
+  (athei/wine@cx-26-patched, named in the release notes of athei/wine-build cx-26.3.0-8)
+Built by scripts/build-winemac.sh. The same change as the patch SWTOR on Mac 0.0.4-0.0.6 carried
+for CrossOver 24.0.7; only the option declarations moved (CrossOver 26 declares the Mac Driver
+options as bool in macdrv_cocoa.h).
 
 New Mac Driver option, OFF by default, per-app configurable like the others:
   HKCU\Software\Wine\Mac Driver                         "PhysicalKeyboard"="y"
@@ -30,8 +33,8 @@ check layouts without changing the system's input source.
 
 --- a/dlls/winemac.drv/cocoa_app.m
 +++ b/dlls/winemac.drv/cocoa_app.m
-@@ -2625,9 +2625,29 @@
- void macdrv_get_input_source_info(CFDataRef* uchr, CGEventSourceKeyboardType* keyboard_type, int* is_iso, TISInputSourceRef* input_source)
+@@ -2825,9 +2825,29 @@
+ void macdrv_get_input_source_info(CFDataRef* uchr, CGEventSourceKeyboardType* keyboard_type, bool* is_iso, TISInputSourceRef* input_source)
  {
      OnMainThread(^{
 -        TISInputSourceRef inputSourceLayout;
@@ -64,10 +67,12 @@ check layouts without changing the system's input source.
              CFDataRef data = TISGetInputSourceProperty(inputSourceLayout,
 --- a/dlls/winemac.drv/keyboard.c
 +++ b/dlls/winemac.drv/keyboard.c
-@@ -398,6 +398,27 @@
-     { VK_VOLUME_UP | 0x100,     "Volume Up" },
+@@ -274,6 +274,27 @@
+     { 0x02DC,                   "SMALL TILDE" },
+     { 0x02DD,                   "DOUBLE ACUTE ACCENT" },
  };
- 
++
++
 +/* PhysicalKeyboard: the name of a character key's vkey on a US keyboard (0: not one) */
 +static WCHAR us_key_char(unsigned int vkey)
 +{
@@ -87,15 +92,15 @@ check layouts without changing the system's input source.
 +        if (oem_chars[i].vkey == vkey) return oem_chars[i].wchar;
 +    return 0;
 +}
-+
-+
- static BOOL char_matches_string(WCHAR wchar, UniChar *string, BOOL ignore_diacritics)
- {
-     BOOL ret;
-@@ -776,6 +797,29 @@
-         thread_data->keyc2scan[kVK_ISO_Section] = temp;
-     }
  
+ 
+ static Boolean char_matches_string(WCHAR wchar, UniChar *string, CollatorRef collatorRef)
+@@ -676,6 +697,29 @@
+         DWORD temp = thread_data->keyc2scan[kVK_ANSI_Grave];
+         thread_data->keyc2scan[kVK_ANSI_Grave] = thread_data->keyc2scan[kVK_ISO_Section];
+         thread_data->keyc2scan[kVK_ISO_Section] = temp;
++    }
++
 +    if (physical_keyboard)
 +    {
 +        /* PhysicalKeyboard: every key gets the vkey of its position on a US keyboard,
@@ -117,12 +122,10 @@ check layouts without changing the system's input source.
 +            thread_data->keyc2vkey[kVK_ISO_Section] = VK_OEM_3;
 +        }
 +        return;
-+    }
-+
-     uchr = (const UCKeyboardLayout*)CFDataGetBytePtr(thread_data->keyboard_layout_uchr);
+     }
  
-     /* Using the keyboard layout, build a map of key code + modifiers -> characters. */
-@@ -1486,6 +1530,7 @@
+     uchr = (const UCKeyboardLayout*)CFDataGetBytePtr(thread_data->keyboard_layout_uchr);
+@@ -1386,6 +1430,7 @@
              UniCharCount len;
              OSStatus status;
              unsigned int vkey;
@@ -130,7 +133,7 @@ check layouts without changing the system's input source.
              int i;
  
              uchr = (const UCKeyboardLayout*)CFDataGetBytePtr(thread_data->keyboard_layout_uchr);
-@@ -1496,6 +1541,16 @@
+@@ -1396,6 +1441,16 @@
              if (len && buffer[0] > 32)
                  buffer[len] = 0;
  
@@ -147,7 +150,7 @@ check layouts without changing the system's input source.
              vkey = thread_data->keyc2vkey[keyc];
              if (lparam & (1 << 25))
              {
-@@ -1668,6 +1723,11 @@
+@@ -1579,6 +1634,11 @@
  
              if ((VK_PRIOR <= wCode && wCode <= VK_HELP) ||
                  (VK_F1 <= wCode && wCode <= VK_F24))
@@ -159,27 +162,27 @@ check layouts without changing the system's input source.
                  break;
  
              if (!thread_data || !thread_data->keyboard_layout_uchr)
---- a/dlls/winemac.drv/macdrv.h
-+++ b/dlls/winemac.drv/macdrv.h
-@@ -44,6 +44,7 @@
- extern BOOL allow_set_gamma;
- extern BOOL allow_software_rendering;
- extern BOOL disable_window_decorations;
-+extern int physical_keyboard;
- 
- /* CrossOver Hack 14364 */
- extern BOOL force_backing_store;
+--- a/dlls/winemac.drv/macdrv_cocoa.h
++++ b/dlls/winemac.drv/macdrv_cocoa.h
+@@ -141,6 +141,7 @@
+ extern bool use_confinement_cursor_clipping;
+ extern bool cursor_clipping_locks_windows;
+ extern bool use_precise_scrolling;
++extern bool physical_keyboard;  /* PhysicalKeyboard: vkeys by US key position */
+ extern int gl_surface_mode;
+ extern CFDictionaryRef localized_strings;
+ extern bool retina_enabled;  /* Whether Retina mode is enabled via registry setting. */
 --- a/dlls/winemac.drv/macdrv_main.c
 +++ b/dlls/winemac.drv/macdrv_main.c
-@@ -59,6 +59,7 @@
- int allow_immovable_windows = TRUE;
- int use_confinement_cursor_clipping = TRUE;
- int cursor_clipping_locks_windows = TRUE;
-+int physical_keyboard = FALSE;
- int use_precise_scrolling = TRUE;
+@@ -56,6 +56,7 @@
+ bool allow_immovable_windows = true;
+ bool use_confinement_cursor_clipping = true;
+ bool cursor_clipping_locks_windows = true;
++bool physical_keyboard = false;
+ bool use_precise_scrolling = true;
  int gl_surface_mode = GL_SURFACE_IN_FRONT_OPAQUE;
- int retina_enabled = FALSE;
-@@ -377,6 +378,9 @@
+ bool retina_enabled = false;
+@@ -370,6 +371,9 @@
  
      if (!get_config_key(hkey, appkey, "CursorClippingLocksWindows", buffer, sizeof(buffer)))
          cursor_clipping_locks_windows = IS_OPTION_TRUE(buffer[0]);

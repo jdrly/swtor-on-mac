@@ -39,7 +39,7 @@ final class Installer {
   }
   static let installSteps = [
     Step(id: 1, title: "Download the Wine engine",
-         detail: "CrossOver 24.0.7 and its libraries (about 270 MB)", symbol: "arrow.down"),
+         detail: "CrossOver 26.3 with Wine 11 (about 235 MB)", symbol: "arrow.down"),
     Step(id: 2, title: "Prepare the game files",
          detail: "A Wine prefix of SWTOR on Mac's own, with your game settings", symbol: "folder.fill"),
     Step(id: 3, title: "Install the d9mt graphics driver",
@@ -488,7 +488,7 @@ enum AppActions {
     ])
   }
 
-  // "d9mt 7975e2e · Wine WS12WineCX24.0.7_7" from Resources/VERSIONS.
+  // "d9mt 68c7190 · Wine cx-26.3.0-8" from Resources/VERSIONS.
   static func componentVersions() -> String {
     let url = Bundle.main.resourceURL!.appendingPathComponent("VERSIONS")
     guard let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }

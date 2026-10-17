@@ -13,6 +13,8 @@
 #
 # Sources, all optional (SWTOR on Mac 0.0.5 logs have no STATS lines; then the frame numbers
 # come from what there is):
+#   the first line (SWTOR on Mac 0.1.0-dev.1 and later): the app version, Wine engine and d9mt
+#             the session ran on
 #   STATS     once a second (d9mt 0.0.6 dev and later): fps, frame times, slow frames, passes,
 #             attachment loads/stores, compiles, Metal's allocated memory; from 0.0.6-dev.3 also
 #             the render thread's CPU time in the attachment optimization and the clears
@@ -220,6 +222,12 @@ analyze() {
 
 get() { sed -n "s/^$1=//p" "$2" | head -1; }
 
+# build_of <log>: "0.1.0-dev.1 cx-26.3.0-8 d9mt 68c7190" (app, Wine engine, d9mt) from the
+# wrapper's first line in wine.log (none in logs of 0.0.x)
+build_of() {
+  sed -n '1,5s/^SWTOR on Mac \([^:]*\): engine [^ ]* \([^,]*\), d9mt \([^,]*\), started .*/\1 \2 d9mt \3/p' "$1" | head -1
+}
+
 # label key [unit]: one line of the report from the analysis files A (and B)
 row() {  # (left out when no log has it)
   local label=$1 key=$2 a b=""
@@ -235,6 +243,7 @@ row() {  # (left out when no log has it)
 
 report() {
   [ "$SKIP" -gt 0 ] && echo "  (first $SKIP s left out)"
+  row "SWTOR on Mac, Wine engine, d9mt" build
   row "Seconds with STATS lines" duration
   row "Frames" frames
   row "FPS: average" fps_avg
@@ -292,6 +301,7 @@ if [ -n "$COMPARE" ]; then
   [ $# -eq 2 ] || usage
   for f in "$1" "$2"; do [ -r "$f" ] || { echo "Cannot read $f" >&2; exit 1; }; done
   analyze "$1" >"$tmp/a"; analyze "$2" >"$tmp/b"
+  echo "build=$(build_of "$1")" >>"$tmp/a"; echo "build=$(build_of "$2")" >>"$tmp/b"
   A="$tmp/a" B="$tmp/b"
   echo "SWTOR on Mac session report: comparison"
   printf '  %-38s %-36s %s\n' "" "A: ${1##*/}" "B: ${2##*/}"
@@ -307,6 +317,7 @@ fi
 LOG="${1:-$LOGS/wine.log}"
 [ -r "$LOG" ] || { echo "Cannot read $LOG" >&2; exit 1; }
 analyze "$LOG" >"$tmp/a"
+echo "build=$(build_of "$LOG")" >>"$tmp/a"
 A="$tmp/a" B=""
 echo "SWTOR on Mac session report: $LOG"
 report
