@@ -1311,6 +1311,21 @@ lock() {
   mkdir "$SOM/.lock" 2>/dev/null || die "Another SWTOR on Mac install or uninstall is running."
 }
 
+# A release's install over a development build's: what only development builds read goes,
+# once the install has gone through (d9mt-ab.sh's switches, which a release's env never reads,
+# and the caches of its cold= runs). Development builds keep both.
+remove_dev_leftovers() {
+  [ "$CHANNEL" = release ] || return 0
+  if [ -e "$SOM/d9mt-ab.env" ]; then
+    run rm -f "$SOM/d9mt-ab.env"
+    say "Removed a development build's d9mt A/B switches (d9mt-ab.env)"
+  fi
+  if [ -e "$CACHE/d9mt-ab" ]; then
+    run rm -rf "$CACHE/d9mt-ab"
+    say "Removed a development build's d9mt test caches ($CACHE/d9mt-ab)"
+  fi
+}
+
 cmd_install() {
   CREATED="" MOVED="" WRAPPER_PHASE="" NEW_PREFIX="" WRAPPER_STATE="" FIRST_INSTALL="" SETTINGS_USER="" UPGRADE=""
   [ -f "$MANIFEST" ] || FIRST_INSTALL=1
@@ -1347,6 +1362,7 @@ cmd_install() {
   # not part of the all-or-nothing install: without it, everything else still works
   install_agent || warn "The launcher-update guard (a launchd job) could not be set up; after a launcher update, open SWTOR on Mac and click Reinstall."
   [ -n "$DRY" ] || rm -rf "$CACHE/downloads"
+  remove_dev_leftovers
   log "install complete"
   echo "@done SWTOR on Mac $VERSION is installed. Press Play SWTOR, or start SWTOR from the official app as usual."
 }

@@ -203,7 +203,8 @@ they differ from releases in four ways:
   untouched). Each call sets exactly the switches it names; `d9mt-ab.sh` alone shows them,
   `reset` clears them (`--clean` also deletes the cold caches). They are kept in
   `d9mt-ab.env` next to `env`, which only a development build's `env` reads, so Settings keep
-  them; `wine.log` names them in its second line and the session report shows them.
+  them; `wine.log` names them in its second line and the session report shows them. A
+  release's Reinstall over a development build removes `d9mt-ab.env` and the cold caches.
 
 ### Debug Logging, session reports and live d9mt flags
 
@@ -395,7 +396,7 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
   setup of your user (SWGL on Mac's too), so Uninstall leaves them; macOS clears that folder
   when it needs the space, and deleting it only costs the stutter of a first start
 - `~/Library/Caches/SWTOR on Mac/d9mt-ab/` – only in development builds, the caches of
-  `d9mt-ab.sh cold=<name>` runs
+  `d9mt-ab.sh cold=<name>` runs (a release's Reinstall removes them and `d9mt-ab.env`)
 - `~/Library/Logs/SWTOR on Mac/` – `install.log`, `watch.log`, and per game start `wine.log`
   (d9mt warnings), `hold.log` (also a line per Wine start that is not the game: its time,
   the command's first word and who started it), `launch-env.txt`, `effective-env.txt`
@@ -494,8 +495,10 @@ directory) and `SWTOR_ON_MAC_DRY_RUN=1` (print the changes, make none). The app 
 so `SWTOR_ON_MAC_ROOT=/tmp/x "SWTOR on Mac.app/Contents/MacOS/SWTORonMac"` shows the window for
 a sandbox. In a sandbox the launchd job is written but not loaded, notifications go to
 `notifications.log`, and Play SWTOR opens only the sandbox's official app
-(`SWTORonMac --play-target` prints what the button would do, without opening anything). `scripts/test-sandbox.sh` builds a sandbox from APFS clones of this Mac's
-official install and runs install, the settings, reinstall, the wrapper's update check (with a
+(`SWTORonMac --play-target` prints what the button would do, without opening anything). `scripts/test-sandbox.sh` builds a sandbox from an APFS clone of this Mac's
+Broadsword Wine folder and a stand-in for the official app (its `Info.plist`, ad-hoc signed,
+with the test's stand-ins for the launcher built in, so Gatekeeper never sees a changed copy
+of Broadsword's signed app) and runs install, the settings, reinstall, the wrapper's update check (with a
 stub engine and a local feed), a simulated launcher update and the launchd job's repair (run as
 launchd would), leftover Wine processes (dummy programs under the sandbox engine: what
 `status` reports, that only they end, from `end-leftovers`, install, uninstall, the wrapper and
@@ -517,8 +520,10 @@ updated, game keys by position work); the upgrade again; and this version's Unin
 engine) it tests the way from it and back: this version's Reinstall over it changes only d9mt's
 `d3d9.dll` in the prefix and adds the env lines (the engine's code stays the same, its
 `winemetal.so` that of the previous release), and the previous release's Reinstall puts
-prefix, engine and `env` back as it had them. It also checks development builds' `d9mt-ab.sh`
-and the session report on a sample of d9mt's log lines. `scripts/test-update.sh` tests app updates with two Developer ID builds and a
+prefix, engine and `env` back as it had them. A release build then goes on from a development
+build (`DEV_APP`, default `release/0.1.1-dev.1`): its Reinstall removes the dev build's
+`d9mt-ab.env` and test caches and keeps the prefix, engine and settings. It also checks
+development builds' `d9mt-ab.sh` and the session report on a sample of d9mt's log lines. `scripts/test-update.sh` tests app updates with two Developer ID builds and a
 local feed, as in SWGL on Mac.
 
 ## Building

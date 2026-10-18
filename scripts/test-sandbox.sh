@@ -1,22 +1,26 @@
 #!/bin/bash
 # End-to-end test of the installer (Resources/som.sh of a built app) in a sandbox, without
-# touching the real system: a fake official install made of APFS clones of this Mac's real one
-# (the app and Broadsword's Wine folder, not the game data), put back to stock if a wrapper is
-# installed, under $SANDBOX (SWTOR_ON_MAC_ROOT). Downloads the real engine and runs Wine
+# touching the real system: a fake official install under $SANDBOX (SWTOR_ON_MAC_ROOT), a
+# stand-in for the official app with its Info.plist and an APFS clone of Broadsword's Wine
+# folder (not the game data), put back to stock if a wrapper is installed. Downloads the real engine and runs Wine
 # (wineboot, reg) on the sandbox prefix only, then checks that no Wine process is left.
 # Then the way from and back to 0.0.6 (sections 11-13, with OLD_APP): an install of 0.0.6
 # upgraded by this one (and a failed upgrade rolled back), this one replaced by 0.0.6 again
 # (Reinstall of the older app), and upgraded once more. Then the way from and back to the
 # previous release on the same engine (section 15, with PREV_APP): what this version's
 # Reinstall changes over it (d9mt's d3d9.dll in the prefix and the env lines, nothing in the
-# engine), and the previous release's Reinstall over this one.
+# engine), and the previous release's Reinstall over this one. A release build then goes on from
+# a development build (section 16, with DEV_APP): its A/B switches and test caches removed, the
+# rest kept, and uninstall to stock.
 #
 #   scripts/test-sandbox.sh [path/to/SWTOR on Mac.app]
 #
 # Needs the official SWTOR Mac app installed on this Mac (it is only read). Quit SWTOR first.
 # Env: SANDBOX (default /tmp/som-sandbox), KEEP=1 (leave the sandbox for a look afterwards),
 #      OLD_APP (default release/0.0.6/SWTOR on Mac.app; missing: sections 11-14 are skipped),
-#      PREV_APP (default release/0.1.0/SWTOR on Mac.app; missing: section 15 is skipped)
+#      PREV_APP (default release/0.1.0/SWTOR on Mac.app; missing: section 15 is skipped),
+#      DEV_APP (default release/0.1.1-dev.1/SWTOR on Mac.app; release builds only, missing:
+#      section 16 is skipped)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 APP="$(cd "${1:-dist/SWTOR on Mac.app}" && pwd)"
@@ -27,6 +31,8 @@ OLD_APP="${OLD_APP:-release/0.0.6/SWTOR on Mac.app}"
 [ ! -d "$OLD_APP" ] || OLD_APP="$(cd "$OLD_APP" && pwd)"
 PREV_APP="${PREV_APP:-release/0.1.0/SWTOR on Mac.app}"
 [ ! -d "$PREV_APP" ] || PREV_APP="$(cd "$PREV_APP" && pwd)"
+DEV_APP="${DEV_APP:-release/0.1.1-dev.1/SWTOR on Mac.app}"
+[ ! -d "$DEV_APP" ] || DEV_APP="$(cd "$DEV_APP" && pwd)"
 REPO="$PWD"
 SANDBOX="${SANDBOX:-/tmp/som-sandbox}"
 REAL_APP="/Applications/Star Wars - The Old Republic.app"
@@ -134,7 +140,20 @@ LOGS="$H/Library/Logs/SWTOR on Mac"
 AGENT_PLIST="$H/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist"
 export SWTOR_ON_MAC_ROOT="$SANDBOX"
 mkdir -p "$SANDBOX/Applications" "$(dirname "$BS_WINE")" "$SANDBOX/usertmp"
-cp -c -R -P "$REAL_APP" "$SANDBOX/Applications/"
+# The sandbox's official app: a bundle of its own with the real one's Info.plist (its bundle id,
+# by which the window finds the launcher running), not a copy. The tests run stand-ins for the
+# launcher from inside it, and a program added to a copy of Broadsword's signed app breaks its
+# seal, which Gatekeeper reports in a dialog as a damaged app. This one has its stand-ins
+# (tiny programs of our own: a copy of /bin/sleep, a platform binary, is not allowed to run)
+# from the start and an ad-hoc signature that stays valid; the real app is only read.
+mkdir -p "$BS_APP/Contents/MacOS"
+cp "$REAL_APP/Contents/Info.plist" "$BS_APP/Contents/Info.plist"
+printf '#include <stdlib.h>\n#include <unistd.h>\nint main(int c, char **v) { sleep(c > 1 ? atoi(v[1]) : 30); return 0; }\n' >"$SANDBOX/sleep.c"
+for p in "$(plutil -extract CFBundleExecutable raw -o - "$REAL_APP/Contents/Info.plist")" test-sleep test-sleep2 test-sleep3; do
+  clang -o "$BS_APP/Contents/MacOS/$p" "$SANDBOX/sleep.c"
+done
+codesign --force --sign - "$BS_APP" 2>/dev/null
+codesign --verify --strict "$BS_APP" || { echo "the sandbox's official app is not validly signed" >&2; exit 1; }
 cp -c -R -P "$REAL_WINE" "$(dirname "$BS_WINE")/"
 # back to stock: Broadsword's real preloaders into bin, no bin-real
 if [ -d "$BS_WINE/bin-real" ]; then
@@ -177,9 +196,7 @@ check "dry run: no app files" test ! -e "$SOM"
 check "dry run: lists the wrapper change" grep -q 'write .*bin/wine64-preloader' "$SANDBOX/dry-run.txt"
 
 echo "== 2. refuses while the launcher runs"
-# a tiny program of our own (a copy of /bin/sleep, a platform binary, is not allowed to run)
-printf '#include <unistd.h>\nint main(void) { sleep(30); return 0; }\n' >"$SANDBOX/sleep.c"
-clang -o "$BS_APP/Contents/MacOS/test-sleep" "$SANDBOX/sleep.c"
+# (a stand-in for the launcher, built into the sandbox's official app)
 "$BS_APP/Contents/MacOS/test-sleep" 30 &
 sleeper=$!
 sleep 0.5
@@ -187,7 +204,6 @@ if som install >"$SANDBOX/running.txt" 2>&1; then bad "install while running"; e
   check "running: refused with a message" grep -q '@error Quit the SWTOR launcher' "$SANDBOX/running.txt"
 fi
 kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true
-rm -f "$BS_APP/Contents/MacOS/test-sleep"
 
 echo "== 2b. leftover Wine processes of the engine (dummy programs; only those may end)"
 # One dummy program for every part: as .../wineserver it is a Wine server (writes ws.pid next
@@ -437,13 +453,11 @@ check "set retina: ended a leftover first" all_gone "$l5"
 rm -f "$SOM/engine/bin/test-leftover"
 check "set retina off: Wine reads n ($(echo "$out" | awk '/RetinaMode/ { print $NF }'))" test "$(echo "$out" | awk '/RetinaMode/ { print $NF }')" = n
 check "set retina: no Wine left running" test -z "$(sandbox_wine)"
-printf '#include <unistd.h>\nint main(void) { sleep(30); return 0; }\n' >"$SANDBOX/sleep2.c"
-clang -o "$BS_APP/Contents/MacOS/test-sleep2" "$SANDBOX/sleep2.c"
 "$BS_APP/Contents/MacOS/test-sleep2" & sleeper=$!; sleep 0.5
 check "set retina: refused while the launcher runs" eval '! som set retina on >/dev/null 2>&1'
 check "play: shows the launcher while it runs ($(play_target))" test "$(play_target)" = "show launcher"
 check "set hud: allowed while the launcher runs" eval 'som set hud off >/dev/null'
-kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true; rm -f "$BS_APP/Contents/MacOS/test-sleep2"
+kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true
 som set retina on >/dev/null && check "set retina on again" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
 check "settings: physkeys off by default" test "$(som settings | sed -n 's/^physkeys=//p')" = off
 check "settings: rawmouse on, mousespeed 1 by default" test "$(som settings | sed -n 's/^rawmouse=//p')/$(som settings | sed -n 's/^mousespeed=//p')" = on/1
@@ -467,12 +481,12 @@ check "set physkeys on: RetinaMode kept" reg_has 'Software\\Wine\\Mac Driver' '"
 out=$(sbx_wine reg query 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v PhysicalKeyboard 2>/dev/null | tr -d '\r' || true)
 cleanup_wine
 check "set physkeys on: Wine reads y ($(echo "$out" | awk '/PhysicalKeyboard/ { print $NF }'))" test "$(echo "$out" | awk '/PhysicalKeyboard/ { print $NF }')" = y
-clang -o "$BS_APP/Contents/MacOS/test-sleep2" "$SANDBOX/sleep2.c" && { "$BS_APP/Contents/MacOS/test-sleep2" & sleeper=$!; sleep 0.5; }
+"$BS_APP/Contents/MacOS/test-sleep3" & sleeper=$!; sleep 0.5
 check "set physkeys: refused while the launcher runs" eval '! som set physkeys off >/dev/null 2>&1'
 check "set rawmouse: refused while the launcher runs" eval '! som set rawmouse off >/dev/null 2>&1'
 check "set mousespeed: refused while the launcher runs" eval '! som set mousespeed 2 >/dev/null 2>&1'
 check "set physkeys, rawmouse: driver unchanged while refused" wm_is app
-kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true; rm -f "$BS_APP/Contents/MacOS/test-sleep2"
+kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true
 
 echo "== 4c. game keys by keyboard position: what the game sees (a probe program as swtor.exe)"
 if command -v x86_64-w64-mingw32-gcc >/dev/null; then
@@ -1052,6 +1066,32 @@ else
   echo "== 11-14 skipped: no older app at $OLD_APP (OLD_APP)"
 fi
 
+# the prefix's tree with the registry files' timestamps left out (every Reinstall rewrites
+# them), without the dll<hex>.tmp files wineboot -u leaves in system32 and syswow64 at every
+# run (any version), and of dosdevices only c: and z: (wineboot maps the other letters to
+# whatever volumes are mounted at the time); in the registry also without the values every
+# wineboot -u sets anew (PendingFileRenameOperations for those .tmp files, the input devices'
+# ContainerId)
+prefix_snap() {
+  snap "$SOM/prefix" | grep -v -e '\.reg$' -e '\.reg|' -e '/dll[0-9a-f]*\.tmp$' -e '/dll[0-9a-f]*\.tmp|' \
+    -e '^\./dosdevices/[a-y]:' -e '^\./dosdevices/z::'
+  for r in system.reg user.reg userdef.reg; do
+    printf '%s ' "$r"; sed -e 's/^\(\[.*\]\) [0-9]*$/\1/' -e '/^#time=/d' -e '/^"PendingFileRenameOperations"=/d' -e '/^"ContainerId"=/d' "$SOM/prefix/$r" |
+      shasum -a 256 | cut -d' ' -f1
+  done
+}
+# engine_same <name>: the engine's files that differ from $SANDBOX/<name>-engine (listed in
+# $SANDBOX/<name>-engine.diff) are the same code. A Developer ID build of either side signs its
+# Mach-O files, winemetal.so and winemac.so, with signatures of their own: those may differ,
+# their code not.
+engine_same() {
+  local f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    macho_same "$SANDBOX/$1-engine/$f" "$SOM/engine/$f" || { echo "  differs: $f"; return 1; }
+  done <"$SANDBOX/$1-engine.diff"
+}
+
 if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   PREVSOM="$PREV_APP/Contents/Resources/som.sh"
   PREVV=$(sed -n 's/^version=//p' "$PREV_APP/Contents/Resources/app.properties")
@@ -1066,20 +1106,6 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   prevsom set debug on >/dev/null; prevsom set memory high >/dev/null
   prevsom install >"$SANDBOX/prev-reinstall.txt" 2>&1 || { tail -20 "$SANDBOX/prev-reinstall.txt"; bad "$PREVV reinstall exit"; }
   check "$PREVV: installed" eval 'grep -q "^@done" "$SANDBOX/prev-reinstall.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$PREVV" ]'
-  # the prefix's tree with the registry files' timestamps left out (every Reinstall rewrites
-  # them), without the dll<hex>.tmp files wineboot -u leaves in system32 and syswow64 at every
-  # run (any version), and of dosdevices only c: and z: (wineboot maps the other letters to
-  # whatever volumes are mounted at the time); in the registry also without the values every
-  # wineboot -u sets anew (PendingFileRenameOperations for those .tmp files, the input devices'
-  # ContainerId)
-  prefix_snap() {
-    snap "$SOM/prefix" | grep -v -e '\.reg$' -e '\.reg|' -e '/dll[0-9a-f]*\.tmp$' -e '/dll[0-9a-f]*\.tmp|' \
-      -e '^\./dosdevices/[a-y]:' -e '^\./dosdevices/z::'
-    for r in system.reg user.reg userdef.reg; do
-      printf '%s ' "$r"; sed -e 's/^\(\[.*\]\) [0-9]*$/\1/' -e '/^#time=/d' -e '/^"PendingFileRenameOperations"=/d' -e '/^"ContainerId"=/d' "$SOM/prefix/$r" |
-        shasum -a 256 | cut -d' ' -f1
-    done
-  }
   # env without comments, versions, the lines this version adds and (development builds) the
   # update check, which they turn off
   envnorm() {
@@ -1101,16 +1127,7 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   check "over $PREVV: in the prefix only d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" test "$(cat "$SANDBOX/prev-prefix.diff")" = ./drive_c/windows/system32/d3d9.dll
   check "over $PREVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/prev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-engine.diff"
-  # (a Developer ID build of either side signs its Mach-O files, winemetal.so and winemac.so,
-  # with signatures of their own: those may differ, their code not)
-  engine_same() {
-    local f
-    while IFS= read -r f; do
-      [ -n "$f" ] || continue
-      macho_same "$SANDBOX/prev-engine/$f" "$SOM/engine/$f" || { echo "  differs: $f"; return 1; }
-    done <"$SANDBOX/prev-engine.diff"
-  }
-  check "over $PREVV: the engine unchanged, signatures aside ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same
+  check "over $PREVV: the engine unchanged, signatures aside ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same prev
   check "over $PREVV: winemetal.so is $PREVV's code (LC_UUID $(dwarfdump -u "$WM/winemetal.so" | awk '{ print $2 }'))" eval 'macho_same "$PREV_APP/Contents/Resources/d9mt/winemetal.so" "$WM/winemetal.so" && [ "$(dwarfdump -u "$WM/winemetal.so" | awk "{ print \$2 }")" = "$(dwarfdump -u "$PREV_APP/Contents/Resources/d9mt/winemetal.so" | awk "{ print \$2 }")" ]'
   check "over $PREVV: winemetal.dll byte for byte $PREVV's" cmp -s "$PREV_APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll"
   check "over $PREVV: settings.conf and dxvk.conf unchanged" eval 'cmp -s "$SANDBOX/prev-settings.conf" "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
@@ -1132,6 +1149,46 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   check "this version's uninstall of $PREVV: app files gone (d9mt-ab.env too)" eval 'for c in engine prefix gamemode env install-manifest.json d9mt-ab.env; do [ ! -e "$SOM/$c" ] || exit 1; done'
 else
   echo "== 15 skipped: no previous release at $PREV_APP (PREV_APP)"
+fi
+
+DEVV=$(sed -n 's/^version=//p' "$DEV_APP/Contents/Resources/app.properties" 2>/dev/null || true)
+if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ -x "$DEV_APP/Contents/Resources/d9mt-ab.sh" ]; then
+  devsom() { "$DEV_APP/Contents/Resources/som.sh" "$@"; }
+  COLD="$H/Library/Caches/SWTOR on Mac/d9mt-ab"
+  echo "== 16. from the development build $DEVV to this release: its leftovers go, the rest stays"
+  rm -rf "$SOM" "$H/Library/Caches/SWTOR on Mac"
+  seed "$NEW_ENGINE"
+  devsom install >"$SANDBOX/dev-install.txt" 2>&1 || { tail -20 "$SANDBOX/dev-install.txt"; bad "$DEVV install exit"; }
+  devsom set memory high >/dev/null
+  # a Reinstall of $DEVV, so both sides of the prefix comparison come from a Reinstall
+  devsom install >"$SANDBOX/dev-reinstall0.txt" 2>&1 || { tail -20 "$SANDBOX/dev-reinstall0.txt"; bad "$DEVV reinstall exit"; }
+  "$DEV_APP/Contents/Resources/d9mt-ab.sh" pfv state-off cold=d1 >/dev/null
+  mkdir -p "$COLD/d1/pso" && echo cold >"$COLD/d1/air-cache.sqlite3"
+  check "$DEVV: installed, Debug Logging on, the A/B switches read ($(envv SWTOR_D9MT_AB))" eval 'grep -q "^@done" "$SANDBOX/dev-install.txt" && grep -qx debug=on "$SOM/settings.conf" && [ "$(envv D9MT_TEX_PFV)/$(envv D9MT_STATE_CACHE)" = 1/0 ] && [ -f "$SOM/d9mt-ab.env" ]'
+  check "$DEVV: no Wine left running" test -z "$(sandbox_wine)"
+  prefix_snap >"$SANDBOX/dev-prefix.txt"
+  snap "$SOM/engine" >"$SANDBOX/dev-engine.txt"
+  rm -rf "$SANDBOX/dev-engine" && cp -c -R -p "$SOM/engine" "$SANDBOX/dev-engine"
+  cp "$SOM/settings.conf" "$SANDBOX/dev-settings.conf"
+
+  som install >"$SANDBOX/dev-upgrade.txt" 2>&1 || { tail -20 "$SANDBOX/dev-upgrade.txt"; bad "install over $DEVV exit"; }
+  check "over $DEVV: @done, manifest $APPV" eval 'grep -q "^@done" "$SANDBOX/dev-upgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$APPV" ]'
+  check "over $DEVV: the A/B switches removed, said so" eval '[ ! -e "$SOM/d9mt-ab.env" ] && grep -q "^Removed a development build.s d9mt A/B switches" "$SANDBOX/dev-upgrade.txt"'
+  check "over $DEVV: the cold test caches removed, said so" eval '[ ! -e "$COLD" ] && grep -q "^Removed a development build.s d9mt test caches" "$SANDBOX/dev-upgrade.txt"'
+  check "over $DEVV: env as a release writes it (no A/B include, state cache on, update check on)" eval '! grep -q d9mt-ab "$SOM/env" && [ "$(envv D9MT_TEX_PFV)/$(envv SWTOR_D9MT_AB)" = "<unset>/<unset>" ] && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && grep -qx SWTOR_UPDATE_CHECK=1 "$SOM/env"'
+  check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high)" cmp -s "$SANDBOX/dev-settings.conf" "$SOM/settings.conf"
+  check "over $DEVV: the same d3d9.dll as $DEVV" cmp -s "$DEV_APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
+  check "over $DEVV: the prefix as $DEVV left it" eval 'prefix_snap | diff "$SANDBOX/dev-prefix.txt" - >"$SANDBOX/dev-prefix.diff"'
+  { snap "$SOM/engine" | diff "$SANDBOX/dev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/dev-engine.diff"
+  check "over $DEVV: the engine unchanged, signatures aside ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev
+  check "over $DEVV: no Wine left running" test -z "$(sandbox_wine)"
+  som install >"$SANDBOX/dev-reinstall.txt" 2>&1 || bad "reinstall after $DEVV exit"
+  check "over $DEVV: a Reinstall after it has nothing more to remove" eval 'grep -q "^@done" "$SANDBOX/dev-reinstall.txt" && ! grep -q "^Removed a development build" "$SANDBOX/dev-reinstall.txt"'
+  som uninstall >"$SANDBOX/uninstall5.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall5.txt"; bad "uninstall after $DEVV"; }
+  check "uninstall after $DEVV: official install identical to stock" like_stock uninstall5
+  check "uninstall after $DEVV: app files and caches gone" eval 'for c in engine prefix gamemode env settings.conf install-manifest.json d9mt-ab.env dev-defaults; do [ ! -e "$SOM/$c" ] || exit 1; done; [ ! -e "$H/Library/Caches/SWTOR on Mac" ]'
+elif [ "$CHANNEL" = release ]; then
+  echo "== 16 skipped: no development build at $DEV_APP (DEV_APP)"
 fi
 
 cleanup_wine
