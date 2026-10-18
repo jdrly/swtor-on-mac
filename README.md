@@ -285,7 +285,10 @@ update* and a **Repair the Launcher Hook** button.
 
 The zip holds SWTOR on Mac's logs, `env`, `settings.conf`, `dxvk.conf`,
 `install-manifest.json`, the versions, system information (macOS, chip, memory, displays) and
-crash reports of the last 7 days for the game and Wine. Your home folder, user name, account
+macOS's crash, hang and spin reports of the last 7 days (from `~/Library/Logs/DiagnosticReports`)
+for the game, Wine, the official launcher and SWTOR on Mac, so you don't have to look for them:
+the newest 20, up to 10 MB together; `system-info.txt` lists which are in the zip and which were
+left out. Your home folder, user name, account
 names and e-mail addresses are replaced, serial numbers and device identifiers are left out,
 and the game's command line (the launcher passes the account on it) is never included. Turn on
 **Settings > Debug Logging** only when asked: it makes the logs much more detailed for the next

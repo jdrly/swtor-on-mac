@@ -7,9 +7,11 @@
 # In the zip: SWTOR on Mac's logs (the end of large ones), its env, settings.conf, dxvk.conf,
 # install-manifest.json and d9mt-ab.env (a development build's A/B switches, if set), the app's VERSIONS, session-report.txt (the last game session in
 # short, scripts/session-report.sh), a fresh system-info.txt (macOS, chip,
-# memory, displays, versions, the state of the install), and crash reports of the last 7 days
-# for the game, Wine and the app. Never the game's command line (the launcher passes the
-# account name and session on it), nor anything from the Wine prefixes.
+# memory, displays, versions, the state of the install, which crash reports are in the zip), and
+# crash-reports/: macOS's crash, hang and spin reports of the last 7 days for the game, Wine, the
+# official launcher and SWTOR on Mac (see crash_reports), so nobody has to look for them. Never
+# the game's command line (the launcher passes the account name and session on it), nor
+# anything from the Wine prefixes.
 # Every file is redacted on the way in: home folder → ~, user and full name → USER and NAME,
 # account names (from the game's <account>_Account.ini names) → ACCOUNT, e-mail addresses → EMAIL, "-set <key> <value>" arguments and password/user name/token
 # settings → REDACTED, serial numbers and device identifiers left out.
@@ -22,6 +24,7 @@ H="${ROOT:+$ROOT/home}"
 H="${H:-$HOME}"
 SOM="$H/Library/Application Support/SWTOR on Mac"
 LOGS="$H/Library/Logs/SWTOR on Mac"
+DIAG="$H/Library/Logs/DiagnosticReports"
 BS_WINE="$H/Library/Application Support/com.broadsword.swtor/Star Wars - The Old Republic/swtor-precompiled/Libraries/Wine"
 
 name="SWTOR-on-Mac-logs-$(date +%Y-%m-%d-%H%M)"
@@ -123,18 +126,33 @@ add_log() {  # file max-bytes: the end of a log
   fi
 }
 
-# Crash reports of the last 7 days for the game, Wine (and its preloader, the Game Mode
-# bundle's swtor.exe), Metal's shader compiler working for them, and this app.
+# Crash reports: macOS's reports in ~/Library/Logs/DiagnosticReports (crashes .ips/.crash,
+# hangs .hang, spins .spin, .diag) of the last 7 days, of what SWTOR on Mac runs: the game and
+# Wine (wine, wine64-preloader, wineserver, mac_wine; swtor.exe, the Game Mode bundle's), the
+# official launcher (Star Wars - The Old Republic Launcher), this app and its helpers, and
+# Metal's shader compiler when it worked for the game or Wine. The newest first, at most
+# CRASH_MAX of them, CRASH_MAX_BYTES together and CRASH_FILE_MAX each (larger ones are left
+# out, and named in system-info.txt). Prints "add <path>" or "skip <name> (<why>)" per report.
+CRASH_MAX=20
+CRASH_MAX_BYTES=10000000
+CRASH_FILE_MAX=3000000
 crash_reports() {
-  local f
-  find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f \( -iname 'swtor*' -o -iname '*wine*' \
-    -o -name 'SWTORonMac*' -o -name 'MTLCompilerService*' -o -name 'hold-launcher*' -o -name 'setsid-exec*' \) \
-    -mtime -7 -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | while IFS= read -r f; do
+  local size f n=0 total=0
+  find "$DIAG" -maxdepth 1 -type f \( -iname '*wine*' -o -iname 'swtor*' -o -name 'Star Wars*' -o -name 'launcher*' \
+    -o -name 'SWTOR on Mac*' -o -name 'SWTORonMac*' -o -name 'hold-launcher*' -o -name 'setsid-exec*' \
+    -o -name 'MTLCompilerService*' \) \( -name '*.ips' -o -name '*.crash' -o -name '*.hang' -o -name '*.spin' -o -name '*.diag' \) \
+    -mtime -7 -exec stat -f '%m %z %N' {} + 2>/dev/null | sort -rn | while read -r _ size f; do
       case "${f##*/}" in
         MTLCompilerService*) LC_ALL=C grep -q -E '"responsibleProc" : "(swtor|wine)' "$f" || continue ;;
       esac
-      echo "$f"
-    done | head -10
+      if [ "$n" -ge "$CRASH_MAX" ]; then echo "skip ${f##*/} (more than $CRASH_MAX reports)"
+      elif [ "$size" -gt "$CRASH_FILE_MAX" ]; then echo "skip ${f##*/} ($(((size + 999) / 1000)) KB, too large)"
+      elif [ $((total + size)) -gt "$CRASH_MAX_BYTES" ]; then echo "skip ${f##*/} (over $((CRASH_MAX_BYTES / 1000000)) MB together)"
+      else
+        echo "add $f"
+        n=$((n + 1)); total=$((total + size))
+      fi
+    done
 }
 
 for f in "$LOGS"/*; do
@@ -148,7 +166,15 @@ add "$RES/VERSIONS"
 if [ -f "$LOGS/wine.log" ] && [ -x "$RES/session-report.sh" ]; then
   "$RES/session-report.sh" "$LOGS/wine.log" 2>&1 | redact >"$out/session-report.txt"
 fi
-crash_reports | while IFS= read -r f; do add "$f" "crash-reports/${f##*/}"; done
+# (redacted like every other file; the list goes into system-info.txt)
+crash_reports >"$work/crash-list"
+while IFS= read -r line; do
+  case "$line" in
+    "add "*) f=${line#add }; add "$f" "crash-reports/${f##*/}" &&
+      echo "  ${f##*/} ($(stat -f '%Sm' -t '%F %R' "$f"), $((($(stat -f %z "$f") + 999) / 1000)) KB)" ;;
+    "skip "*) echo "  left out: ${line#skip }" ;;
+  esac
+done <"$work/crash-list" >"$work/crash-index"
 
 {
   echo "SWTOR on Mac logs, collected $(date '+%F %T %z')"
@@ -191,6 +217,9 @@ crash_reports | while IFS= read -r f; do add "$f" "crash-reports/${f##*/}"; done
     done
   done
   echo "Launcher-update guard: $([ -f "$H/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist" ] && echo "installed" || echo "not installed")"
+  echo
+  echo "Crash reports of the last 7 days (newest first; in crash-reports/):"
+  if [ -s "$work/crash-index" ]; then cat "$work/crash-index"; else echo "  none"; fi
   echo
   # names only, never the command line (it has the account)
   echo "Running SWTOR, Wine and SWTOR on Mac processes (name only):"

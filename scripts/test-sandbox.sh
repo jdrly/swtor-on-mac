@@ -857,6 +857,40 @@ if [ -d "$GS_APP" ]; then
 fi
 # Collect Logs (sandbox: the zip goes to the sandbox's Desktop)
 echo "2026-10-16 launch: swtor.exe -set username SECRETACCOUNT -set password hunter2 $HOME/x" >>"$LOGS/install.log"
+# Crash reports: fakes in the sandbox's DiagnosticReports (the real ones are never read), from
+# the newest: the game's, three large Wine ones (8.7 MB together), one over the 10 MB total,
+# the launcher's over 3 MB, Metal's compiler for Wine and for another app, another app's, a
+# .txt, then 20 small ones (only 15 fit in the 20 reports) and one 8 days old.
+DIAG="$H/Library/Logs/DiagnosticReports"
+mkdir -p "$DIAG"
+fake_report() { # <name> <minutes ago> [<bytes> | <responsibleProc>]
+  local f="$DIAG/$1"
+  case "${3:-}" in
+    [0-9]*) python3 -I -c 'import sys; n = int(sys.argv[2]); l = b"a line of a large crash report\n"; open(sys.argv[1], "wb").write((l * (n // len(l) + 1))[:n])' "$f" "$3" ;;
+    *) printf '{"app_name":"%s","timestamp":"2026-10-18"}\n{\n  "procPath" : "%s/Library/Application Support/SWTOR on Mac/engine/bin/wine",\n  "responsibleProc" : "%s",\n  "crashReporterKey" : "SECRETKEY123",\n  "userEmail" : "player@example.com",\n  "path" : "/Users/%s/Desktop"\n}\n' \
+         "${1%%-*}" "$HOME" "${3:-wine}" "$(id -un)" >"$f" ;;
+  esac
+  touch -t "$(date -v-"$2"M +%Y%m%d%H%M)" "$f"
+}
+fake_report swtor.exe-2026-10-18-120000.ips 1
+for i in 1 2 3; do fake_report "wine-2026-10-18-11000$i.ips" $((1 + i)) 2900000; done
+fake_report wineserver-2026-10-18-110004.ips 5 2900000
+fake_report "Star Wars - The Old Republic Launcher-2026-10-18-110005.ips" 6 3500000
+fake_report MTLCompilerService-2026-10-18-110006.ips 7 wine
+fake_report MTLCompilerService-2026-10-18-110007.ips 8 Xcode
+fake_report Safari-2026-10-18-110008.ips 9
+fake_report wine-notes.txt 10
+small="mac_wine-2026-10-18-100000.crash SWTORonMac-2026-10-18-100001.hang hold-launcher-2026-10-18-100002.ips"
+small="$small setsid-exec-2026-10-18-100003.spin wineserver-2026-10-18-100004.diag"
+for i in 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do small="$small wine-2026-10-18-0900$i.ips"; done
+crash_want="swtor.exe-2026-10-18-120000.ips wine-2026-10-18-110001.ips wine-2026-10-18-110002.ips wine-2026-10-18-110003.ips"
+crash_want="$crash_want MTLCompilerService-2026-10-18-110006.ips"
+n=20; for f in $small; do
+  fake_report "$f" "$n"
+  [ "$n" -ge 35 ] || crash_want="$crash_want $f"
+  n=$((n + 1))
+done
+fake_report wine-2026-10-10-090000.ips $((8 * 24 * 60))
 zip=$("$APP/Contents/Resources/collect-logs.sh" 2>"$SANDBOX/collect.err" || true)
 check "logs: zip on the sandbox Desktop" test -f "$zip" -a "${zip#"$H/Desktop/"}" != "$zip"
 if [ -f "$zip" ]; then
@@ -865,6 +899,13 @@ if [ -f "$zip" ]; then
   check "logs: no -set values" eval '! grep -rq -e SECRETACCOUNT -e hunter2 "$SANDBOX/zip"'
   check "logs: no user name in paths" eval '! grep -rq "/Users/$(id -un)/" "$SANDBOX/zip"'
   check "logs: system info has the Mac" grep -q '^Mac: ' "$SANDBOX"/zip/*/system-info.txt
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  CR=$(echo "$SANDBOX"/zip/*/crash-reports) SI=$(echo "$SANDBOX"/zip/*/system-info.txt)
+  check "logs: crash reports: the newest 20 of the game, Wine and the app, within 3 MB each and 10 MB together, only the sandbox's" \
+    eval '[ "$(ls "$CR" | sort)" = "$(echo $crash_want | tr " " "\n" | sort)" ]'
+  check "logs: crash reports redacted (home, user name, keys, e-mail)" eval '! grep -rq -e "$HOME" -e "/Users/$(id -un)/" -e SECRETKEY123 -e player@example.com "$CR" && grep -q "\"procPath\" : \"~/Library/Application Support/SWTOR on Mac/engine/bin/wine\"" "$CR/swtor.exe-2026-10-18-120000.ips"'
+  check "logs: system info lists the crash reports, the newest first" eval '[ "$(sed -n "/^Crash reports/,/^\$/p" "$SI" | sed -n "2s/^  \([^ ]*\) .*/\1/p")" = swtor.exe-2026-10-18-120000.ips ] && [ "$(grep -c "^  [^l].*KB)\$" "$SI")" = 20 ]'
+  check "logs: system info names the ones left out and why" eval 'grep -q "^  left out: wineserver-2026-10-18-110004.ips (over 10 MB together)" "$SI" && grep -q "^  left out: Star Wars - The Old Republic Launcher-2026-10-18-110005.ips (3500 KB, too large)" "$SI" && [ "$(grep -c "(more than 20 reports)" "$SI")" = 5 ]'
 fi
 # the Game Mode links the wrapper would have made at game start ("wine", or "swtor.exe" for a
 # start.exe command)

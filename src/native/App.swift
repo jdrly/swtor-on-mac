@@ -552,7 +552,9 @@ final class LogCollector {
       alert.messageText = "Logs collected"
       alert.informativeText = "\((zip as NSString).lastPathComponent) is in your \(folder) folder. Send it with a "
         + "short description of the problem to Pharaphobia on Discord or attach it to a GitHub issue, "
-        + "not to Broadsword or SWTOR customer support. It contains no account names or passwords."
+        + "not to Broadsword or SWTOR customer support. It includes the crash reports of the game, "
+        + "Wine and SWTOR on Mac from the last 7 days, so you don't need to look for them, and "
+        + "contains no account names or passwords."
       alert.addButton(withTitle: "Show in Finder")
     } else {
       alert.alertStyle = .warning
