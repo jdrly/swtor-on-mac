@@ -71,8 +71,10 @@ versions with a click (see [Updates](#updates)).
 
 **The first minutes of play may stutter**, and so may each new area or effect the first time
 you see it (for example a city full of players): d9mt compiles the game's shaders and pipelines
-for Metal the first time it meets them and caches them, so it gets smooth after that. After an
-update of SWTOR on Mac the cache is rebuilt once.
+for Metal the first time it meets them and caches them, so it gets smooth after that. d9mt also
+remembers which pipelines the game used (its pipeline state cache, 0.1.1 and later) and
+builds them again in the background while the game loads, so the next sessions, and the first
+one after an update of SWTOR on Mac that changes d9mt's shader compiler, stutter less.
 
 Install again (**Reinstall**) whenever you like: it is safe to repeat and keeps your game
 settings and SWTOR on Mac's settings.
@@ -179,7 +181,7 @@ messages. With the setting on:
 
 Versions like `0.0.6-dev.1` are test builds of the next version. They are published only as
 GitHub **pre-releases** (DMG only, no `appcast.xml`), so the feed above never offers them, and
-they differ from releases in three ways:
+they differ from releases in four ways:
 
 - A **Development build** badge next to the title, and in About.
 - **Debug Logging is on by default.** The first install or Reinstall of each dev version turns
@@ -188,9 +190,20 @@ they differ from releases in three ways:
 - **No automatic update checks**, neither Sparkle's nor the wrapper's at game start; the
   setting is shown off. **Check for Updates…** still works. A dev build's `CFBundleVersion`
   (what Sparkle compares) sorts between the previous release and its own:
-  `0.0.6-dev.N` is `0.0.5.(1000+N)`, `0.1.0-dev.N` is `0.0.9999.(1000+N)`. So the feed's
-  previous release is never offered as an update, and the public X.Y.Z is offered once it is
-  out. `CFBundleShortVersionString` stays `X.Y.Z-dev.N`.
+  `0.0.6-dev.N` is `0.0.5.(1000+N)`, `0.1.0-dev.N` is `0.0.9999.(1000+N)`, `0.1.1-dev.N` is
+  `0.1.0.(1000+N)`. So the feed's previous release is never offered as an update, and the
+  public X.Y.Z is offered once it is out. `CFBundleShortVersionString` stays `X.Y.Z-dev.N`.
+- **d9mt A/B switches** (0.1.1-dev.1 and later):
+  `"/Applications/SWTOR on Mac.app/Contents/Resources/d9mt-ab.sh"` (`scripts/d9mt-ab.sh`) sets
+  d9mt's test switches for the next game starts, without editing `env`: `state-off` (no
+  pipeline state cache), `pfv`, `barrier-all`, `clear-keep` (each undoes one of 0.1.1's GPU
+  savings; `gpu-old` all three), `vsync-off`, `repro` (`DXVK_CONFIG`
+  `d3d9.reproducibleCommandStream=True`) and `cold=<name>` (an empty shader cache and pipeline
+  archives of their own in `~/Library/Caches/SWTOR on Mac/d9mt-ab/<name>`, d9mt's own caches
+  untouched). Each call sets exactly the switches it names; `d9mt-ab.sh` alone shows them,
+  `reset` clears them (`--clean` also deletes the cold caches). They are kept in
+  `d9mt-ab.env` next to `env`, which only a development build's `env` reads, so Settings keep
+  them; `wine.log` names them in its second line and the session report shows them.
 
 ### Debug Logging, session reports and live d9mt flags
 
@@ -213,7 +226,14 @@ performance. A setting you choose is kept through updates and Reinstall.
   render thread's CPU time in that optimization and the clears per frame, to tell its cost
   apart from compile waits (a cold shader cache);
 - the attachment re-clears by cause, from the `RESTORE` lines (0.0.6 and later):
-  image format and size, the aspects re-cleared, why and the D3D9 call, per frame.
+  image format and size, the aspects re-cleared, why and the D3D9 call, per frame;
+- (0.1.1 and later) d9mt's GPU path (lossless texture compression, the end-of-pass barrier,
+  clears that skip stores) and the A/B switches the session ran with; the pass splits per
+  frame (`split=`, with a submit, `splitMiB=`) from the `STATS` lines; the pipeline state
+  cache from the `STATECACHE` lines: what it loaded (and whether the last session ended
+  during its prewarm, `guard`), what the prewarm built or failed, and how many pipelines the
+  game then found prewarmed (`hits`), still building (`late`) or not in it (`misses`);
+  StretchRect and ColorFill by path from the `XFER` lines.
 
 `wine.log` starts afresh at every game start, so `--keep` saves a copy to `sessions/`.
 `--compare A.log B.log` puts two sessions side by side. `--skip <s>` leaves out the first
@@ -369,6 +389,13 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
 - `~/Library/Caches/SWTOR on Mac/downloads` – the engine downloads, only during an install
 - `winetemp-…/wine` (or `winetemp-…/swtor.exe`) in your per-user temporary folder
   (`$TMPDIR`) – the Game Mode link, made at each game start
+- `d9mt/` in your per-user cache folder (`$(getconf DARWIN_USER_CACHE_DIR)`) – d9mt's own
+  caches, made by the game: compiled shaders (`air-cache.sqlite3`), pipeline archives (`pso/`)
+  and the pipeline state cache (`state/`, `D9MT_STATE_CACHE`). They are shared by every d9mt
+  setup of your user (SWGL on Mac's too), so Uninstall leaves them; macOS clears that folder
+  when it needs the space, and deleting it only costs the stutter of a first start
+- `~/Library/Caches/SWTOR on Mac/d9mt-ab/` – only in development builds, the caches of
+  `d9mt-ab.sh cold=<name>` runs
 - `~/Library/Logs/SWTOR on Mac/` – `install.log`, `watch.log`, and per game start `wine.log`
   (d9mt warnings), `hold.log` (also a line per Wine start that is not the game: its time,
   the command's first word and who started it), `launch-env.txt`, `effective-env.txt`
@@ -446,7 +473,8 @@ those; the window says which, and the buttons say why when clicked. The window l
 when it becomes active and when the launcher or the game quits.
 
 Fixed settings (`env` and the prefix's registry): `WINEMSYNC=1`, `WINEDEBUG=-all`,
-`WINEDLLOVERRIDES=d3d9=n,b` (also per app for `swtor.exe`), `d3d9.allowOutOfRangeVsDefs = True`
+`WINEDLLOVERRIDES=d3d9=n,b` (also per app for `swtor.exe`), `D9MT_STATE_CACHE` (d9mt's
+pipeline state cache next to its other caches, see [What it changes](#what-it-changes)), `d3d9.allowOutOfRangeVsDefs = True`
 in d9mt's `dxvk.conf`, and `GrabPointer=n` for `swtor.exe` (no hitch when mouse-look starts).
 Vsync is on by default because SWTOR asks for none in borderless mode, which tears. The rest is
 in the Settings window (above).
@@ -485,7 +513,12 @@ way from 0.0.6 and back: a 0.0.6 install upgraded (a failed upgrade rolled back 
 libraries, env and prefix as before, and Wine 9 still reads the prefix), everything kept and
 the new engine in use; 0.0.6's Reinstall over it (Wine 9 runs programs in the prefix Wine 11
 updated, game keys by position work); the upgrade again; and this version's Uninstall of a
-0.0.6 install. `scripts/test-update.sh` tests app updates with two Developer ID builds and a
+0.0.6 install. With the previous release (`PREV_APP`, default `release/0.1.0`, the same
+engine) it tests the way from it and back: this version's Reinstall over it changes only d9mt's
+`d3d9.dll` in the prefix and adds the env lines (the engine's code stays the same, its
+`winemetal.so` that of the previous release), and the previous release's Reinstall puts
+prefix, engine and `env` back as it had them. It also checks development builds' `d9mt-ab.sh`
+and the session report on a sample of d9mt's log lines. `scripts/test-update.sh` tests app updates with two Developer ID builds and a
 local feed, as in SWGL on Mac.
 
 ## Building
@@ -493,7 +526,11 @@ local feed, as in SWGL on Mac.
 - `scripts/build-d9mt.sh` builds d9mt (x86_64) at a pinned commit of
   [jdrly/d9mt](https://github.com/jdrly/d9mt) in a scratch clone into `prebuilt/d9mt`
   (Homebrew bash, mingw-w64, cmake, ninja, Xcode; an LLVM 15 build for macOS 26 via
-  `D9MT_LLVM`).
+  `D9MT_LLVM`): d9mt's `scripts/fetch-deps.sh` (dxbc-spirv at its pin with d9mt's patches),
+  then a build from scratch every time. It is reproducible: `SOURCE_DATE_EPOCH` is the commit's
+  time, and the same `D9MT_WORK` path gives the same `d3d9.dll`. (0.1.1's `winemetal.dll` is
+  0.1.0's: the bridge's source is the same, and `SOURCE_DATE_EPOCH=1792149856` builds it byte
+  for byte.)
 - `build.sh` assembles `dist/SWTOR on Mac.app` with Sparkle (pinned download; ad-hoc signed;
   `--install` copies it to /Applications). Needs Xcode 27 (macOS 27 SDK); the app runs on
   macOS 26 and later.
@@ -555,7 +592,7 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 |---|---|---|
 | Wine engine `cx-26.3.0-8` (CrossOver 26.3, Wine 11.0, x86_64 WoW64; the one SWGL on Mac uses) | [athei/wine-build cx-26.3.0-8](https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
 | Sparkle 2.10.0 (bundled) | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
-| d9mt `4b7ab26` (bundled, `prebuilt/d9mt`; main after jdrly/d9mt#9, the PACE line) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/4b7ab2652ae90383eac965a68da53bf3e81418bb) | see `prebuilt/d9mt` |
+| d9mt `6fa5df7` (bundled, `prebuilt/d9mt`; main after jdrly/d9mt#21: the pipeline state cache, the 4K GPU savings, StretchRect/ColorFill, the SM3 converter fixes) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/6fa5df7d366acd978109f38690935a8df73f027a) | see `prebuilt/d9mt` |
 | The engine's Wine sources (for the Mac driver, `prebuilt/winemac`): athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0) (codeload tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006 (only for configuring that build) | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 

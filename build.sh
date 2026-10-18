@@ -7,6 +7,8 @@
 #   Contents/Resources/collect-logs.sh "Collect Logs…" (src/collect-logs.sh)
 #   Contents/Resources/session-report.sh  a game session in short (scripts/session-report.sh;
 #                                      in Collect Logs, and for Terminal)
+#   Contents/Resources/d9mt-ab.sh      development builds only: d9mt A/B switches for the next
+#                                      game starts (scripts/d9mt-ab.sh)
 #   Contents/Resources/wine-wrapper.sh the wrapper template installed into Broadsword's Wine
 #   Contents/Resources/helpers/        hold-launcher, setsid-exec (universal)
 #   Contents/Resources/d9mt/           prebuilt d9mt (scripts/build-d9mt.sh)
@@ -32,15 +34,16 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # SWTOR_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.0}
+APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.1-dev.1}
 
 # Development builds: a version with a prerelease suffix, X.Y.Z-dev.N. They are published only
 # as GitHub pre-releases, never in the appcast. CFBundleShortVersionString is the version as is;
 # CFBundleVersion (what Sparkle compares) is numeric and sorts above the previous release and
-# below X.Y.Z: 0.0.6-dev.N -> 0.0.5.(1000+N), 0.1.0-dev.N -> 0.0.9999.(1000+N). Sparkle's
-# standard comparator orders 0.0.5 < 0.0.5.1001 < 0.0.5.1002 < 0.0.6 (and 0.0.6 <
-# 0.0.9999.1001 < 0.1.0), so a dev build is never offered the previous release again and is
-# offered the public X.Y.Z once that is out. Releases: CFBundleVersion = the version.
+# below X.Y.Z: 0.0.6-dev.N -> 0.0.5.(1000+N), 0.1.0-dev.N -> 0.0.9999.(1000+N),
+# 0.1.1-dev.N -> 0.1.0.(1000+N). Sparkle's standard comparator orders 0.0.5 < 0.0.5.1001 <
+# 0.0.5.1002 < 0.0.6 (and 0.0.6 < 0.0.9999.1001 < 0.1.0 < 0.1.0.1001 < 0.1.1), so a dev build
+# is never offered the previous release again and is offered the public X.Y.Z once that is
+# out. Releases: CFBundleVersion = the version.
 bundle_version() {
   local v=$1 core n x y z
   case "$v" in
@@ -141,6 +144,8 @@ rm -rf "$APP/Contents/Frameworks/Sparkle.framework/XPCServices" \
 install -m 755 src/som.sh "$R/som.sh"
 install -m 755 src/collect-logs.sh "$R/collect-logs.sh"
 install -m 755 scripts/session-report.sh "$R/session-report.sh"
+# Development builds: d9mt's A/B switches for test sessions (only their env reads its file)
+[ "$CHANNEL" = release ] || install -m 755 scripts/d9mt-ab.sh "$R/d9mt-ab.sh"
 install -m 644 src/wine-wrapper.sh "$R/wine-wrapper.sh"
 install -m 644 src/dxvk.conf "$R/dxvk.conf"
 

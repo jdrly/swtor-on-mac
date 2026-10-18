@@ -20,11 +20,17 @@
 #
 #   D9MT_SRC=<git url or local clone>  (default: GitHub)
 #   D9MT_WORK=<scratch dir>            (default: /tmp/swtor-on-mac-d9mt)
+#
+# Every run builds from scratch (d9mt's build does not track header dependencies, jdrly/d9mt#15)
+# after d9mt's scripts/fetch-deps.sh has put its dxbc-spirv checkout at the pin with
+# patches/dxbc-spirv applied (build-driver.sh refuses an unpatched tree). The output is
+# reproducible: SOURCE_DATE_EPOCH is the pinned commit's time, and the same D9MT_WORK path gives
+# the same d3d9.dll (its PE image base follows the path: mingw's auto image base).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 REPO="${D9MT_SRC:-https://github.com/jdrly/d9mt.git}"
-COMMIT=4b7ab2652ae90383eac965a68da53bf3e81418bb
+COMMIT=6fa5df7d366acd978109f38690935a8df73f027a
 MACOS_MIN=26.0
 V="${D9MT_WORK:-/tmp/swtor-on-mac-d9mt}"
 OUT="$ROOT/prebuilt/d9mt"
@@ -44,11 +50,12 @@ if [ "$(git -C "$V" rev-parse HEAD)" != "$COMMIT" ]; then
   [ -z "$(git -C "$V" status --porcelain --untracked-files=no)" ] || { echo "$V has local changes" >&2; exit 1; }
   git -C "$V" fetch -q origin
   git -C "$V" checkout -q --detach "$COMMIT"
-  rm -rf "$V/build"
 fi
 
 cd "$V"
 scripts/fetch-deps.sh
+rm -rf build
+export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git show -s --format=%ct HEAD)}"
 mkdir -p toolchains && ln -sfn "$D9MT_LLVM" toolchains/llvm-x86_64
 llvm_min="$(otool -l toolchains/llvm-x86_64/lib/libLLVMSupport.a | awk '/minos/ { print $2 }' | sort -V | tail -1)"
 if newer_than_min "$llvm_min"; then

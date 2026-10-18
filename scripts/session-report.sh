@@ -31,6 +31,21 @@
 #             game process, its busiest threads and the session's wineserver, in ms
 #   RAWMOUSE  once a second while raw mouse-look moves (0.1.0-dev.2 and later): moves by
 #             source (GCMouse, AppKit), the measured pixels per mouse count, the speed setting
+#   STATECACHE (d9mt 6fa5df7 and later) the pipeline state cache: loaded at the start (entries,
+#             how many can be prewarmed, guard=tripped if the last session ended during
+#             prewarm builds), the background prewarm (built, failed), the pipelines the game
+#             needed (hits: prewarmed in time, late: still building, misses: not in the cache),
+#             written at the end; "STATECACHE off" when it is off
+#   XFER      seconds with StretchRect/ColorFill calls (d9mt 6fa5df7 and later), by path;
+#             XFER-SUMMARY with the session's totals when the game released its device
+#   split=    in STATS (d9mt 6fa5df7 and later): passes per frame that reopen the attachments
+#             the previous pass closed (splitSubmit: with a command buffer submit in between),
+#             splitMiB the bytes they load again
+#   d9mt's startup lines: its GPU path (lossless texture compression, the end-of-pass barrier,
+#             clears that skip stores; d9mt-ab.sh switches them back) and DXVK_CONFIG
+#   the wrapper's "d9mt-ab:" line: development builds' A/B switches (d9mt-ab.sh)
+#   D3D9 SM3 hazard  (d9mt 6fa5df7 and later) a shader with the patterns its converter fix
+#             covers, once per shader
 # Also in Collect Logs (session-report.txt). Runs under macOS's /bin/bash 3.2 and awk.
 set -euo pipefail
 
@@ -78,6 +93,64 @@ analyze() {
     /D9MT: pipeline wait budget/ { budget = $0; sub(/.*budget /, "", budget); sub(/ per frame.*/, "", budget) }
     /D9MT: attachment load\/store optimization off/ { attoff = 1 }
     /D9MT: memory profile/ { mp = $0; sub(/.*memory profile /, "", mp); sub(/:.*/, "", mp) }
+    /^SWTOR on Mac d9mt-ab: / { ab = $0; sub(/^SWTOR on Mac d9mt-ab: /, "", ab) }
+    # d9mt'"'"'s GPU path (d9mt 6fa5df7 and later; d9mt-ab.sh switches it back to the old one)
+    /D9MT: PixelFormatView only on block-compressed textures/ { gpfv = "lossless compression on" }
+    /D9MT: PixelFormatView on every texture/ { gpfv = "lossless compression off (D9MT_TEX_PFV=1)" }
+    /D9MT: end-of-pass barrier before Fragment/ { gbar = "narrow pass barrier" }
+    /D9MT: end-of-pass barrier before all stages/ { gbar = "pass barrier before all stages" }
+    /D9MT: a clear that ends a pass skips/ { gclr = "clears skip stores" }
+    /D9MT: a clear that ends a pass keeps/ { gclr = "clears keep stores" }
+    /Found config env: / { cfgenv = $0; sub(/.*Found config env: /, "", cfgenv) }
+    # shaders with the patterns the converter fix of d9mt 6fa5df7 covers (once per shader):
+    # "D3D9 SM3 hazard: ps_<hash> PS crs-partial-mask:r2.yz packed-io:..."
+    /D3D9 SM3 hazard: / {
+      nhz++; l = $0; sub(/.*D3D9 SM3 hazard: [^ ]+ [^ ]+ /, "", l)
+      nk = split(l, hk, " ")
+      for (i = 1; i <= nk; i++) { k = hk[i]; sub(/:.*/, "", k); if (!(k in hzk)) { hzk[k] = 1; hzl = hzl (hzl == "" ? "" : ", ") k } }
+    }
+    # the pipeline state cache (lines at the start, when the prewarm drains, every 60 s, at the end)
+    / STATECACHE off/ { scoff = $0; sub(/.* STATECACHE /, "", scoff); next }
+    / STATECACHE load / {
+      scload = sprintf("%s, %d entries, %d to prewarm%s", field("status"), num(field("entries")), num(field("prewarmable")),
+        num(field("invalid")) ? sprintf(", %d invalid dropped", num(field("invalid"))) : "")
+      if (index($0, " guard=tripped")) scguard = "tripped"
+      next
+    }
+    / STATECACHE the last session ended while prewarm/ || / STATECACHE [0-9]+ sessions in a row ended/ {
+      scguardmsg = $0; sub(/.* STATECACHE /, "", scguardmsg); next
+    }
+    / STATECACHE prewarm t=/ {
+      v = field("t"); sub(/s$/, "", v)
+      scpw = sprintf("built %d, failed %d, skipped %d, done %.1f s after the start (%d ms of builds, paused %d ms)",
+        num(field("built")), num(field("failed")), num(field("skipped")), num(v), num(field("buildMs")), num(field("pausedMs")))
+      next
+    }
+    / STATECACHE use t=/ {
+      scuse = sprintf("hits %d, late %d, misses %d (build time saved %d ms)",
+        num(field("hits")), num(field("late")), num(field("misses")), num(field("hitBuildMs")))
+      screc = num(field("recorded")); scboost = num(field("boosts"))
+      next
+    }
+    / STATECACHE write entries=/ { scwr = sprintf("%d entries, %d KB", num(field("entries")), num(field("bytes")) / 1024); next }
+    / STATECACHE write failed/ { scwr = "failed"; next }
+    # StretchRect and ColorFill by path: " | stretch copy=2 ... skip=0 | fill rt=1 ... skip=0"
+    / XFER t=/ || / XFER-SUMMARY / {
+      summary = index($0, "XFER-SUMMARY") > 0
+      if (!summary) { if (num(field("t")) <= skip) next; nxs++ } else if (skip) next
+      nseg = split($0, seg, / \| /)
+      for (i = 2; i <= nseg; i++) {
+        kind = seg[i]; sub(/ .*/, "", kind)
+        nt = split(seg[i], tok, /[ ()]+/)
+        for (j = 2; j <= nt; j++) {
+          if (tok[j] !~ /=/) continue
+          k = kind "_" tok[j]; sub(/=.*/, "", k); v = tok[j]; sub(/.*=/, "", v)
+          if (summary) xsum[k] = num(v); else xlin[k] += num(v)
+          if (summary) hasxsum = 1
+        }
+      }
+      next
+    }
 
     / STATS t=/ {
       t = num(field("t"))
@@ -101,6 +174,10 @@ analyze() {
       split(field("wait"), w, "/"); waits += num(w[1]); waitMs += num(w[2])
       a = num(field("allocMiB")); if (a > memPeak) memPeak = a
       att = field("att")
+      if (field("split") != "") {
+        nspl++; spl += num(field("split")) * fps; splSub += num(field("splitSubmit")) * fps
+        splMiB += num(field("splitMiB")) * fps
+      }
       next
     }
     / HITCH frame=/ {
@@ -222,6 +299,7 @@ analyze() {
         }
         if (memPeak) printf "mem_peak=%d\n", memPeak
         printf "att=%s\n", att
+        if (nspl && frames) printf "split=%.1f (%.1f with a submit), %.0f MiB loaded again\n", spl / frames, splSub / frames, splMiB / frames
       } else {
         if (lastFrame) printf "frames=%d\n", lastFrame
         if (nco) {
@@ -261,6 +339,34 @@ analyze() {
       if (rs != "") print "restore_summary=" rs
       if (mp != "") print "memory_profile=" mp
       if (budget != "") print "wait_budget=" budget
+      if (ab != "") print "ab=" ab
+      if (gpfv != "" || gbar != "" || gclr != "") {
+        g = gpfv
+        if (gbar != "") g = g (g == "" ? "" : ", ") gbar
+        if (gclr != "") g = g (g == "" ? "" : ", ") gclr
+        print "gpu_path=" g
+      }
+      if (cfgenv != "") print "config_env=" cfgenv
+      if (nhz) printf "sm3_hazards=%d shaders (%s)\n", nhz, hzl
+      if (scoff != "") print "statecache=" scoff
+      else if (scload != "") print "statecache=" scload
+      if (scpw != "") print "statecache_prewarm=" scpw
+      if (scuse != "") printf "statecache_use=%s, %d new recorded%s\n", scuse, screc, scboost ? sprintf(", %d prewarms sped up", scboost) : ""
+      if (scguardmsg != "") print "statecache_guard=" scguardmsg
+      else if (scguard != "") print "statecache_guard=" scguard
+      if (scwr != "") print "statecache_write=" scwr
+      if (hasxsum || nxs) {
+        if (hasxsum) { for (k in xsum) xt[k] = xsum[k]; xwhen = "session total" }
+        else { for (k in xlin) xt[k] = xlin[k]; xwhen = sprintf("%d seconds with any", nxs) }
+        xany = 0; for (k in xt) xany += xt[k]
+      }
+      if (xany) {
+        printf "xfer_stretch=copy %d, resolve %d, blit %d (scaled %d, linear %d, convert %d, msaa %d), left alone %d (%s)\n",
+          xt["stretch_copy"], xt["stretch_resolve"], xt["stretch_blit"], xt["stretch_scaled"], xt["stretch_linear"],
+          xt["stretch_convert"], xt["stretch_msaa"], xt["stretch_skip"], xwhen
+        printf "xfer_fill=render target %d, part %d, block-compressed %d, left alone %d\n",
+          xt["fill_rt"], xt["fill_rect"], xt["fill_bc"], xt["fill_skip"]
+      }
       if (resets) print "devices=" resets + 1
       if (np) {
         qs(psd, 1, np); qs(pmax, 1, np); qs(pd9, 1, np); qs(pgame, 1, np); qs(pgmax, 1, np); qs(pwait, 1, np)
@@ -355,6 +461,18 @@ report() {
   row "Attachment optimization" att
   row "Memory profile" memory_profile
   row "Pipeline wait budget" wait_budget
+  row "A/B switches (d9mt-ab.sh)" ab
+  row "GPU path" gpu_path
+  row "DXVK_CONFIG" config_env
+  row "Pass splits per frame" split
+  row "Pipeline state cache" statecache
+  row "  prewarm" statecache_prewarm
+  row "  pipelines the game needed" statecache_use
+  row "  guard (ended during a prewarm)" statecache_guard
+  row "  written at the end" statecache_write
+  row "StretchRect (XFER)" xfer_stretch
+  row "ColorFill (XFER)" xfer_fill
+  row "SM3 shaders the converter fix covers" sm3_hazards
   row "PACE seconds" pace_seconds
   row "  Present interval sd" pace_present_sd
   row "  per frame (medians)" pace_frame

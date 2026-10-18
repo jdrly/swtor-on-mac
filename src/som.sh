@@ -16,8 +16,9 @@
 #
 # Environment:
 #   SWTOR_ON_MAC_ROOT=/abs/dir  sandbox for tests: the official install, the app's own files,
-#                               logs, caches and the per-user temp dir all live under it
-#                               ($ROOT/Applications, $ROOT/home/Library/..., $ROOT/usertmp/)
+#                               logs, caches and the per-user temp and cache dirs all live
+#                               under it ($ROOT/Applications, $ROOT/home/Library/...,
+#                               $ROOT/usertmp/, $ROOT/usercache/)
 #   SWTOR_ON_MAC_DRY_RUN=1      print what would change and change nothing (no downloads,
 #                               no Wine, no log file)
 #   SWTOR_ON_MAC_FORCE=1        go ahead although Broadsword's Wine folder holds a Wine
@@ -90,10 +91,16 @@ if [ -n "$ROOT" ]; then
   H="$ROOT/home"
   APPS="$ROOT/Applications"
   USER_TMP="$ROOT/usertmp/"
+  USER_CACHE="$ROOT/usercache/"
 else
   H="$HOME"
   APPS=/Applications
   USER_TMP="$(getconf DARWIN_USER_TEMP_DIR)"
+  # the per-user cache dir (/var/folders/.../C/), where d9mt keeps its caches in d9mt/:
+  # air-cache.sqlite3 (compiled shaders), pso/ (pipeline archives) and state/ (the pipeline
+  # state cache, D9MT_STATE_CACHE). They are d9mt's, shared with any other d9mt setup of this
+  # user, and stay when SWTOR on Mac is uninstalled (macOS clears them when it needs space).
+  USER_CACHE="$(getconf DARWIN_USER_CACHE_DIR)"
 fi
 BS_APP="$APPS/Star Wars - The Old Republic.app"
 BS_DATA="$H/Library/Application Support/com.broadsword.swtor/Star Wars - The Old Republic"
@@ -112,8 +119,9 @@ AGENT_PLIST="$H/Library/LaunchAgents/$AGENT_LABEL.plist"
 AGENT_DIR="$SOM/agent"
 # What SWTOR on Mac keeps in $SOM (removed by uninstall; backup/ stays). frameworks: the old
 # engine's libraries (0.0.x installs, until an install upgrades them); upgrade-backup: what an
-# upgrade from 0.0.x keeps until it has gone through (begin_upgrade)
-APP_FILES="engine prefix gamemode dxvk.conf env settings.conf agent last-update-check update-available dev-defaults frameworks upgrade-backup"
+# upgrade from 0.0.x keeps until it has gone through (begin_upgrade); d9mt-ab.env: development
+# builds' d9mt A/B switches (Resources/d9mt-ab.sh, see write_env)
+APP_FILES="engine prefix gamemode dxvk.conf env settings.conf agent last-update-check update-available dev-defaults frameworks upgrade-backup d9mt-ab.env"
 LOGFILE=/dev/null
 
 # The engine (one at a time) and the file every Wine process of it runs from: its loader
@@ -805,7 +813,7 @@ EOF
 }
 
 write_env() {
-  local gm hud dbg upd notify_log=""
+  local gm hud dbg upd notify_log="" ab=""
   say "Writing the settings file $SOM/env"
   gm="SWTOR_GAMEMODE_APP=\"$SOM/gamemode/SWTOR.app\""
   [ "$(setting gamemode)" = on ] || gm="#$gm   (Game Mode is off in Settings)"
@@ -837,6 +845,15 @@ DXVK_LOG_LEVEL=warn"
   [ "$CHANNEL" = release ] || upd=0
   # in a sandbox, the update check's notification goes to a file
   [ -z "$ROOT" ] || notify_log="SWTOR_NOTIFY_LOG=\"$LOGS/notifications.log\""
+  # Development builds: d9mt's A/B switches for the next game starts (Resources/d9mt-ab.sh) live
+  # in a file of their own, so rewriting this one (Settings, Reinstall) keeps them. Release
+  # builds never read it.
+  if [ "$CHANNEL" = dev ]; then
+    ab="
+# Development build: d9mt's A/B switches set by d9mt-ab.sh in the app's Resources (its status
+# shows them), until it resets them
+[ ! -f \"$SOM/d9mt-ab.env\" ] || . \"$SOM/d9mt-ab.env\""
+  fi
   put "$SOM/env" 644 <<EOF
 # SWTOR on Mac $VERSION: settings the Wine wrapper in Broadsword's Wine folder reads at every
 # Wine start. Made from settings.conf by the installer and the app's Settings window, which
@@ -865,6 +882,9 @@ DXVK_CONFIG_FILE="$SOM/dxvk.conf"
 # how much video memory d9mt keeps in use: auto (by the Mac's memory), low, medium, high,
 # ultra, unlimited
 D9MT_MEMORY_PROFILE=$(setting memory)
+# d9mt's pipeline state cache: the pipelines the game used, rebuilt in the background at the
+# next start; in the per-user cache dir, next to d9mt's shader cache and pipeline archives
+D9MT_STATE_CACHE="${USER_CACHE}d9mt/state"
 $dbg
 
 # Apple's Metal HUD (FPS, frame times)
@@ -876,7 +896,7 @@ SWTOR_ON_MAC_VERSION=$VERSION
 SWTOR_APP_DIR="$SOM"
 SWTOR_UPDATE_FEED="$FEED_URL"
 SWTOR_UPDATE_CHECK=$upd
-$notify_log
+$notify_log$ab
 EOF
 }
 

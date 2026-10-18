@@ -6,13 +6,17 @@
 # (wineboot, reg) on the sandbox prefix only, then checks that no Wine process is left.
 # Then the way from and back to 0.0.6 (sections 11-13, with OLD_APP): an install of 0.0.6
 # upgraded by this one (and a failed upgrade rolled back), this one replaced by 0.0.6 again
-# (Reinstall of the older app), and upgraded once more.
+# (Reinstall of the older app), and upgraded once more. Then the way from and back to the
+# previous release on the same engine (section 15, with PREV_APP): what this version's
+# Reinstall changes over it (d9mt's d3d9.dll in the prefix and the env lines, nothing in the
+# engine), and the previous release's Reinstall over this one.
 #
 #   scripts/test-sandbox.sh [path/to/SWTOR on Mac.app]
 #
 # Needs the official SWTOR Mac app installed on this Mac (it is only read). Quit SWTOR first.
 # Env: SANDBOX (default /tmp/som-sandbox), KEEP=1 (leave the sandbox for a look afterwards),
-#      OLD_APP (default release/0.0.6/SWTOR on Mac.app; missing: sections 11-13 are skipped)
+#      OLD_APP (default release/0.0.6/SWTOR on Mac.app; missing: sections 11-14 are skipped),
+#      PREV_APP (default release/0.1.0/SWTOR on Mac.app; missing: section 15 is skipped)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 APP="$(cd "${1:-dist/SWTOR on Mac.app}" && pwd)"
@@ -21,6 +25,8 @@ SOMSH="$APP/Contents/Resources/som.sh"
 HL_APP="$APP/Contents/Resources/helpers/hold-launcher"
 OLD_APP="${OLD_APP:-release/0.0.6/SWTOR on Mac.app}"
 [ ! -d "$OLD_APP" ] || OLD_APP="$(cd "$OLD_APP" && pwd)"
+PREV_APP="${PREV_APP:-release/0.1.0/SWTOR on Mac.app}"
+[ ! -d "$PREV_APP" ] || PREV_APP="$(cd "$PREV_APP" && pwd)"
 REPO="$PWD"
 SANDBOX="${SANDBOX:-/tmp/som-sandbox}"
 REAL_APP="/Applications/Star Wars - The Old Republic.app"
@@ -77,6 +83,34 @@ sbx_wine() {
   ( set -a; [ ! -f "$SOM/env" ] || . "$SOM/env"; set +a; unset WINEDLLPATH
     export WINEPREFIX="$SOM/prefix" WINEDEBUG=-all DYLD_FALLBACK_LIBRARY_PATH="$SOM/frameworks:/usr/lib"
     exec "$SOM/engine/bin/wine" "$@" )
+}
+# envv <name>: the variable as the wrapper gets it from the sandbox's env file ("<unset>" if not)
+envv() { ( set -a; . "$SOM/env"; set +a; eval "printf '%s' \"\${$1-<unset>}\"" ); }
+# macho_same <a> <b>: the same Mach-O code: equal once their code signatures and the space
+# codesign reserves for one (__LINKEDIT's vmsize) are left out
+macho_same() {
+  local t r
+  t=$(mktemp -d)
+  cp "$1" "$t/a" && cp "$2" "$t/b" || { rm -rf "$t"; return 1; }
+  codesign --remove-signature "$t/a" 2>/dev/null || true
+  codesign --remove-signature "$t/b" 2>/dev/null || true
+  python3 -I -c '
+import struct, sys
+def norm(p):
+    b = bytearray(open(p, "rb").read())
+    if struct.unpack_from("<I", b, 0)[0] != 0xfeedfacf:
+        sys.exit(1)
+    off = 32
+    for _ in range(struct.unpack_from("<I", b, 16)[0]):
+        cmd, size = struct.unpack_from("<II", b, off)
+        if cmd == 0x19 and bytes(b[off + 8:off + 24]).rstrip(b"\0") == b"__LINKEDIT":
+            struct.pack_into("<Q", b, off + 32, 0)
+        off += size
+    return bytes(b)
+sys.exit(0 if norm(sys.argv[1]) == norm(sys.argv[2]) else 1)' "$t/a" "$t/b"
+  r=$?
+  rm -rf "$t"
+  return $r
 }
 cleanup_wine() {
   local ws="$SOM/engine/bin/wineserver"
@@ -343,6 +377,7 @@ check "install: log" test -s "$LOGS/install.log"
 check "install: no Wine left running" test -z "$(sandbox_wine)"
 check "install: settings.conf" grep -qx 'memory=auto' "$SOM/settings.conf"
 check "install: env memory profile" grep -qx 'D9MT_MEMORY_PROFILE=auto' "$SOM/env"
+check "install: env d9mt state cache in the per-user cache dir ($(envv D9MT_STATE_CACHE))" test "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state"
 CHANNEL=$(sed -n 's/^channel=//p' "$APP/Contents/Resources/app.properties")
 APPV=$(sed -n 's/^version=//p' "$APP/Contents/Resources/app.properties")
 if [ "$CHANNEL" = dev ]; then
@@ -351,9 +386,11 @@ if [ "$CHANNEL" = dev ]; then
   check "install: development defaults recorded" grep -qx "debug-on=$APPV" "$SOM/dev-defaults"
   check "install: d9mt flags file in the prefix (Debug Logging)" test -f "$SOM/prefix/drive_c/d9mt/flags.txt"
   check "install: the game's Wine debug channels (Debug Logging)" grep -qx 'SWTOR_GAME_WINEDEBUG=-all,warn+rawmouse,warn+threadcpu' "$SOM/env"
+  check "install: d9mt-ab.sh in the app, env reads its switches (development build)" eval 'test -x "$APP/Contents/Resources/d9mt-ab.sh" && grep -qF "[ ! -f \"$SOM/d9mt-ab.env\" ] || . \"$SOM/d9mt-ab.env\"" "$SOM/env"'
 else
   check "install: env update check" grep -qx 'SWTOR_UPDATE_CHECK=1' "$SOM/env"
   check "install: Debug Logging off" grep -qx 'debug=off' "$SOM/settings.conf"
+  check "install: no d9mt-ab.sh, env never reads d9mt-ab.env (release build)" eval 'test ! -e "$APP/Contents/Resources/d9mt-ab.sh" && ! grep -q d9mt-ab "$SOM/env"'
 fi
 check "install: env feed" grep -q '^SWTOR_UPDATE_FEED="https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml"$' "$SOM/env"
 check "install: env notifications to a file (sandbox)" grep -q '^SWTOR_NOTIFY_LOG=' "$SOM/env"
@@ -488,6 +525,31 @@ else
   echo "  (skipped: no x86_64-w64-mingw32-gcc for the probe program)"
 fi
 
+if [ "$CHANNEL" = dev ]; then
+  echo "== 4d. d9mt A/B switches (d9mt-ab.sh, development builds)"
+  AB="$APP/Contents/Resources/d9mt-ab.sh"
+  "$AB" gpu-old vsync-off repro state-off cold=t1 >"$SANDBOX/ab1.txt" 2>&1 || bad "d9mt-ab.sh exit"
+  check "ab: the switches named ($(envv SWTOR_D9MT_AB))" test "$(envv SWTOR_D9MT_AB)" = "pfv barrier-all clear-keep vsync-off repro state-off cold=t1"
+  check "ab: gpu-old: D9MT_TEX_PFV=1, D9MT_PASS_BARRIER=all, D9MT_CLEAR_DISCARD=0" test "$(envv D9MT_TEX_PFV)/$(envv D9MT_PASS_BARRIER)/$(envv D9MT_CLEAR_DISCARD)" = 1/all/0
+  check "ab: state-off wins over env's D9MT_STATE_CACHE" test "$(envv D9MT_STATE_CACHE)" = 0
+  check "ab: DXVK_CONFIG ($(envv DXVK_CONFIG))" test "$(envv DXVK_CONFIG)" = "d3d9.presentInterval=0;d3d9.reproducibleCommandStream=True"
+  check "ab: cold caches in the sandbox's Library/Caches" eval '[ "$(envv D9MT_AIR_CACHE)" = "$H/Library/Caches/SWTOR on Mac/d9mt-ab/t1/air-cache.sqlite3" ] && [ "$(envv D9MT_PSO_ARCHIVE_DIR)" = "$H/Library/Caches/SWTOR on Mac/d9mt-ab/t1/pso" ]'
+  check "ab: says when they take effect" grep -q 'next time the game starts' "$SANDBOX/ab1.txt"
+  som set hud on >/dev/null
+  check "ab: kept when Settings rewrite env" eval '[ "$(envv D9MT_TEX_PFV)" = 1 ] && grep -qx MTL_HUD_ENABLED=1 "$SOM/env"'
+  som set hud off >/dev/null
+  "$AB" pfv >/dev/null
+  check "ab: each call sets exactly its switches" eval '[ "$(envv D9MT_TEX_PFV)/$(envv D9MT_PASS_BARRIER)/$(envv DXVK_CONFIG)/$(envv D9MT_AIR_CACHE)" = "1/<unset>/<unset>/<unset>" ] && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ]'
+  check "ab: an unknown switch refused, the switches kept" eval '! "$AB" turbo >/dev/null 2>&1 && [ "$(envv D9MT_TEX_PFV)" = 1 ]'
+  check "ab: a bad cold name refused" eval '! "$AB" "cold=../x" >/dev/null 2>&1 && [ "$(envv SWTOR_D9MT_AB)" = pfv ]'
+  check "ab: status names them" eval '"$AB" | grep "for the next game start: pfv$" >/dev/null'
+  mkdir -p "$H/Library/Caches/SWTOR on Mac/d9mt-ab/t1"
+  check "ab: a cold name used before: warned" eval '"$AB" cold=t1 | grep "used before" >/dev/null'
+  "$AB" reset --clean >/dev/null
+  check "ab: reset --clean: no switches, no cold caches" eval '[ ! -e "$SOM/d9mt-ab.env" ] && [ ! -e "$H/Library/Caches/SWTOR on Mac/d9mt-ab" ] && [ "$(envv D9MT_TEX_PFV)" = "<unset>" ]'
+  check "ab: status with none" eval '"$AB" | grep "switches: none" >/dev/null'
+fi
+
 echo "== 5. the wrapper hands Wine calls to the app's engine"
 out=$("$BS_WINE/bin/wine64-preloader" "$BS_WINE/bin/wine64" --version 2>&1 || true)
 check "wrapper: engine wine answers ($out)" test "$out" = wine-11.0
@@ -575,6 +637,53 @@ check "wrapper: no start line for the game" eval '! grep -q "wine start: swtor.e
 "$U/bin/wine64-preloader" "$U/bin/wine64" 'C:\windows\system32\reg.exe' add 'HKCU\Software\Broadsword' /v Token /d SECRETTOKEN >/dev/null 2>&1
 check "wrapper: one line per other Wine start, the command's first word" eval 'test "$(grep -c "wine start: reg.exe (parent $$ " "$U/logs/hold.log")" = 1'
 check "wrapper: nothing else of the command logged" eval '! grep -rq SECRETTOKEN "$U/logs"'
+printf 'SWTOR_LOG_FILTER=.\nSWTOR_D9MT_AB="pfv cold=x"\n' >>"$U/env"; game
+check "wrapper: wine.log's second line names the A/B switches" eval 'sed -n 2p "$U/logs/wine.log" | grep -qx "SWTOR on Mac d9mt-ab: pfv cold=x"'
+sed -i '' '/^SWTOR_D9MT_AB=/d' "$U/env"; game
+check "wrapper: no A/B line without switches" eval '! grep -q "d9mt-ab" "$U/logs/wine.log"'
+
+echo "== 6f. session-report.sh: the lines of d9mt 6fa5df7 (a sample log)"
+R="$SANDBOX/report"
+mkdir -p "$R"
+cat >"$R/wine.log" <<'LOG'
+SWTOR on Mac 0.1.1-dev.1: engine cx26 cx-26.3.0-8, d9mt 6fa5df7, started 2026-10-18 20:00:00
+SWTOR on Mac d9mt-ab: pfv vsync-off
+info:  Found config env: d3d9.presentInterval=0
+info:  D9MT: PixelFormatView on every texture (D9MT_TEX_PFV=1): no lossless compression
+info:  D9MT: end-of-pass barrier before Fragment|Blit|Dispatch, vertex fences for vertex textures
+info:  D9MT: a clear that ends a pass skips the pass's store of what it clears
+warn:  D3D9 SM3 hazard: ps_1a2b PS crs-partial-mask:r2.yz
+warn:  D3D9 SM3 hazard: vs_3c4d VS packed-io:o1.xy=texcoord0+o1.zw=texcoord1 crs-partial-mask:r1.y
+info:  STATECACHE load path=/x/d9mt/state/swtor.exe.d9mtstate status=ok entries=40 session=2 prewarmable=39 readyAtLoad=0 corrupt=0 truncated=0 invalid=1 (first: layout stride) capped=0 max=1024 guard=tripped threads=2 ms=3.8
+warn:  STATECACHE the last session ended while prewarm builds were running (crash, kill, or exit without releasing the device; 1 in a row): dropped 2 in-flight entries, kept the rest
+info:  STATECACHE prewarm t=0.83s built=37 dup=1 failed=1 skipped=0 buildMs=991 pausedMs=201
+warn:  STATS t=1 fps=60.0 ms=16.7/18.0/21.4 slow33=0 slow50=0 | rp=31.4 skip=2.1 cb=13.0 draws=1520 | ld=12.1 clr=9.0 ldDc=4.0 st=15.2 stDc=6.0 rsv=0.0 restore=0.0 savedMiB=231.4 attMs=1.3 clrFold=6.0 clrPass=1.0 | sh=0 pso=0 wait=0/0.0ms | allocMiB=5210 att=on | split=8.0 splitSubmit=6.0 splitXfer=0.0 splitClear=2.0 splitMiB=420.0
+info:  XFER t=1 | stretch copy=2 resolve=0 blit=5 (scaled=5 linear=4 convert=1 msaa=0) skip=0 | fill rt=1 rect=1 bc=0 skip=0
+warn:  STATS t=2 fps=60.0 ms=16.7/18.0/21.4 slow33=0 slow50=0 | rp=31.4 skip=2.1 cb=13.0 draws=1520 | ld=12.1 clr=9.0 ldDc=4.0 st=15.2 stDc=6.0 rsv=0.0 restore=0.0 savedMiB=231.4 attMs=1.3 clrFold=6.0 clrPass=1.0 | sh=0 pso=0 wait=0/0.0ms | allocMiB=5210 att=on | split=4.0 splitSubmit=2.0 splitXfer=0.0 splitClear=2.0 splitMiB=100.0
+info:  XFER t=2 | stretch copy=1 resolve=0 blit=0 (scaled=0 linear=0 convert=0 msaa=0) skip=1 | fill rt=0 rect=0 bc=2 skip=0
+info:  STATECACHE use t=60s hits=37 late=1 misses=2 recorded=3 unrecorded=0 ringDrops=0 hitBuildMs=991 | prewarm built=37 dup=1 failed=1 skipped=0 buildMs=991 pausedMs=201 boosts=1 ready=0 | entries=42 invalid=0 (final)
+info:  STATECACHE write entries=42 bytes=16128 ms=1.7
+LOG
+rpt=$("$APP/Contents/Resources/session-report.sh" "$R/wine.log" 2>&1 || true)
+printf '%s\n' "$rpt" >"$R/report.txt"
+has() { grep -qF -- "$1" "$R/report.txt"; }
+check "report: the A/B switches" grep -qE '^  A/B switches \(d9mt-ab\.sh\) +pfv vsync-off$' "$R/report.txt"
+check "report: the GPU path" has "lossless compression off (D9MT_TEX_PFV=1), narrow pass barrier, clears skip stores"
+check "report: DXVK_CONFIG" has "d3d9.presentInterval=0"
+check "report: pass splits (frame-weighted)" has "6.0 (4.0 with a submit), 260 MiB loaded again"
+check "report: state cache loaded" has "ok, 40 entries, 39 to prewarm, 1 invalid dropped"
+check "report: prewarm" has "built 37, failed 1, skipped 0, done 0.8 s after the start (991 ms of builds, paused 201 ms)"
+check "report: what the game needed" has "hits 37, late 1, misses 2 (build time saved 991 ms), 3 new recorded, 1 prewarms sped up"
+check "report: the guard" has "the last session ended while prewarm builds were running"
+check "report: written" has "42 entries, 15 KB"
+check "report: StretchRect by path, summed" has "copy 3, resolve 0, blit 5 (scaled 5, linear 4, convert 1, msaa 0), left alone 1 (2 seconds with any)"
+check "report: ColorFill by path" has "render target 1, part 1, block-compressed 2, left alone 0"
+check "report: SM3 hazards" has "2 shaders (crs-partial-mask, packed-io)"
+echo 'info:  XFER-SUMMARY | stretch copy=9 resolve=1 blit=5 (scaled=5 linear=4 convert=1 msaa=0) skip=1 | fill rt=1 rect=1 bc=2 skip=3' >>"$R/wine.log"
+echo 'info:  STATECACHE off (D9MT_STATE_CACHE=0)' >"$R/off.log"
+check "report: XFER-SUMMARY when the device was released" eval '"$APP/Contents/Resources/session-report.sh" "$R/wine.log" | grep -F "copy 9, resolve 1, blit 5 (scaled 5, linear 4, convert 1, msaa 0), left alone 1 (session total)" >/dev/null'
+check "report: state cache off" eval '"$APP/Contents/Resources/session-report.sh" "$R/off.log" | grep -F "off (D9MT_STATE_CACHE=0)" >/dev/null'
+check "report: --compare with both" eval '"$APP/Contents/Resources/session-report.sh" --compare "$R/wine.log" "$R/off.log" | grep "Pipeline state cache.*ok, 40 entries.*off (D9MT_STATE_CACHE=0)" >/dev/null'
 
 echo "== 6d. hold-launcher ends what is left of the engine's Wine once the launcher quits (dummies)"
 T="$SANDBOX/hold-test"
@@ -749,6 +858,10 @@ pre="$SOM/engine/lib/wine/x86_64-unix/wine"; m=$(stat -f '%Fm' "$pre")
 link="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$pre")-${m%.*}-$((10#${m#*.}))/wine"
 mkdir -p "$(dirname "$link")" && ln -sf "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe" "$link" &&
   ln -sf "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe" "${link%/*}/swtor.exe"
+if [ "$CHANNEL" = dev ]; then
+  "$APP/Contents/Resources/d9mt-ab.sh" pfv cold=u1 >/dev/null
+  mkdir -p "$H/Library/Caches/SWTOR on Mac/d9mt-ab/u1/pso"
+fi
 cp "$SANDBOX/fake" "$SOM/engine/bin/test-leftover"; l8=$(orphan "$SOM/engine/bin/test-leftover"); sleep 0.3
 check "before uninstall: status shows the leftover" test "$(st busy)" = leftovers
 som uninstall >"$SANDBOX/uninstall.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall.txt"; bad "uninstall exit"; }
@@ -758,9 +871,10 @@ check "uninstall: @done" grep -q '^@done' "$SANDBOX/uninstall.txt"
 check "uninstall: official install identical to stock" like_stock uninstall
 check "uninstall: status stock" test "$(st wrapper)" = stock
 check "play: unavailable after uninstall" test "$(play_target)" = "unavailable Install SWTOR on Mac first."
-for c in engine frameworks prefix gamemode env dxvk.conf install-manifest.json; do
+for c in engine frameworks prefix gamemode env dxvk.conf install-manifest.json d9mt-ab.env; do
   check "uninstall: $c removed" test ! -e "$SOM/$c"
 done
+check "uninstall: SWTOR on Mac's caches removed (with d9mt-ab's)" test ! -e "$H/Library/Caches/SWTOR on Mac"
 check "uninstall: Game Mode links removed" test ! -L "$link" -a ! -L "${link%/*}/swtor.exe"
 check "uninstall: launchd job removed" test ! -e "$AGENT_PLIST" -a ! -e "$SOM/agent"
 if [ -d "$GS_BS" ]; then
@@ -799,24 +913,25 @@ if [ -d "$PERSONAL_WRAPPER" ]; then
   check "force: uninstall gives stock" like_stock force-uninstall
 fi
 
+# The engines' downloads, verified, from the repository's cache (fetched once): the installs
+# below take them from the sandbox's download cache instead of downloading them each time.
+cached() { # <url> <sha256>: the path of the verified download in .cache
+  local f="$REPO/.cache/$2/${1##*/}"
+  if [ ! -f "$f" ]; then mkdir -p "${f%/*}"; curl -fsSL -o "$f.part" "$1" && mv "$f.part" "$f"; fi
+  [ "$(shasum -a 256 "$f" | cut -d' ' -f1)" = "$2" ] && echo "$f"
+}
+val() { sed -n "s/^$1=//p" "$2" | head -1; }
+DLC="$H/Library/Caches/SWTOR on Mac/downloads"
+seed() { mkdir -p "$DLC"; cp -c "$@" "$DLC/"; }
+NEW_ENGINE=$(cached "$(val ENGINE_URL "$SOMSH")" "$(val ENGINE_SHA256 "$SOMSH")")
+
 if [ -x "$OLD_APP/Contents/Resources/som.sh" ]; then
   OLDSOM="$OLD_APP/Contents/Resources/som.sh"
   OLDV=$(sed -n 's/^version=//p' "$OLD_APP/Contents/Resources/app.properties")
   oldsom() { "$OLDSOM" "$@"; }
   oldst() { oldsom status | sed -n "s/^$1=//p"; }
-  # The engines' downloads, verified, from the repository's cache (fetched once): the installs
-  # below take them from the sandbox's download cache instead of downloading them each time.
-  cached() { # <url> <sha256>: the path of the verified download in .cache
-    local f="$REPO/.cache/$2/${1##*/}"
-    if [ ! -f "$f" ]; then mkdir -p "${f%/*}"; curl -fsSL -o "$f.part" "$1" && mv "$f.part" "$f"; fi
-    [ "$(shasum -a 256 "$f" | cut -d' ' -f1)" = "$2" ] && echo "$f"
-  }
-  val() { sed -n "s/^$1=//p" "$2" | head -1; }
   OLD_ENGINE=$(cached "$(val ENGINE_URL "$OLDSOM")" "$(val ENGINE_SHA256 "$OLDSOM")")
   OLD_FW=$(cached "$(val FW_URL "$OLDSOM")" "$(val FW_SHA256 "$OLDSOM")")
-  NEW_ENGINE=$(cached "$(val ENGINE_URL "$SOMSH")" "$(val ENGINE_SHA256 "$SOMSH")")
-  DLC="$H/Library/Caches/SWTOR on Mac/downloads"
-  seed() { mkdir -p "$DLC"; cp -c "$@" "$DLC/"; }
   # shellcheck disable=SC2034 # (used in check's eval strings)
   OLD_SHA=$(val ENGINE_SHA256 "$OLDSOM")
   GS="$SOM/prefix/drive_c/users/crossover/AppData/Local/SWTOR/swtor/settings"
@@ -935,6 +1050,88 @@ if [ -x "$OLD_APP/Contents/Resources/som.sh" ]; then
   check "uninstall of $OLDV: no Wine left running" test -z "$(sandbox_wine)"
 else
   echo "== 11-14 skipped: no older app at $OLD_APP (OLD_APP)"
+fi
+
+if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
+  PREVSOM="$PREV_APP/Contents/Resources/som.sh"
+  PREVV=$(sed -n 's/^version=//p' "$PREV_APP/Contents/Resources/app.properties")
+  prevsom() { "$PREVSOM" "$@"; }
+  echo "== 15. from $PREVV (the same engine) and back: what this version's Reinstall changes"
+  [ "$(val ENGINE_SHA256 "$PREVSOM")" = "$(val ENGINE_SHA256 "$SOMSH")" ] || bad "$PREVV has another engine than this version"
+  rm -rf "$SOM" "$H/Library/Caches/SWTOR on Mac"
+  seed "$NEW_ENGINE"
+  prevsom install >"$SANDBOX/prev-install.txt" 2>&1 || { tail -20 "$SANDBOX/prev-install.txt"; bad "$PREVV install exit"; }
+  # Debug Logging on as a development build has it, and another setting; then a Reinstall of
+  # $PREVV, so both sides of the comparison come from a Reinstall
+  prevsom set debug on >/dev/null; prevsom set memory high >/dev/null
+  prevsom install >"$SANDBOX/prev-reinstall.txt" 2>&1 || { tail -20 "$SANDBOX/prev-reinstall.txt"; bad "$PREVV reinstall exit"; }
+  check "$PREVV: installed" eval 'grep -q "^@done" "$SANDBOX/prev-reinstall.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$PREVV" ]'
+  # the prefix's tree with the registry files' timestamps left out (every Reinstall rewrites
+  # them), without the dll<hex>.tmp files wineboot -u leaves in system32 and syswow64 at every
+  # run (any version), and of dosdevices only c: and z: (wineboot maps the other letters to
+  # whatever volumes are mounted at the time); in the registry also without the values every
+  # wineboot -u sets anew (PendingFileRenameOperations for those .tmp files, the input devices'
+  # ContainerId)
+  prefix_snap() {
+    snap "$SOM/prefix" | grep -v -e '\.reg$' -e '\.reg|' -e '/dll[0-9a-f]*\.tmp$' -e '/dll[0-9a-f]*\.tmp|' \
+      -e '^\./dosdevices/[a-y]:' -e '^\./dosdevices/z::'
+    for r in system.reg user.reg userdef.reg; do
+      printf '%s ' "$r"; sed -e 's/^\(\[.*\]\) [0-9]*$/\1/' -e '/^#time=/d' -e '/^"PendingFileRenameOperations"=/d' -e '/^"ContainerId"=/d' "$SOM/prefix/$r" |
+        shasum -a 256 | cut -d' ' -f1
+    done
+  }
+  # env without comments, versions, the lines this version adds and (development builds) the
+  # update check, which they turn off
+  envnorm() {
+    sed -e "s/$PREVV/V/g; s/$APPV/V/g" -e 's/^SWTOR_D9MT=.*/SWTOR_D9MT=H/' "$1" |
+      { if [ "$CHANNEL" = dev ]; then sed 's/^SWTOR_UPDATE_CHECK=.*/SWTOR_UPDATE_CHECK=X/'; else cat; fi; } |
+      grep -v -e '^#' -e '^$' -e '^D9MT_STATE_CACHE=' -e 'd9mt-ab\.env'
+  }
+  prefix_snap >"$SANDBOX/prev-prefix.txt"
+  snap "$SOM/engine" >"$SANDBOX/prev-engine.txt"
+  rm -rf "$SANDBOX/prev-engine" && cp -c -R -p "$SOM/engine" "$SANDBOX/prev-engine"
+  cp "$SOM/env" "$SANDBOX/prev-env"; cp "$SOM/settings.conf" "$SANDBOX/prev-settings.conf"; cp "$SOM/dxvk.conf" "$SANDBOX/prev-dxvk.conf"
+  check "$PREVV: env has no D9MT_STATE_CACHE" eval '! grep -q "^D9MT_STATE_CACHE=" "$SOM/env"'
+  check "$PREVV: no Wine left running" test -z "$(sandbox_wine)"
+
+  som install >"$SANDBOX/prev-upgrade.txt" 2>&1 || { tail -20 "$SANDBOX/prev-upgrade.txt"; bad "install over $PREVV exit"; }
+  check "over $PREVV: @done, manifest $APPV" eval 'grep -q "^@done" "$SANDBOX/prev-upgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$APPV" ]'
+  check "over $PREVV: the engine already in place, no download" eval 'grep -q "is already in place" "$SANDBOX/prev-upgrade.txt" && ! grep -q "Unpacking the Wine engine" "$SANDBOX/prev-upgrade.txt"'
+  { prefix_snap | diff "$SANDBOX/prev-prefix.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-prefix.diff"
+  check "over $PREVV: in the prefix only d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" test "$(cat "$SANDBOX/prev-prefix.diff")" = ./drive_c/windows/system32/d3d9.dll
+  check "over $PREVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
+  { snap "$SOM/engine" | diff "$SANDBOX/prev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-engine.diff"
+  # (a Developer ID build of either side signs its Mach-O files, winemetal.so and winemac.so,
+  # with signatures of their own: those may differ, their code not)
+  engine_same() {
+    local f
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      macho_same "$SANDBOX/prev-engine/$f" "$SOM/engine/$f" || { echo "  differs: $f"; return 1; }
+    done <"$SANDBOX/prev-engine.diff"
+  }
+  check "over $PREVV: the engine unchanged, signatures aside ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same
+  check "over $PREVV: winemetal.so is $PREVV's code (LC_UUID $(dwarfdump -u "$WM/winemetal.so" | awk '{ print $2 }'))" eval 'macho_same "$PREV_APP/Contents/Resources/d9mt/winemetal.so" "$WM/winemetal.so" && [ "$(dwarfdump -u "$WM/winemetal.so" | awk "{ print \$2 }")" = "$(dwarfdump -u "$PREV_APP/Contents/Resources/d9mt/winemetal.so" | awk "{ print \$2 }")" ]'
+  check "over $PREVV: winemetal.dll byte for byte $PREVV's" cmp -s "$PREV_APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll"
+  check "over $PREVV: settings.conf and dxvk.conf unchanged" eval 'cmp -s "$SANDBOX/prev-settings.conf" "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
+  check "over $PREVV: env: the state cache line$([ "$CHANNEL" = dev ] && echo " and the A/B include") added, the rest as before (versions aside)" eval 'diff <(envnorm "$SANDBOX/prev-env") <(envnorm "$SOM/env") >"$SANDBOX/prev-env.diff" && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ]'
+  check "over $PREVV: no Wine left running" test -z "$(sandbox_wine)"
+  [ "$CHANNEL" != dev ] || "$APP/Contents/Resources/d9mt-ab.sh" pfv >/dev/null
+
+  prevsom install >"$SANDBOX/prev-downgrade.txt" 2>&1 || { tail -20 "$SANDBOX/prev-downgrade.txt"; bad "$PREVV over this version exit"; }
+  check "back to $PREVV: @done, manifest $PREVV" eval 'grep -q "^@done" "$SANDBOX/prev-downgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$PREVV" ]'
+  check "back to $PREVV: the prefix as $PREVV left it" eval 'prefix_snap | diff "$SANDBOX/prev-prefix.txt" - >"$SANDBOX/prev-back.diff"'
+  check "back to $PREVV: the engine as $PREVV left it" eval 'snap "$SOM/engine" | diff -q "$SANDBOX/prev-engine.txt" - >/dev/null'
+  check "back to $PREVV: env byte for byte as $PREVV wrote it (no state cache line, no A/B switches)" eval 'cmp -s "$SANDBOX/prev-env" "$SOM/env" && [ "$(envv D9MT_TEX_PFV)" = "<unset>" ]'
+  out=$("$BS_WINE/bin/wine64-preloader" "$BS_WINE/bin/wine64" --version 2>&1 || true)
+  check "back to $PREVV: the wrapper runs the engine ($out)" test "$out" = wine-11.0
+  cleanup_wine
+  check "back to $PREVV: no Wine left running" test -z "$(sandbox_wine)"
+  som uninstall >"$SANDBOX/uninstall4.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall4.txt"; bad "uninstall of $PREVV"; }
+  check "this version's uninstall of $PREVV: official install identical to stock" like_stock uninstall4
+  check "this version's uninstall of $PREVV: app files gone (d9mt-ab.env too)" eval 'for c in engine prefix gamemode env install-manifest.json d9mt-ab.env; do [ ! -e "$SOM/$c" ] || exit 1; done'
+else
+  echo "== 15 skipped: no previous release at $PREV_APP (PREV_APP)"
 fi
 
 cleanup_wine
