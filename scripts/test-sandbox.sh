@@ -848,20 +848,20 @@ macwine_call() { "$T/bin/wine64-preloader" "$T/bin/wine64" reg query 'HKCU\Softw
 exec 7>"$T/caller-fd"   # a file of the caller's, which nothing of the session may keep open
 t0=$SECONDS; macwine_call; dt=$((SECONDS - t0))
 exec 7>&-
-sys=$(cat "$T/sys.pid" 2>/dev/null || echo 0)
+sp=$(cat "$T/sys.pid" 2>/dev/null || echo 0)
 check "session: mac_wine's Wine call that started it returns at once ($dt s; it used to wait for the session's end)" test "$dt" -le 3
 check "session: a bootstrap Wine call first" test "$(head -1 "$T/wine-args")" = 'reg query HKCU\Software\Wine /v SWTORonMacSession'
 check "session: then mac_wine's call" test "$(sed -n 2p "$T/wine-args")" = 'reg query HKCU\Software\Broadsword'
 check "session: wineserver -p10" test "$(cat "$TE/ws.args")" = -p10
 check "session: the wineserver inherited no fds" test -z "$(tr -d ' \n' <"$TE/ws.fds")"
-check "session: its system process has /dev/null as stdout and stderr" eval 'test "$(lsof -a -p "$sys" -d 1,2 -Fn 2>/dev/null | grep -c "^n/dev/null")" = 2'
-check "session: and nothing of the caller's" eval '! lsof -p "$sys" 2>/dev/null | grep -q caller-fd'
+check "session: its system process has /dev/null as stdout and stderr" eval 'test "$(lsof -a -p "$sp" -d 1,2 -Fn 2>/dev/null | grep -c "^n/dev/null")" = 2'
+check "session: and nothing of the caller's" eval '! lsof -p "$sp" 2>/dev/null | grep -q caller-fd'
 macwine_call
 check "session: a second Wine call joins it (no second bootstrap)" test "$(grep -c SWTORonMacSession "$T/wine-args")" = 1
 check "session: one start logged" test "$(grep -c 'Wine session started' "$T/logs/hold.log")" = 1
 kill "$(cat "$TE/ws.pid")"
-for _ in $(seq 20); do alive "$sys" || break; sleep 0.2; done
-check "session: its system process went with its server" all_gone "$sys"
+for _ in $(seq 20); do alive "$sp" || break; sleep 0.2; done
+check "session: its system process went with its server" all_gone "$sp"
 macwine_call & macwine_call & wait
 check "session: two Wine calls at once start it once" test "$(grep -c SWTORonMacSession "$T/wine-args")" = 2
 kill "$(cat "$TE/ws.pid")"; sleep 0.5
