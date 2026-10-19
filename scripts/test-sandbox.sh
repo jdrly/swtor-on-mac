@@ -722,9 +722,15 @@ mkdir -p "$U/engine/lib/wine/x86_64-unix"
 cp "$SANDBOX/fake" "$U/engine/lib/wine/x86_64-unix/wine"
 UWT="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$U/engine/lib/wine/x86_64-unix/wine")-7-8"
 mkdir -p "$UWT" && ln "$U/engine/lib/wine/x86_64-unix/wine" "$UWT/winedevice.exe"
-l6=$(orphan "$UWT/winedevice.exe"); d6=$(orphan "$SANDBOX/fake" 60); sleep 0.3
+# a leftover of this prefix's session (Wine's system processes work in C:\windows), and one
+# of the engine that belongs to no session of this prefix (another prefix's: left alone)
+mkdir -p "$U/prefix/drive_c/windows"
+l6=$(cd "$U/prefix/drive_c/windows" && orphan "$UWT/winedevice.exe"); d6=$(orphan "$SANDBOX/fake" 60)
+o6=$(orphan "$UWT/winedevice.exe"); sleep 0.3
 feed 0.0.2; game
-check "wrapper: ended a leftover of the engine before starting Wine" all_gone "$l6"
+check "wrapper: ended a leftover of the prefix before starting Wine" all_gone "$l6"
+check "wrapper: left the engine's process of no session of this prefix alone" alive "$o6"
+kill "$o6" 2>/dev/null || true
 check "wrapper: logged it" grep -q "ended leftover Wine process $l6 (winedevice.exe" "$U/logs/hold.log"
 check "wrapper: left the same program elsewhere alone" alive "$d6"
 kill "$d6" 2>/dev/null || true
