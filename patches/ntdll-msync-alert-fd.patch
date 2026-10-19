@@ -1,0 +1,44 @@
+msync alert_fd: a thread's exit closes its msync alert index as if it were a file descriptor.
+For ntdll of the CrossOver 26.3 engine SWTOR on Mac uses (athei's wine-build cx-26.3.0-8, Wine
+11.0, dlls/ntdll/unix). Part of SWTOR on Mac, https://github.com/jdrly/swtor-on-mac.
+
+CodeWeavers' msync port onto Wine 11's in-process synchronization (all CrossOver 26.0-26.3
+sources) keeps, with msync, the msync shared-memory index of a thread's alert object in
+ntdll_thread_data's alert_fd (get_inproc_alert_fd in sync.c). pthread_exit_wrapper then
+close()s alert_fd unconditionally, so every thread that ever did an alertable in-process wait
+closes an unrelated file descriptor with that number when it exits: a file, another thread's
+wineserver pipe ("wine client error"), or a kqueue (lost wakeups). With msync the alert object
+belongs to the server and there is no descriptor to close. The same guard as athei/wine
+12927acab0 (its arm64 branch), written again for these sources. Found and tested with
+SWTOR on Mac's repros (thread churn with alertable waits: EBADF and hangs without it, none with
+it); only pthread_exit_wrapper changes.
+
+This patch changes Wine's ntdll, which is licensed under the GNU Lesser General Public License
+2.1 or later (see the copyright headers of the files it changes); the patch and the ntdll.so
+built with it are under the same license. Changed by Jan Drlý, 2026-10. Applies to the sources
+that engine is built from (CodeWeavers' CrossOver 26.3 with athei's patches):
+  https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0
+  (athei/wine@cx-26-patched, named in the release notes of athei/wine-build cx-26.3.0-8)
+Built by scripts/build-ntdll.sh.
+
+--- a/dlls/ntdll/unix/thread.c
++++ b/dlls/ntdll/unix/thread.c
+@@ -76,6 +76,7 @@
+ #include "wine/server.h"
+ #include "wine/debug.h"
+ #include "unix_private.h"
++#include "msync.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(thread);
+ WINE_DECLARE_DEBUG_CHANNEL(seh);
+@@ -1104,7 +1105,9 @@
+  */
+ static DECLSPEC_NORETURN void pthread_exit_wrapper( int status )
+ {
+-    close( ntdll_get_thread_data()->alert_fd );
++    /* with msync, alert_fd is the msync shared-memory index of the thread's alert object
++     * (get_inproc_alert_fd), not a file descriptor; the server owns that object */
++    if (!do_msync()) close( ntdll_get_thread_data()->alert_fd );
+     close( ntdll_get_thread_data()->wait_fd[0] );
+     close( ntdll_get_thread_data()->wait_fd[1] );
+     close( ntdll_get_thread_data()->reply_fd );

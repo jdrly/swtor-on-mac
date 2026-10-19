@@ -371,7 +371,8 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
 
 - `~/Library/Application Support/SWTOR on Mac/`
   - `engine/` – the Wine engine (self-contained: its libraries are inside it), with d9mt's
-    winemetal bridge (and, while *Game keys by keyboard position* or *Raw mouse-look* is on,
+    winemetal bridge, SWTOR on Mac's build of its `ntdll.so` (`lib/wine/x86_64-unix`: the msync
+    fix, see [Building](#building); the engine's own kept as `ntdll.so.stock`) (and, while *Game keys by keyboard position* or *Raw mouse-look* is on,
     SWTOR on Mac's build of its Mac driver, `winemac.so` and the PE sides
     `x86_64-windows/winemac.drv`, `i386-windows/winemac.drv`; the engine's own files are kept
     as `<name>.stock`)
@@ -526,7 +527,11 @@ engine) it tests the way from it and back: this version's Reinstall over it chan
 prefix, engine and `env` back as it had them. A release build then goes on from a development
 build (`DEV_APP`, default `release/0.1.1-dev.1`): its Reinstall removes the dev build's
 `d9mt-ab.env` and test caches and keeps the prefix, engine and settings. It also checks
-development builds' `d9mt-ab.sh` and the session report on a sample of d9mt's log lines. `scripts/test-update.sh` tests app updates with two Developer ID builds and a
+development builds' `d9mt-ab.sh`, the session report on a sample of d9mt's log lines, the
+app's `ntdll.so` in the engine (the engine's own kept as `.stock`, also after an upgrade and
+a downgrade), and a wrapper copied by hand from the template (`@CONF@` not filled in, or
+another install's `env`), which the window and Play treat as unhooked and Reinstall and the
+launchd job repair. `scripts/test-update.sh` tests app updates with two Developer ID builds and a
 local feed, as in SWGL on Mac.
 
 ## Building
@@ -565,7 +570,21 @@ local feed, as in SWGL on Mac.
   which would cost Direct presentation (Xcode, Rosetta, Homebrew bison; llvm-mingw pinned as in
   athei's build). The build is reproducible (the PE sides without their debug info).
 
-`prebuilt/` holds the d9mt binaries and the Mac driver, so `build.sh` works from a fresh clone. Build outputs
+- `scripts/build-ntdll.sh` builds Wine's `ntdll.so` (the x86_64 unix side) from the same sources
+  with `patches/ntdll-msync-alert-fd.patch` into `prebuilt/ntdll`. CodeWeavers' msync port
+  keeps a thread's msync alert index in the field Wine 11 keeps its alert file descriptor in,
+  and a thread's exit closes it: every thread that did an alertable wait closes an unrelated
+  file descriptor when it exits (a file, another thread's wineserver pipe, a kqueue); with
+  msync the patch leaves it alone, as athei/wine `12927acab0` does on another branch. It is
+  configured as athei's `build-wine.sh` configures the engine (`--with-unwind`, unoptimized)
+  against the engine's macOS 26.5 SDK (the Command Line Tools'), together with an unpatched
+  build: `scripts/ntdll-compare.py` checks that one against the engine's own `ntdll.so`
+  (exports, imports, libraries and the code of every function the same; the files differ in
+  the linker's layout only) and that the patch changes only `pthread_exit_wrapper`. The
+  sources come from `.cache/`, a local copy (`WINE_SRC_CACHE`; the commit is on no branch of
+  athei/wine any more) or codeload. The build is reproducible.
+
+`prebuilt/` holds the d9mt binaries, the Mac driver and `ntdll.so`, so `build.sh` works from a fresh clone. Build outputs
 (`dist/`, `release/`) are not committed; DMGs, deltas and `appcast.xml` are release assets.
 
 ### Releasing
@@ -601,7 +620,7 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 | Wine engine `cx-26.3.0-8` (CrossOver 26.3, Wine 11.0, x86_64 WoW64; the one SWGL on Mac uses) | [athei/wine-build cx-26.3.0-8](https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
 | Sparkle 2.10.0 (bundled) | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
 | d9mt `6fa5df7` (bundled, `prebuilt/d9mt`; main after jdrly/d9mt#21: the pipeline state cache, the 4K GPU savings, StretchRect/ColorFill, the SM3 converter fixes) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/6fa5df7d366acd978109f38690935a8df73f027a) | see `prebuilt/d9mt` |
-| The engine's Wine sources (for the Mac driver, `prebuilt/winemac`): athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0) (codeload tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
+| The engine's Wine sources (for the Mac driver, `prebuilt/winemac`, and `ntdll.so`, `prebuilt/ntdll`): athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0) (codeload tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006 (only for configuring that build) | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
 ## Credits and licenses
@@ -628,6 +647,10 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
   and SWTOR on Mac's changes to them for *Raw mouse-look*
   ([`patches/winemac-swtor-mouse.patch`](patches/winemac-swtor-mouse.patch)): bundled in the
   app, with Wine's license and the patches under `Resources/Licenses/winemac`.
+- Wine's `ntdll.so` (LGPL-2.1-or-later), built from the same sources with SWTOR on Mac's msync
+  fix ([`patches/ntdll-msync-alert-fd.patch`](patches/ntdll-msync-alert-fd.patch), by Jan
+  Drlý; the same guard as athei's `12927acab0`): bundled in the app, with Wine's license and
+  the patch under `Resources/Licenses/ntdll`.
 - [Sparkle](https://sparkle-project.org) for app updates (MIT, with bsdiff and other notices;
   in the app under `Resources/Licenses/sparkle`).
 - Built after the example of [SWGL on Mac](https://github.com/jdrly/swgl-on-mac).
@@ -638,6 +661,6 @@ What the app bundles and what it downloads at install time, with their licenses:
 ## License
 
 The code in this repository is under the [zlib license](LICENSE), except the patches in
-`patches/` (`winemac-*.patch`), changes to Wine and so under Wine's LGPL-2.1-or-later. The files in `prebuilt/` and everything the build or the installer downloads
+`patches/` (`winemac-*.patch`, `ntdll-*.patch`), changes to Wine and so under Wine's LGPL-2.1-or-later. The files in `prebuilt/` and everything the build or the installer downloads
 keep their own licenses (see above; d9mt's are in `prebuilt/d9mt`, the Mac driver's in
-`prebuilt/winemac`).
+`prebuilt/winemac`, `ntdll.so`'s in `prebuilt/ntdll`).

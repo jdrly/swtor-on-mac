@@ -145,8 +145,8 @@ package() {
   xattr -cr "$APP"
 
   # Inside out: the helpers (they run inside the launcher's Wine start and must pass DYLD_*
-  # on to Wine: helpers.plist), d9mt's winemetal.so and the Mac driver winemac.so (Wine unix
-  # libraries Wine loads itself; every Mach-O of a notarized app is signed), Sparkle in its documented order (Autoupdate,
+  # on to Wine: helpers.plist), d9mt's winemetal.so, the Mac driver winemac.so and ntdll.so (Wine
+  # unix libraries Wine loads itself; every Mach-O of a notarized app is signed), Sparkle in its documented order (Autoupdate,
   # Updater.app, the framework, each with the hardened runtime and no --deep; build.sh removed
   # its XPC services), then the app (app.plist: no exceptions).
   echo "[release] signing nested code"
@@ -154,6 +154,7 @@ package() {
   for h in "$APP/Contents/Resources/helpers/"*; do sign --entitlements "$ENT/helpers.plist" "$h"; done
   sign "$APP/Contents/Resources/d9mt/winemetal.so"
   sign "$APP/Contents/Resources/wine/winemac.so"
+  sign "$APP/Contents/Resources/wine/ntdll.so"
   fw="$APP/$FW_REL"
   sign "$fw/Versions/B/Autoupdate"
   sign "$fw/Versions/B/Updater.app"

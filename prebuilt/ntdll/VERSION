@@ -1,0 +1,5 @@
+ntdll.so: Wine's ntdll (x86_64 unix side) for the cx-26.3.0-8 engine
+sources: athei/wine d23b39774528237cafe49f9a073286f854b779c0 (codeload tar.gz sha256 7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e)
+configured as the engine (athei/wine-build build-wine.sh), macOS 26.5 SDK, unsigned sha256 b51c9784ae7bccee4a610c71451ebdc5b38e8fcef8b98b63cf5ed1af631f18fa
+patch:
+  patches/ntdll-msync-alert-fd.patch sha256 a81a9d04415a8b212b7a17db30a344887c5b463a35a7f0431b527e7d6ada948a

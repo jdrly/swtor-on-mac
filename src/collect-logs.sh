@@ -183,7 +183,9 @@ done <"$work/crash-list" >"$work/crash-index"
     "d9mt $(plutil -extract d9mt raw -o - "$SOM/install-manifest.json" 2>/dev/null || echo -)," \
     "engine $(plutil -extract engine_id raw -o - "$SOM/install-manifest.json" 2>/dev/null || echo cx24)" \
     "$(plutil -extract engine raw -o - "$SOM/install-manifest.json" 2>/dev/null || echo -)," \
-    "Mac driver $(plutil -extract winemac raw -o - "$SOM/install-manifest.json" 2>/dev/null || echo -)"
+    "Mac driver $(plutil -extract winemac raw -o - "$SOM/install-manifest.json" 2>/dev/null || echo -)," \
+    "ntdll.so $(plutil -extract ntdll raw -o - "$SOM/install-manifest.json" 2>/dev/null || echo stock)" \
+    "$(cut -c1-12 <<<"$(shasum -a 256 "$SOM/engine/lib/wine/x86_64-unix/ntdll.so" 2>/dev/null)")"
   echo "Wine engine in place: $(ls "$SOM/engine/bin/wine-preloader" >/dev/null 2>&1 && echo "CrossOver 24.0.7 (0.0.x)" ||
     { [ -x "$SOM/engine/lib/wine/x86_64-unix/wine" ] && echo "CrossOver 26.3, $("$SOM/engine/bin/wine" --version 2>/dev/null || echo "version unknown")"; } || echo none)," \
     "sha256 $(cut -c1-12 "$SOM/engine/.som-source" 2>/dev/null || echo -)$([ -d "$SOM/upgrade-backup" ] && echo ", an upgrade from 0.0.x did not finish")"
@@ -213,7 +215,7 @@ done <"$work/crash-list" >"$work/crash-index"
   for d in bin bin-real; do
     for f in "$BS_WINE/$d"/wine64-preloader "$BS_WINE/$d"/wine-preloader "$BS_WINE/$d"/hold-launcher "$BS_WINE/$d"/setsid-exec; do
       [ -e "$f" ] || continue
-      echo "  $d/${f##*/}: $(file -b "$f" | cut -c1-40), $(stat -f '%Sm %z bytes' "$f")$(grep -q SWTOR_ON_MAC_WRAPPER "$f" 2>/dev/null && echo ", SWTOR on Mac's wrapper")"
+      echo "  $d/${f##*/}: $(file -b "$f" | cut -c1-40), $(stat -f '%Sm %z bytes' "$f")$(grep -q SWTOR_ON_MAC_WRAPPER "$f" 2>/dev/null && echo ", SWTOR on Mac's wrapper")$(grep -qx 'CONF="@CONF@"' "$f" 2>/dev/null && echo " NOT FILLED IN (@CONF@: it runs Broadsword's Wine)")"
     done
   done
   echo "Launcher-update guard: $([ -f "$H/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist" ] && echo "installed" || echo "not installed")"

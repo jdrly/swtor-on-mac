@@ -60,7 +60,8 @@ ENGINE_TITLE="CrossOver 26.3 (Wine 11.0)"
 ENGINE_URL=https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz
 ENGINE_SIZE=234978748
 ENGINE_SHA256=1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d
-# two of its files, checked after unpacking (the known-good engine)
+# two of its files, checked after unpacking (the known-good engine); its ntdll.so is replaced
+# by the app's build (Resources/wine/ntdll.so, scripts/build-ntdll.sh: the msync alert_fd fix)
 ENGINE_LOADER_SHA256=2100dea802b2c560ba5d719c20ba1fcc1c8a09daf66580a4da6dd48e552d5a05
 ENGINE_NTDLL_SHA256=f1ca0f092c9435299bb06f2e6e9c92b52b4b0ab5016a42c1a4ce01ccc18c9f4a
 # its Mac driver (lib/wine/x86_64-unix/winemac.so and the PE sides lib/wine/x86_64-windows/
@@ -202,7 +203,11 @@ wrapper_state_of() {
   if [ ! -e "$f" ]; then echo missing
   elif is_macho "$f"; then
     if [ -e "$BS_WINE/bin-real/$1" ]; then echo replaced; else echo stock; fi
-  elif grep -q 'SWTOR_ON_MAC_WRAPPER' "$f" 2>/dev/null; then echo ours
+  elif grep -q 'SWTOR_ON_MAC_WRAPPER' "$f" 2>/dev/null; then
+    # ours only if it reads this install's settings: a copy of the template with @CONF@ not
+    # filled in (or one naming another env) finds none and runs Broadsword's Wine, so it is
+    # repaired like a wrapper a launcher update replaced
+    if grep -qxF "CONF=\"$SOM/env\"" "$f"; then echo ours; else echo replaced; fi
   elif grep -q '\.config/swtor-mac/env' "$f" 2>/dev/null; then echo personal
   else echo foreign
   fi
@@ -515,7 +520,8 @@ check_wrapper() {
       warn "Replacing a $WRAPPER_STATE Wine wrapper (confirmed); a copy is kept in $SOM/backup"
       backup_foreign "$1" ;;
     replaced)
-      [ -f "$MANIFEST" ] || [ -n "$FORCE" ] ||
+      # (our own wrapper not filled in for this install, see wrapper_state_of: ours to repair)
+      [ -f "$MANIFEST" ] || [ -n "$FORCE" ] || grep -q SWTOR_ON_MAC_WRAPPER "$BS_WINE/bin/wine64-preloader" 2>/dev/null ||
         die "Broadsword's Wine folder has leftovers of a Wine wrapper that is not SWTOR on Mac's ($BS_WINE/bin-real). SWTOR on Mac leaves them alone unless you confirm." ;;
   esac
 }
@@ -621,7 +627,34 @@ install_engine() {
   say "Installing the d9mt bridge (winemetal) into the engine"
   copy_atomic "$RES/d9mt/winemetal.so" "$w/x86_64-unix/winemetal.so" 755
   copy_atomic "$RES/d9mt/winemetal.dll" "$w/x86_64-windows/winemetal.dll" 644
+  install_ntdll
   install_winemac "$(winemac_wanted)"
+}
+
+# The engine's ntdll.so (the unix side of ntdll, which every Wine process of the engine loads):
+# the app's build of it (Resources/wine/ntdll.so; scripts/build-ntdll.sh with
+# patches/ntdll-msync-alert-fd.patch: an exiting thread no longer closes an unrelated file
+# descriptor), the engine's own kept next to it as ntdll.so.stock. Only over the engine build
+# the patched one was made from (ENGINE_NTDLL_SHA256). The Game Mode bundle links to this file,
+# so it gets the same. (A Reinstall with SWTOR on Mac 0.1.0 or 0.1.1, the same engine, leaves
+# this one in place: they only check the file when they unpack the engine.)
+install_ntdll() {
+  local f="$ENG/lib/wine/x86_64-unix/ntdll.so"
+  if [ -n "$DRY" ]; then echo "[dry-run] engine's ntdll.so: the app's build"; return; fi
+  if [ ! -f "$f.stock" ]; then
+    [ "$(sha256 "$f")" = "$ENGINE_NTDLL_SHA256" ] ||
+      die "The Wine engine's ntdll.so is not the expected build. Uninstall SWTOR on Mac and install it again."
+    run cp -p "$f" "$f.stock"
+  fi
+  [ "$(sha256 "$f.stock")" = "$ENGINE_NTDLL_SHA256" ] ||
+    die "The Wine engine's copy of its ntdll.so (ntdll.so.stock) is damaged. Uninstall SWTOR on Mac and install it again."
+  [ -f "$RES/wine/ntdll.so" ] || die "This app has no ntdll.so build ($RES/wine/ntdll.so)."
+  if cmp -s "$RES/wine/ntdll.so" "$f"; then
+    say "The engine has the app's ntdll.so (msync fix)"
+  else
+    say "Installing the app's ntdll.so (msync fix) into the engine"
+    copy_atomic "$RES/wine/ntdll.so" "$f" 755
+  fi
 }
 
 # winemac_wanted [<key> <value>]: on if the engine needs the app's Mac driver (game keys by
@@ -1000,6 +1033,8 @@ write_manifest() {
   "engine_sha256": "$ENGINE_SHA256",
   "winemac": "$([ "$(winemac_wanted)" = on ] && echo app || echo stock)",
   "winemac_sha256": "$([ -n "$DRY" ] || sha256 "$ENG/lib/wine/x86_64-unix/winemac.so")",
+  "ntdll": "app",
+  "ntdll_sha256": "$([ -n "$DRY" ] || sha256 "$ENG/lib/wine/x86_64-unix/ntdll.so")",
   "broadsword_wine": "$BS_WINE",
   "previous_wrapper": "$WRAPPER_STATE",
   "bin_real_created": $([ "$BIN_REAL_EXISTED" = false ] && echo true || echo false),
@@ -1381,7 +1416,8 @@ cmd_uninstall() {
       [ -n "$FORCE" ] || die "Broadsword's Wine folder has a Wine wrapper that is not SWTOR on Mac's ($WRAPPER_STATE). SWTOR on Mac leaves it alone unless you confirm."
       backup_foreign uninstall ;;
     replaced)
-      [ -f "$MANIFEST" ] || [ -n "$FORCE" ] ||
+      # (our own wrapper not filled in for this install, see wrapper_state_of: ours to repair)
+      [ -f "$MANIFEST" ] || [ -n "$FORCE" ] || grep -q SWTOR_ON_MAC_WRAPPER "$BS_WINE/bin/wine64-preloader" 2>/dev/null ||
         die "Broadsword's Wine folder has leftovers of a Wine wrapper that is not SWTOR on Mac's ($BS_WINE/bin-real). SWTOR on Mac leaves them alone unless you confirm." ;;
   esac
   lock

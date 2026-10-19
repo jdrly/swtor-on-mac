@@ -15,7 +15,8 @@
 #   Contents/Resources/wine/           Wine's Mac driver with the PhysicalKeyboard and raw
 #                                      mouse-look options: winemac.so, x86_64-windows/ and
 #                                      i386-windows/winemac.drv (scripts/build-winemac.sh,
-#                                      patches/), for the engine
+#                                      patches/), for the engine; and its ntdll.so with the
+#                                      msync alert_fd fix (scripts/build-ntdll.sh)
 #   Contents/Resources/Licenses/       licenses of the app and the bundled components
 # The Wine engine is not bundled: som.sh downloads it at install time from athei's wine-build
 # releases (CrossOver 26.3, the engine SWGL on Mac uses; pinned URL + sha256 in src/som.sh).
@@ -104,6 +105,13 @@ for p in $WINEMAC_PATCHES; do
     { echo "$WM was not built from patches/$p.patch as it is now; run scripts/build-winemac.sh" >&2; exit 1; }
 done
 WINEMAC_COMMIT="$(sed -n 's/^WINE_COMMIT=//p' scripts/build-winemac.sh)"
+NT=prebuilt/ntdll
+NTDLL_PATCH="$(sed -n 's/^PATCH=//p' scripts/build-ntdll.sh)"
+for f in ntdll.so VERSION COPYING.LIB LICENSE; do
+  [ -f "$NT/$f" ] || { echo "Missing $NT/$f; run scripts/build-ntdll.sh" >&2; exit 1; }
+done
+grep -q "patches/$NTDLL_PATCH.patch sha256 $(shasum -a 256 "patches/$NTDLL_PATCH.patch" | cut -d' ' -f1)" "$NT/VERSION" ||
+  { echo "$NT was not built from patches/$NTDLL_PATCH.patch as it is now; run scripts/build-ntdll.sh" >&2; exit 1; }
 
 # Sparkle (app updates, as in SWGL on Mac): the framework goes into the app, its tools
 # (generate_appcast, BinaryDelta, generate_keys) are used from here by scripts/release.sh.
@@ -171,6 +179,8 @@ install -m 755 "$WM/winemac.so" "$R/wine/winemac.so"
 for a in x86_64 i386; do
   install -m 644 "$WM/$a-windows/winemac.drv" "$R/wine/$a-windows/winemac.drv"
 done
+# the engine's ntdll.so with the msync alert_fd fix; the installer puts it into its engine copy
+install -m 755 "$NT/ntdll.so" "$R/wine/ntdll.so"
 
 # Licenses: the app's own (zlib), the overview of what is bundled and what is downloaded
 # (THIRD_PARTY_NOTICES.md), d9mt's (zlib; its bridge LGPL-2.1-or-later; third parties), Sparkle's
@@ -185,6 +195,8 @@ cp "$SPARKLE/LICENSE" "$L/sparkle/LICENSE"
 mkdir -p "$L/winemac"
 cp "$WM/COPYING.LIB" "$WM/LICENSE" "$WM/VERSION" "$L/winemac/"
 for p in $WINEMAC_PATCHES; do cp "patches/$p.patch" "$L/winemac/"; done
+mkdir -p "$L/ntdll"
+cp "$NT/COPYING.LIB" "$NT/LICENSE" "$NT/VERSION" "patches/$NTDLL_PATCH.patch" "$L/ntdll/"
 cat >"$L/README.txt" <<EOF
 SWTOR on Mac $APP_VERSION - licenses
 
@@ -208,6 +220,10 @@ patches in winemac/, applied in this order: $(echo $WINEMAC_PATCHES | sed 's/\([
 (SWTOR on Mac's PhysicalKeyboard option, "Game keys by keyboard position"; SWGL on
 Mac's two mouse-look patches, https://github.com/jdrly/swgl-on-mac; SWTOR on Mac's changes
 to them, "Raw mouse-look"): LGPL-2.1-or-later, see winemac/COPYING.LIB and winemac/LICENSE.
+wine/ntdll.so: Wine's ntdll (dlls/ntdll, the x86_64 unix side) from the same sources, with
+ntdll/$NTDLL_PATCH.patch (a thread's exit no longer closes an unrelated file descriptor
+under msync): LGPL-2.1-or-later, see ntdll/COPYING.LIB and ntdll/LICENSE; build script:
+$REPO_URL/blob/v$APP_VERSION/scripts/build-ntdll.sh.
 The patches are also in $REPO_URL/tree/v$APP_VERSION/patches; the
 sources they apply to: https://github.com/athei/wine/tree/$WINEMAC_COMMIT (CodeWeavers'
 CrossOver sources: https://www.codeweavers.com/crossover/source); build script:
@@ -224,9 +240,10 @@ EOF
 # update checks; som.sh and the app read it)
 printf 'version=%s\nbuild=%s\nchannel=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s\n' "$APP_VERSION" "$BUNDLE_VERSION" \
   "$CHANNEL" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" "$(plutil -extract SUFeedURL raw src/Info.plist)" >"$R/app.properties"
-printf 'app %s\nd9mt %s\nengine %s\nwinemac %s\nsparkle %s\nsdk %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
+printf 'app %s\nd9mt %s\nengine %s\nwinemac %s\nntdll %s\nsparkle %s\nsdk %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
   "$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)" \
   "$(for p in $WINEMAC_PATCHES; do printf '%s %s ' "${p#winemac-}" "$(shasum -a 256 "patches/$p.patch" | cut -c1-12)"; done | sed 's/ $//')" \
+  "${NTDLL_PATCH#ntdll-} $(shasum -a 256 "patches/$NTDLL_PATCH.patch" | cut -c1-12)" \
   "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
 
 iconset="$CACHE/AppIcon.iconset"

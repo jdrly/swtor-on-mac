@@ -357,6 +357,11 @@ WM_STOCK=$(sed -n 's/^ENGINE_WINEMAC_SHA256=//p' "$SOMSH")
 WM_STOCK64=$(sed -n 's/^ENGINE_WINEMAC_PE64_SHA256=//p' "$SOMSH")
 WM_STOCK32=$(sed -n 's/^ENGINE_WINEMAC_PE32_SHA256=//p' "$SOMSH")
 wm_sha() { shasum -a 256 "$WM/winemac.so" | cut -d" " -f1; }
+# the engine's ntdll.so is the app's build, its own kept as ntdll.so.stock
+ntdll_is_apps() {
+  cmp -s "$APP/Contents/Resources/wine/ntdll.so" "$WM/ntdll.so" &&
+    [ "$(shasum -a 256 "$WM/ntdll.so.stock" | cut -d" " -f1)" = "$(sed -n 's/^ENGINE_NTDLL_SHA256=//p' "$SOMSH")" ]
+}
 # the engine's Mac driver, all three files: the app's build (app) or the engine's own (stock)
 wm_is() {
   local r="$APP/Contents/Resources/wine"
@@ -370,6 +375,9 @@ wm_is() {
 }
 check "install: the app's Mac driver, all three files (raw mouse-look on by default)" wm_is app
 check "install: the engine's own kept as .stock" eval 'test "$(shasum -a 256 "$WM/winemac.so.stock" | cut -d" " -f1)" = "$WM_STOCK" && test "$(shasum -a 256 "$WL/x86_64-windows/winemac.drv.stock" | cut -d" " -f1)" = "$WM_STOCK64" && test "$(shasum -a 256 "$WL/i386-windows/winemac.drv.stock" | cut -d" " -f1)" = "$WM_STOCK32"'
+check "install: the app's ntdll.so (msync fix), the engine's own kept as .stock" ntdll_is_apps
+check "install: the Game Mode bundle gets the app's ntdll.so" cmp -s "$APP/Contents/Resources/wine/ntdll.so" "$SOM/gamemode/SWTOR.app/Contents/MacOS/ntdll.so"
+check "install: manifest ntdll app" test "$(plutil -extract ntdll raw -o - "$SOM/install-manifest.json")" = app
 check "install: PhysicalKeyboard=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="n"'
 check "install: RawMouseWhenCursorHidden=y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"RawMouseWhenCursorHidden"="y"'
 check "install: RawMouseGameControllerScale=1" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"RawMouseGameControllerScale"="1"'
@@ -846,6 +854,29 @@ check "watch: half-updated folder untouched" is_macho "$BS_WINE/bin/wine64-prelo
 mv "$SANDBOX/wp.tmp" "$BS_WINE/bin/wine-preloader"; watch
 check "watch: complete again, wrapper back" test "$(st wrapper)" = ours
 
+echo "== 7c. the wrapper template copied by hand (@CONF@ not filled in: it would run Broadsword's Wine)"
+raw_wrapper() { # [<env path>]: the template, or the template filled in for another env
+  local b
+  for b in wine-preloader wine64-preloader; do
+    sed "s|@CONF@|${1:-@CONF@}|" "$APP/Contents/Resources/wine-wrapper.sh" >"$BS_WINE/bin/.x" && chmod 755 "$BS_WINE/bin/.x" &&
+      mv -f "$BS_WINE/bin/.x" "$BS_WINE/bin/$b"
+  done
+}
+raw_wrapper
+check "raw wrapper: status replaced, not ours" test "$(st wrapper)" = replaced
+check "raw wrapper: play off until the hook is repaired" eval 'play_target | grep -q "^unavailable "'
+zip=$("$APP/Contents/Resources/collect-logs.sh" 2>/dev/null || true)
+check "raw wrapper: Collect Logs says it is not filled in" eval 'unzip -p "$zip" "*/system-info.txt" | grep -q "wine64-preloader: .*NOT FILLED IN"'
+rm -f "$zip"
+som install >"$SANDBOX/reinstall-raw.txt" 2>&1 || bad "reinstall over a raw wrapper"
+check "raw wrapper: Reinstall repairs it" eval '[ "$(st wrapper)" = ours ] && grep -qxF "CONF=\"$SOM/env\"" "$BS_WINE/bin/wine64-preloader" && grep -qxF "CONF=\"$SOM/env\"" "$BS_WINE/bin/wine-preloader"'
+raw_wrapper; SETTLE=1 watch
+check "raw wrapper: the launchd job repairs it by itself" eval '[ "$(st wrapper)" = ours ] && ! grep -q "@CONF@" "$BS_WINE/bin/wine64-preloader"'
+raw_wrapper "$SANDBOX/elsewhere/env"
+check "wrapper of another install (another env): status replaced" test "$(st wrapper)" = replaced
+SETTLE=1 watch
+check "wrapper of another install: the launchd job repairs it" test "$(st wrapper)" = ours
+
 echo "== 8. uninstall restores the official install byte for byte, and copies the game settings back"
 GS_REL="AppData/Local/SWTOR/swtor/settings"
 GS_USER=$(plutil -extract settings_user raw -o - "$SOM/install-manifest.json")
@@ -1040,6 +1071,7 @@ if [ -x "$OLD_APP/Contents/Resources/som.sh" ]; then
   check "upgrade: GrabPointer=n and the d3d9 override kept" eval 'reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\X11 Driver" "\"GrabPointer\"=\"n\"" && reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\DllOverrides" "\"d3d9\"=\"native,builtin\""'
   check "upgrade: game settings kept" grep -qx "keybinds-from-$OLDV" "$GS/upgrade-marker.ini"
   check "upgrade: d9mt's d3d9.dll" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
+  check "upgrade: the app's ntdll.so in the new engine" ntdll_is_apps
   check "upgrade: bridge in the new engine" cmp -s "$APP/Contents/Resources/d9mt/winemetal.so" "$SOM/engine/lib/wine/x86_64-unix/winemetal.so"
   check "upgrade: Game Mode bundle from the new loader" eval 'cmp -s "$SOM/engine/lib/wine/x86_64-unix/wine" "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe" && test -e "$SOM/gamemode/SWTOR.app/Contents/MacOS/ntdll.so"'
   check "upgrade: env for the new engine" eval 'grep -qx SWTOR_ENGINE_ID=cx26 "$SOM/env" && grep -q "^WINE_COMPATDB=" "$SOM/env" && ! grep -q "^SWTOR_FRAMEWORKS" "$SOM/env"'
@@ -1122,13 +1154,14 @@ prefix_snap() {
   done
 }
 # engine_same <name>: the engine's files that differ from $SANDBOX/<name>-engine (listed in
-# $SANDBOX/<name>-engine.diff) are the same code. A Developer ID build of either side signs its
+# $SANDBOX/<name>-engine.diff) are the same code, but for ntdll.so and ntdll.so.stock (the
+# app's build and the engine's own, checked by ntdll_is_apps). A Developer ID build of either side signs its
 # Mach-O files, winemetal.so and winemac.so, with signatures of their own: those may differ,
 # their code not.
 engine_same() {
   local f
   while IFS= read -r f; do
-    [ -n "$f" ] || continue
+    case "$f" in ""|./lib/wine/x86_64-unix/ntdll.so|./lib/wine/x86_64-unix/ntdll.so.stock) continue ;; esac
     macho_same "$SANDBOX/$1-engine/$f" "$SOM/engine/$f" || { echo "  differs: $f"; return 1; }
   done <"$SANDBOX/$1-engine.diff"
 }
@@ -1168,7 +1201,8 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   check "over $PREVV: in the prefix only d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" test "$(cat "$SANDBOX/prev-prefix.diff")" = ./drive_c/windows/system32/d3d9.dll
   check "over $PREVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/prev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-engine.diff"
-  check "over $PREVV: the engine unchanged, signatures aside ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same prev
+  check "over $PREVV: the engine unchanged, signatures aside, but ntdll.so ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same prev
+  check "over $PREVV: the app's ntdll.so, $PREVV's (the engine's own) kept as .stock" eval 'ntdll_is_apps && cmp -s "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock"'
   check "over $PREVV: winemetal.so is $PREVV's code (LC_UUID $(dwarfdump -u "$WM/winemetal.so" | awk '{ print $2 }'))" eval 'macho_same "$PREV_APP/Contents/Resources/d9mt/winemetal.so" "$WM/winemetal.so" && [ "$(dwarfdump -u "$WM/winemetal.so" | awk "{ print \$2 }")" = "$(dwarfdump -u "$PREV_APP/Contents/Resources/d9mt/winemetal.so" | awk "{ print \$2 }")" ]'
   check "over $PREVV: winemetal.dll byte for byte $PREVV's" cmp -s "$PREV_APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll"
   check "over $PREVV: settings.conf and dxvk.conf unchanged" eval 'cmp -s "$SANDBOX/prev-settings.conf" "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
@@ -1179,7 +1213,10 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   prevsom install >"$SANDBOX/prev-downgrade.txt" 2>&1 || { tail -20 "$SANDBOX/prev-downgrade.txt"; bad "$PREVV over this version exit"; }
   check "back to $PREVV: @done, manifest $PREVV" eval 'grep -q "^@done" "$SANDBOX/prev-downgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$PREVV" ]'
   check "back to $PREVV: the prefix as $PREVV left it" eval 'prefix_snap | diff "$SANDBOX/prev-prefix.txt" - >"$SANDBOX/prev-back.diff"'
-  check "back to $PREVV: the engine as $PREVV left it" eval 'snap "$SOM/engine" | diff -q "$SANDBOX/prev-engine.txt" - >/dev/null'
+  # ($PREVV checks ntdll.so only when it unpacks the engine: it keeps this version's, the fix)
+  check "back to $PREVV: the engine as $PREVV left it, but ntdll.so this version's (and the engine's own as .stock)" eval '[ "$({ snap "$SOM/engine" | diff "$SANDBOX/prev-engine.txt" - || true; } | sed -n "s/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p" | sort -u | tr "\n" " ")" = "./lib/wine/x86_64-unix/ntdll.so ./lib/wine/x86_64-unix/ntdll.so.stock " ] && ntdll_is_apps'
+  out=$(sbx_wine cmd /c echo prev-ok 2>/dev/null | tr -d '\r' || true)
+  check "back to $PREVV: Wine runs a program with it (cmd: $out)" test "$out" = prev-ok
   check "back to $PREVV: env byte for byte as $PREVV wrote it (no state cache line, no A/B switches)" eval 'cmp -s "$SANDBOX/prev-env" "$SOM/env" && [ "$(envv D9MT_TEX_PFV)" = "<unset>" ]'
   out=$("$BS_WINE/bin/wine64-preloader" "$BS_WINE/bin/wine64" --version 2>&1 || true)
   check "back to $PREVV: the wrapper runs the engine ($out)" test "$out" = wine-11.0
@@ -1221,7 +1258,8 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: the same d3d9.dll as $DEVV" cmp -s "$DEV_APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   check "over $DEVV: the prefix as $DEVV left it" eval 'prefix_snap | diff "$SANDBOX/dev-prefix.txt" - >"$SANDBOX/dev-prefix.diff"'
   { snap "$SOM/engine" | diff "$SANDBOX/dev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/dev-engine.diff"
-  check "over $DEVV: the engine unchanged, signatures aside ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev
+  check "over $DEVV: the engine unchanged, signatures aside, but ntdll.so ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev
+  check "over $DEVV: the app's ntdll.so, $DEVV's (the engine's own) kept as .stock" eval 'ntdll_is_apps && cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock"'
   check "over $DEVV: no Wine left running" test -z "$(sandbox_wine)"
   som install >"$SANDBOX/dev-reinstall.txt" 2>&1 || bad "reinstall after $DEVV exit"
   check "over $DEVV: a Reinstall after it has nothing more to remove" eval 'grep -q "^@done" "$SANDBOX/dev-reinstall.txt" && ! grep -q "^Removed a development build" "$SANDBOX/dev-reinstall.txt"'
