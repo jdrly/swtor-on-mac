@@ -160,8 +160,8 @@ install -m 644 src/dxvk.conf "$R/dxvk.conf"
 # Helpers the wrapper runs from Broadsword's Wine/bin-real. Universal: the launcher and its
 # Wine run under Rosetta.
 mkdir -p "$R/helpers"
-clang -O2 -arch x86_64 -arch arm64 -mmacosx-version-min=$MACOS_MIN -fobjc-arc -framework AppKit \
-  -o "$R/helpers/hold-launcher" src/helpers/hold-launcher/hold_launcher.c src/helpers/hold-launcher/hide_app.m
+clang -O2 -arch x86_64 -arch arm64 -mmacosx-version-min=$MACOS_MIN \
+  -o "$R/helpers/hold-launcher" src/helpers/hold-launcher/hold_launcher.c
 clang -O2 -arch x86_64 -arch arm64 -mmacosx-version-min=$MACOS_MIN \
   -o "$R/helpers/setsid-exec" src/helpers/setsid-exec/setsid_exec.c
 

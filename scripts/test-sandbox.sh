@@ -149,7 +149,7 @@ mkdir -p "$SANDBOX/Applications" "$(dirname "$BS_WINE")" "$SANDBOX/usertmp"
 mkdir -p "$BS_APP/Contents/MacOS"
 cp "$REAL_APP/Contents/Info.plist" "$BS_APP/Contents/Info.plist"
 printf '#include <stdlib.h>\n#include <unistd.h>\nint main(int c, char **v) { sleep(c > 1 ? atoi(v[1]) : 30); return 0; }\n' >"$SANDBOX/sleep.c"
-for p in "$(plutil -extract CFBundleExecutable raw -o - "$REAL_APP/Contents/Info.plist")" test-sleep test-sleep2 test-sleep3; do
+for p in "$(plutil -extract CFBundleExecutable raw -o - "$REAL_APP/Contents/Info.plist")" test-sleep test-sleep2 test-sleep3 mac_wine; do
   clang -o "$BS_APP/Contents/MacOS/$p" "$SANDBOX/sleep.c"
 done
 codesign --force --sign - "$BS_APP" 2>/dev/null
@@ -208,23 +208,60 @@ kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true
 echo "== 2b. leftover Wine processes of the engine (dummy programs; only those may end)"
 # One dummy program for every part: as .../wineserver it is a Wine server (writes ws.pid next
 # to itself; "wineserver -k" sends that one SIGTERM and returns at once, and it lingers
-# $FAKE_LINGER s before it exits); anything else sleeps argv[1] seconds (default 60).
+# $FAKE_LINGER s before it exits); with -p<n> (as hold-launcher starts it) it daemonizes like
+# Wine's: exit 0 once the server runs, 2 if one already does, with WINEPREFIX set holding the
+# lock in /tmp/.wine-<uid>/server-<dev>-<ino> as Wine's does, and records its arguments
+# (ws.args) and the fds it inherited (ws.fds); it serves $FAKE_SERVER_SECS (60) s. Anything
+# else sleeps argv[1] seconds (default 60), with $FAKE_MAP mapped (a file of a session's
+# server directory, as Wine processes map them), or for as long as process $FAKE_UNTIL_PID
+# lives (a system process of a session).
 cat >"$SANDBOX/fake.c" <<'C'
+#include <fcntl.h>
 #include <libgen.h>
 #include <mach-o/dyld.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 static volatile sig_atomic_t term;
 static void on_term(int s) { (void)s; term = 1; }
+/* the prefix's server lock, as Wine's server takes it: its fd, -1 without WINEPREFIX, -2 held */
+static int take_lock(void)
+{
+    const char *p = getenv("WINEPREFIX");
+    struct stat st;
+    char d[1024], l[1100];
+    if (!p || stat(p, &st) != 0) return -1;
+    snprintf(d, sizeof(d), "/tmp/.wine-%u", getuid());
+    mkdir(d, 0700);
+    snprintf(d, sizeof(d), "/tmp/.wine-%u/server-%llx-%llx", getuid(),
+             (unsigned long long)st.st_dev, (unsigned long long)st.st_ino);
+    mkdir(d, 0700);
+    snprintf(l, sizeof(l), "%s/lock", d);
+    int fd = open(l, O_RDWR | O_CREAT, 0600);
+    struct flock fl = { .l_type = F_WRLCK, .l_whence = SEEK_SET, .l_start = 0, .l_len = 1 };
+    if (fd < 0 || fcntl(fd, F_SETLK, &fl) != 0) return -2;
+    return fd;
+}
+static void serve(const char *pidf, int secs)
+{
+    FILE *f = fopen(pidf, "w");
+    if (f) { fprintf(f, "%d\n", getpid()); fclose(f); }
+    signal(SIGTERM, on_term);
+    for (int i = 0; i < secs * 10 && !term; i++) usleep(100000);
+    if (term && getenv("FAKE_LINGER")) sleep(atoi(getenv("FAKE_LINGER")));
+}
 int main(int argc, char **argv)
 {
-    char dir[1024], pidf[1100];
+    char dir[1024], pidf[1100], f2[1100];
     uint32_t size = sizeof(dir);
     if (_NSGetExecutablePath(dir, &size) != 0) return 2;  /* (argv[0] may be a bare name) */
-    snprintf(pidf, sizeof(pidf), "%s/ws.pid", dirname(dir));
+    char *d = dirname(dir);
+    snprintf(pidf, sizeof(pidf), "%s/ws.pid", d);
     const char *base = strrchr(argv[0], '/');
     base = base ? base + 1 : argv[0];
     if (!strcmp(base, "wineserver")) {
@@ -234,14 +271,57 @@ int main(int argc, char **argv)
             if (f) { if (fscanf(f, "%d", &pid) != 1) pid = 0; fclose(f); }
             return pid > 1 && kill(pid, SIGTERM) == 0 ? 0 : 1;
         }
-        FILE *f = fopen(pidf, "w");
-        if (f) { fprintf(f, "%d\n", getpid()); fclose(f); }
-        signal(SIGTERM, on_term);
-        for (int i = 0; i < 60 && !term; i++) sleep(1);
-        if (term && getenv("FAKE_LINGER")) sleep(atoi(getenv("FAKE_LINGER")));
+        int secs = getenv("FAKE_SERVER_SECS") ? atoi(getenv("FAKE_SERVER_SECS")) : 60;
+        if (argc > 1 && !strncmp(argv[1], "-p", 2)) {
+            snprintf(f2, sizeof(f2), "%s/ws.fds", d);
+            FILE *ff = fopen(f2, "a");
+            if (ff) {
+                for (int fd = 3; fd < 256; fd++)
+                    if (fd != fileno(ff) && fcntl(fd, F_GETFD) != -1) fprintf(ff, "%d ", fd);
+                fputc('\n', ff);
+                fclose(ff);
+            }
+            snprintf(f2, sizeof(f2), "%s/ws.args", d);
+            if ((ff = fopen(f2, "a"))) {
+                for (int i = 1; i < argc; i++) fprintf(ff, "%s%s", i > 1 ? " " : "", argv[i]);
+                fputc('\n', ff);
+                fclose(ff);
+            }
+            int p[2];
+            if (pipe(p) != 0) return 1;
+            pid_t c = fork();
+            if (c == 0) {
+                setsid();
+                close(p[0]);
+                if (take_lock() == -2) _exit(2);
+                char x = 0;
+                if (write(p[1], &x, 1) != 1) _exit(1);
+                close(p[1]);
+                serve(pidf, secs);
+                _exit(0);
+            }
+            close(p[1]);
+            char x;
+            if (read(p[0], &x, 1) == 1) return 0;
+            int st = 0;
+            waitpid(c, &st, 0);
+            return WIFEXITED(st) ? WEXITSTATUS(st) : 1;
+        }
+        if (take_lock() == -2) return 2;
+        serve(pidf, secs);
         return 0;
     }
-    sleep(argc > 1 ? atoi(argv[1]) : 60);
+    const char *map = getenv("FAKE_MAP");
+    if (map) {
+        int fd = open(map, O_RDWR | O_CREAT, 0600);
+        if (fd >= 0 && ftruncate(fd, 4096) == 0) (void)mmap(NULL, 4096, PROT_READ, MAP_SHARED, fd, 0);
+    }
+    int secs = argc > 1 ? atoi(argv[1]) : 60;
+    const char *until = getenv("FAKE_UNTIL_PID");
+    for (int i = 0; i < secs * 10; i++) {
+        if (until && kill(atoi(until), 0) != 0) break;
+        usleep(100000);
+    }
     return 0;
 }
 C
@@ -304,12 +384,31 @@ check "game: end-leftovers refuses" eval '! som end-leftovers >/dev/null 2>&1'
 check "game: nothing ended" all_alive "$l4" "$g"
 check "game: install refuses" eval '! som install >"$SANDBOX/game.txt" 2>&1 && grep -q "^@error Quit the game first" "$SANDBOX/game.txt"'
 kill "$g"
+# Broadsword's Wine: with its wineserver, a session of it (wait); without, its processes are
+# leftovers like the engine's (e.g. of a game start while the hook was not active)
+mkdir -p "$BS_WINE/test-bin"
+cp "$SANDBOX/fake" "$BS_WINE/test-bin/wineserver"
 cp "$SANDBOX/fake" "$BS_WINE/test-wine"
-w=$(orphan "$BS_WINE/test-wine"); sleep 0.3
+ws=$(orphan "$BS_WINE/test-bin/wineserver"); w=$(orphan_as 'C:\windows\system32\winedevice.exe' "$BS_WINE/test-wine"); sleep 0.3
 check "Broadsword's Wine: status busy=wine" test "$(st busy)" = wine
 check "Broadsword's Wine: install refuses" eval '! som install >"$SANDBOX/wine.txt" 2>&1 && grep -q "Broadsword.s Wine is still running" "$SANDBOX/wine.txt"'
 check "Broadsword's Wine: the leftover not ended" alive "$l4"
-kill "$w"; sleep 0.3; rm -f "$BS_WINE/test-wine"
+check "Broadsword's Wine: its own process not ended" alive "$w"
+kill "$ws"; sleep 0.3
+# Broadsword's mac_wine (the stand-in in the sandbox's official app) outlives the launcher:
+# neither the launcher nor anything to end
+mw=$(orphan "$BS_APP/Contents/MacOS/mac_wine" 30); sleep 0.3
+check "Broadsword's Wine without its wineserver: busy=leftovers ($(st busy))" test "$(st busy)" = leftovers
+check "Broadsword's Wine leftover: named ($(st busy_detail))" eval 'st busy_detail | grep -q winedevice.exe'
+check "mac_wine: not taken for the launcher" eval '! som status | grep -qx busy=launcher'
+som end-leftovers >"$SANDBOX/end3.txt" 2>&1 || bad "end-leftovers (Broadsword's) exit"
+sleep 0.3
+check "end-leftovers: Broadsword's Wine leftover ended" all_gone "$w" "$l4"
+check "end-leftovers: mac_wine left alone" alive "$mw"
+check "end-leftovers: busy=none" test "$(st busy)" = none
+kill "$mw" 2>/dev/null || true
+rm -rf "$BS_WINE/test-wine" "$BS_WINE/test-bin"
+l4=$(orphan "$WT/winedevice.exe"); sleep 0.3
 kill "$p3" "$d1" "$d2" 2>/dev/null || true; wait "$p3" 2>/dev/null || true
 pkill -f "$SANDBOX/decoy/" 2>/dev/null || true
 rm -f "$EB/wineserver" "$EB/ws.pid"
@@ -599,10 +698,10 @@ check "settings: back to the defaults" test "$(som settings | sed -n 's/^debug=/
 
 echo "== 6b. the wrapper's daily update check (stub engine; the game is never started)"
 U="$SANDBOX/update-check"
-mkdir -p "$U/bin" "$U/bin-real" "$U/engine/bin" "$U/app"
+mkdir -p "$U/bin" "$U/bin-real" "$U/engine/bin" "$U/app" "$U/prefix"
 cp "$BS_WINE/bin-real/setsid-exec" "$BS_WINE/bin-real/hold-launcher" "$U/bin-real/"
 printf '#!/bin/bash\necho "$@" >>"%s/wine-args"\n' "$U" >"$U/engine/bin/wine"
-printf '#!/bin/bash\nexit 0\n' >"$U/engine/bin/wineserver"
+printf '#!/bin/bash\necho "$@" >>"%s/ws-args"\nexit 0\n' "$U" >"$U/engine/bin/wineserver"
 chmod +x "$U/engine/bin/wine" "$U/engine/bin/wineserver"
 feed() { # <version>: an appcast like generate_appcast's
   printf '<?xml version="1.0" standalone="yes"?>\n<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">\n<channel><item>\n<sparkle:version>%s</sparkle:version>\n<sparkle:shortVersionString>%s</sparkle:shortVersionString>\n</item></channel></rss>\n' "$1" "$1" >"$U/appcast.xml"
@@ -632,6 +731,9 @@ kill "$d6" 2>/dev/null || true
 check "update check: notification for 0.0.2" grep -q 'update available (0.0.2)' "$U/notifications.log"
 check "update check: update-available for the app" test "$(cat "$U/app/update-available" 2>/dev/null)" = 0.0.2
 check "update check: the game started anyway" grep -q swtor.exe "$U/wine-args"
+check "wrapper: the engine's wineserver with -p10 (ends by itself; '-p 10' is forever)" grep -qx -- '-p10' "$U/ws-args"
+check "wrapper: a new session's system processes from a bootstrap Wine call" grep -qxF 'reg query HKCU\Software\Wine /v SWTORonMacSession' "$U/wine-args"
+check "wrapper: the session start logged" grep -q 'Wine session started (wineserver' "$U/logs/hold.log"
 n=$(wc -l <"$U/notifications.log"); feed 0.0.3; game
 check "update check: at most once a day" test "$(wc -l <"$U/notifications.log")" = "$n"
 touch -t 202001010000 "$U/app/last-update-check"; rm -f "$U/app/update-available"; feed 0.0.1; game
@@ -707,117 +809,88 @@ check "report: XFER-SUMMARY when the device was released" eval '"$APP/Contents/R
 check "report: state cache off" eval '"$APP/Contents/Resources/session-report.sh" "$R/off.log" | grep -F "off (D9MT_STATE_CACHE=0)" >/dev/null'
 check "report: --compare with both" eval '"$APP/Contents/Resources/session-report.sh" --compare "$R/wine.log" "$R/off.log" | grep "Pipeline state cache.*ok, 40 entries.*off (D9MT_STATE_CACHE=0)" >/dev/null'
 
-echo "== 6d. hold-launcher ends what is left of the engine's Wine once the launcher quits (dummies)"
-T="$SANDBOX/hold-test"
+echo "== 6d. the Wine session: up holding nothing of the caller's, one start at a time, leftovers of its prefix only (dummies)"
+T="$SANDBOX/session-test"
 TE="$T/engine/bin"
 TL="$T/engine/lib/wine/x86_64-unix/wine"   # the engine's loader
-FL="$T/Fake.app/Contents/MacOS/Star Wars - The Old Republic Launcher"
 HL="$APP/Contents/Resources/helpers/hold-launcher"
-mkdir -p "$TE" "${TL%/*}" "${FL%/*}" "$T/logs"
+P1="$T/prefix" P2="$T/other"
+mkdir -p "$TE" "${TL%/*}" "$T/logs" "$T/bin" "$T/bin-real" "$T/srv2" "$P1/drive_c/windows" "$P2/drive_c/windows"
 cp "$SANDBOX/fake" "$TL"
 cp "$SANDBOX/fake" "$TE/wineserver"
-TWT="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$TL")-5-6"
-mkdir -p "$TWT" && ln "$TL" "$TWT/winedevice.exe" && ln "$TL" "$TWT/services.exe"
-mkdir -p "$SANDBOX/decoy/winetemp-1-2-3-4"
-cp "$SANDBOX/fake" "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe"
-d7=$(orphan "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe")
-# --reap (what the wrapper runs): nothing while a wineserver of the engine runs
-srv=$(orphan "$TE/wineserver"); r1=$(orphan "$TWT/winedevice.exe"); r2=$(orphan_as 'C:\windows\system32\services.exe' "$TL"); sleep 0.3
-SWTOR_ENGINE="$T/engine" "$HL" --reap 2>>"$T/logs/reap.log"
-check "hold --reap: leaves a running session alone" all_alive "$r1" "$r2" "$srv"
-kill "$srv"; sleep 0.3
-SWTOR_ENGINE="$T/engine" "$HL" --reap 2>>"$T/logs/reap.log"; sleep 0.3
-check "hold --reap: ended the leftovers" all_gone "$r1" "$r2"
-check "hold --reap: logged each" test "$(grep -c 'ended leftover Wine process' "$T/logs/reap.log")" = 2
-check "hold --reap: decoy left alone" alive "$d7"
-# A whole game: a fake launcher (its executable named like the real one) starts the "game"
-# (a script that runs hold-launcher, then becomes the engine's program for 3 s) and, once
-# resumed, the "last Wine call" that leaves a session behind: a new wineserver, an orphaned
-# winedevice.exe, a services.exe whose parent is still alive. The servers linger 3 s after
-# "wineserver -k" (the old hold-launcher gave up on that: it saw the server and left all).
-printf '#include <stdlib.h>\n#include <sys/wait.h>\n#include <unistd.h>\nint main(int argc, char **argv) { if (argc < 2) return 2; pid_t p = fork(); if (p == 0) { execv(argv[1], argv + 1); _exit(127); } int st; waitpid(p, &st, 0); if (getenv("FAKE_AFTER")) system(getenv("FAKE_AFTER")); return 0; }\n' >"$T/launcher.c"
-clang -o "$FL" "$T/launcher.c"
-printf '#!/bin/bash\n"%s" $$ </dev/null >/dev/null 2>>"%s"\nexec "%s" 3\n' "$HL" "$T/logs/hold.log" "$TL" >"$T/game.sh"
-cat >"$T/after.sh" <<AFTER
+cp "$SANDBOX/fake" "$T/srv2/wineserver"
+cp "$HL" "$APP/Contents/Resources/helpers/setsid-exec" "$T/bin-real/"
+# The engine's wine: logs its command; the first Wine process of a session starts a "system
+# process" that keeps its stdout and stderr for as long as the session runs, as Wine's
+# wineboot --init does (services.exe, winedevice.exe, ...)
+cat >"$TE/wine" <<WINE
 #!/bin/bash
-( "$TE/wineserver" </dev/null >/dev/null 2>&1 & )
-( "$TWT/winedevice.exe" </dev/null >/dev/null 2>&1 & echo \$! >"$T/orphan.pid" )
-( "$TWT/services.exe" & echo \$! >"$T/svc.pid"; "$SANDBOX/decoy/winetemp-1-2-3-4/winedevice.exe" 60 ) </dev/null >/dev/null 2>&1 &
-echo \$! >"$T/svc-parent.pid"
+echo "\$*" >>"$T/wine-args"
+srv=\$(cat "$TE/ws.pid" 2>/dev/null)
+if [ -n "\$srv" ] && [ "\$(cat "$T/booted" 2>/dev/null)" != "\$srv" ]; then
+  echo "\$srv" >"$T/booted"
+  ( cd "$P1/drive_c/windows" && FAKE_UNTIL_PID=\$srv exec "$TL" 60 ) & echo \$! >"$T/sys.pid"
+fi
+WINE
+chmod +x "$TE/wine"
+printf 'SWTOR_ENGINE="%s"\nSWTOR_PREFIX="%s"\nSWTOR_LOG_DIR="%s"\n' "$T/engine" "$P1" "$T/logs" >"$T/env"
+sed "s|@CONF@|$T/env|" "$APP/Contents/Resources/wine-wrapper.sh" >"$T/bin/wine64-preloader"; chmod +x "$T/bin/wine64-preloader"
+# sd <prefix>: its session's server directory, as Wine names it
+sd() { printf '/tmp/.wine-%s/server-%x-%x' "$(id -u)" "$(stat -f %d "$1")" "$(stat -f %i "$1")"; }
+# a Wine call as Broadsword's mac_wine makes them: its output read to EOF (Rust's Command::output)
+macwine_call() { "$T/bin/wine64-preloader" "$T/bin/wine64" reg query 'HKCU\Software\Broadsword' 2>&1 | cat >/dev/null; }
+exec 7>"$T/caller-fd"   # a file of the caller's, which nothing of the session may keep open
+t0=$SECONDS; macwine_call; dt=$((SECONDS - t0))
+exec 7>&-
+sys=$(cat "$T/sys.pid" 2>/dev/null || echo 0)
+check "session: mac_wine's Wine call that started it returns at once ($dt s; it used to wait for the session's end)" test "$dt" -le 3
+check "session: a bootstrap Wine call first" test "$(head -1 "$T/wine-args")" = 'reg query HKCU\Software\Wine /v SWTORonMacSession'
+check "session: then mac_wine's call" test "$(sed -n 2p "$T/wine-args")" = 'reg query HKCU\Software\Broadsword'
+check "session: wineserver -p10" test "$(cat "$TE/ws.args")" = -p10
+check "session: the wineserver inherited no fds" test -z "$(tr -d ' \n' <"$TE/ws.fds")"
+check "session: its system process has /dev/null as stdout and stderr" eval 'test "$(lsof -a -p "$sys" -d 1,2 -Fn 2>/dev/null | grep -c "^n/dev/null")" = 2'
+check "session: and nothing of the caller's" eval '! lsof -p "$sys" 2>/dev/null | grep -q caller-fd'
+macwine_call
+check "session: a second Wine call joins it (no second bootstrap)" test "$(grep -c SWTORonMacSession "$T/wine-args")" = 1
+check "session: one start logged" test "$(grep -c 'Wine session started' "$T/logs/hold.log")" = 1
+kill "$(cat "$TE/ws.pid")"
+for _ in $(seq 20); do alive "$sys" || break; sleep 0.2; done
+check "session: its system process went with its server" all_gone "$sys"
+macwine_call & macwine_call & wait
+check "session: two Wine calls at once start it once" test "$(grep -c SWTORonMacSession "$T/wine-args")" = 2
+kill "$(cat "$TE/ws.pid")"; sleep 0.5
+# --reap: leftovers of this prefix's session, by their working directory in its drive_c (Wine's
+# system processes) or a mapped file of its server directory (every Wine process); another
+# prefix's are not touched, and nothing while the session's wineserver runs
+l1=$(cd "$P1/drive_c/windows" && orphan_as 'C:\windows\system32\winedevice.exe' "$TL")
+l2=$(FAKE_MAP="$(sd "$P1")/tmpmap-test" orphan_as 'C:\windows\system32\svchost.exe' "$TL")
+o1=$(cd "$P2/drive_c/windows" && orphan_as 'C:\windows\system32\winedevice.exe' "$TL")
+cp "$SANDBOX/fake" "$T/decoy-wine"
+dd=$(cd "$P1/drive_c/windows" && orphan "$T/decoy-wine")
+WINEPREFIX="$P2" "$T/srv2/wineserver" -p10
 sleep 0.3
-AFTER
-chmod +x "$T/game.sh" "$T/after.sh"
-s1=$(FAKE_LINGER=3 orphan "$TE/wineserver")
-t0=$SECONDS
-FAKE_LINGER=3 FAKE_AFTER="$T/after.sh" SWTOR_ENGINE="$T/engine" WINEPREFIX="$T/prefix" "$FL" "$T/game.sh" </dev/null >/dev/null 2>&1 &
-fl=$!
-for _ in $(seq 40); do
-  grep -q -e 'ended leftover' -e 'no leftover' -e 'leaving the engine' "$T/logs/hold.log" 2>/dev/null && break
-  sleep 1
-done
-sleep 0.5
-echo "  (hold-launcher done after $((SECONDS - t0)) s)"
-sed 's/^/    hold.log: /' "$T/logs/hold.log"
-check "hold: held the launcher, then resumed it" eval 'grep -q "stopped, waiting for game" "$T/logs/hold.log" && grep -q "resumed (game exited)" "$T/logs/hold.log"'
-check "hold: the launcher quit" all_gone "$fl"
-check "hold: both sessions' wineservers gone" eval 'all_gone "$s1" && test -z "$(ps -axww -o comm= | grep -Fx "$TE/wineserver")"'
-o=$(cat "$T/orphan.pid"); sv=$(cat "$T/svc.pid"); sp=$(cat "$T/svc-parent.pid")
-check "hold: ended the orphaned winedevice.exe" all_gone "$o"
-check "hold: logged it (parent 1)" grep -q "ended leftover Wine process $o (winedevice.exe, parent 1)" "$T/logs/hold.log"
-check "hold: ended services.exe although its parent runs" all_gone "$sv"
-check "hold: logged it" grep -q "ended leftover Wine process $sv (services.exe" "$T/logs/hold.log"
-check "hold: left the non-Wine parent alone" alive "$sp"
-check "hold: left the decoy alone" alive "$d7"
-check "hold: nothing of the engine left" test -z "$(ps -axww -o comm= | grep -F -e "$T/" -e "${TWT##*/}/")"
-kill "$sp" "$d7" 2>/dev/null || true
-pkill -f "$SANDBOX/decoy/" 2>/dev/null || true
-wait "$fl" 2>/dev/null || true
-
-echo "== 6e. hold-launcher after the launcher quit: Broadsword's mac_wine and a Wine call that comes back (dummies)"
-# The launcher's last Wine calls come from Broadsword's mac_wine, which outlives it: a dummy
-# mac_wine (its executable named like the real one) makes a Wine call (a child process) that
-# starts a session 2 s after the launcher quit, then exits a second later; another one stays,
-# idle, with its finished call unreaped (as seen with the real one); 7.5 s after the launcher
-# quit another Wine call brings a wineserver back. hold-launcher must wait for the busy
-# mac_wine only (and never touch either), end the session, end it again when it comes back,
-# and end the leftovers once it stays gone.
-MW="$T/Fake.app/Contents/MacOS/mac_wine"
-printf '#include <stdlib.h>\n#include <stdio.h>\n#include <sys/wait.h>\n#include <unistd.h>\nint main(void) {\n  if (getenv("MW_IDLE")) { if (fork() == 0) _exit(0); sleep(60); return 0; }\n  pid_t c = fork(); if (c == 0) { sleep(2); _exit(system(getenv("MW_CMD")) ? 1 : 0); }\n  int st; waitpid(c, &st, 0); sleep(1);\n  FILE *f = fopen(getenv("MW_DONE"), "w"); if (f) fclose(f); return 0; }\n' >"$T/macwine.c"
-clang -o "$MW" "$T/macwine.c"
-cat >"$T/after2.sh" <<AFTER
-#!/bin/bash
-( MW_IDLE=1 "$MW" </dev/null >/dev/null 2>&1 & echo \$! >"$T/mac_wine_idle.pid" )
-( MW_CMD='( FAKE_LINGER=3 "$TE/wineserver" </dev/null >/dev/null 2>&1 & ); ( "$TWT/winedevice.exe" </dev/null >/dev/null 2>&1 & echo \$! >"$T/orphan2.pid" )' \
-  MW_DONE="$T/mac_wine.done" "$MW" </dev/null >/dev/null 2>&1 & echo \$! >"$T/mac_wine.pid" )
-( sleep 7.5; FAKE_LINGER=3 "$TE/wineserver" </dev/null >/dev/null 2>&1 & ) </dev/null >/dev/null 2>&1 &
-AFTER
-chmod +x "$T/after2.sh"
-rm -f "$T/mac_wine.done" "$T/orphan2.pid" "$TE/ws.pid"
-: >"$T/logs/hold.log"
-t0=$SECONDS
-FAKE_AFTER="$T/after2.sh" SWTOR_ENGINE="$T/engine" WINEPREFIX="$T/prefix" "$FL" "$T/game.sh" </dev/null >/dev/null 2>&1 &
-fl=$!
-for _ in $(seq 60); do
-  grep -q -e 'ended leftover' -e 'no leftover' -e 'leaving the engine' "$T/logs/hold.log" 2>/dev/null && break
-  sleep 1
-done
-sleep 0.5
-echo "  (hold-launcher done after $((SECONDS - t0)) s)"
-sed 's/^/    hold.log: /' "$T/logs/hold.log"
-check "hold, mac_wine: waited for the mac_wine with a Wine call" grep -q 'mac_wine running a Wine call ([0-9]*): waiting for it' "$T/logs/hold.log"
-check "hold, mac_wine: not for the idle one" grep -q 'mac_wine running without a Wine call ([0-9]*): not waiting' "$T/logs/hold.log"
-check "hold, mac_wine: left mac_wine alone (it finished by itself)" test -f "$T/mac_wine.done"
-mwi=$(cat "$T/mac_wine_idle.pid" 2>/dev/null || echo 0)
-check "hold, mac_wine: left the idle mac_wine alone" alive "$mwi"
-kill "$mwi" 2>/dev/null || true
-check "hold, mac_wine: ended the session that came back" grep -q 'came back' "$T/logs/hold.log"
-check "hold, mac_wine: done once no wineserver for 3 s" grep -q 'no wineserver for 3.0 s' "$T/logs/hold.log"
-check "hold, mac_wine: no wineserver left" test -z "$(ps -axww -o comm= | grep -Fx "$TE/wineserver")"
-o2=$(cat "$T/orphan2.pid" 2>/dev/null || echo 0)
-check "hold, mac_wine: ended mac_wine's orphaned winedevice.exe" all_gone "$o2"
-check "hold, mac_wine: logged it" grep -q "ended leftover Wine process $o2 (winedevice.exe" "$T/logs/hold.log"
-check "hold, mac_wine: nothing of the engine left" test -z "$(ps -axww -o comm= | grep -F -e "$T/" -e "${TWT##*/}/")"
-wait "$fl" 2>/dev/null || true
+SWTOR_ENGINE="$T/engine" WINEPREFIX="$P1" "$HL" --reap 2>"$T/logs/reap.log"; sleep 0.3
+check "reap: a leftover by its working directory" all_gone "$l1"
+check "reap: a leftover by a mapped file of the server directory" all_gone "$l2"
+check "reap: logged each" test "$(grep -c 'ended leftover Wine process' "$T/logs/reap.log")" = 2
+check "reap: another prefix's Wine process left alone" alive "$o1"
+check "reap: not the engine's program, left alone" alive "$dd"
+WINEPREFIX="$P1" "$TE/wineserver" -p10; sleep 0.2
+l3=$(cd "$P1/drive_c/windows" && orphan "$TL")
+SWTOR_ENGINE="$T/engine" WINEPREFIX="$P1" "$HL" --reap 2>>"$T/logs/reap.log"; sleep 0.3
+check "reap: nothing while the session's wineserver runs" alive "$l3"
+kill "$(cat "$T/srv2/ws.pid")"; sleep 0.3
+SWTOR_ENGINE="$T/engine" WINEPREFIX="$P2" "$HL" --reap 2>>"$T/logs/reap.log"; sleep 0.3
+check "reap: the other prefix's leftover, for its own prefix" all_gone "$o1"
+check "reap: and still not the running session's" alive "$l3"
+# 0.1.1's wrappers call hold-launcher with the game's pid: nothing happens
+check "hold-launcher <pid> (0.1.1's wrapper): nothing to do" eval '"$HL" $$ 2>"$T/logs/old.log" && grep -q "not holding the launcher" "$T/logs/old.log"'
+check "hold-launcher: no AppKit (never an app of the launcher's)" eval '! nm -u "$HL" | grep -q -e NSApplication -e _objc_'
+kill "$(cat "$TE/ws.pid")" "$l3" "$dd" 2>/dev/null || true
+sleep 0.3
+check "session test: nothing of it left" test -z "$("$HL" --paths | grep -F "$T/")"
+rm -rf "$(sd "$P1")" "$(sd "$P2")"
+rm -f "/tmp/.wine-$(id -u)/swtor-on-mac-$(printf '%x-%x' "$(stat -f %d "$P1")" "$(stat -f %i "$P1")").lock"
 
 echo "== 6c. the launchd job (simulated: run as launchd would)"
 watch; check "watch: wrapper in place, nothing to do" test "$(st wrapper)" = ours

@@ -73,23 +73,23 @@ if [ -n "$SWTOR_ENGINE" ]; then
   mkdir -p "$LOG_DIR"
   # One line in hold.log per Wine start that is not the game: the time, the command's first
   # word only (the rest can hold the account token) and who started it (the launcher, or
-  # Broadsword's mac_wine), next to hold-launcher's lines about ending the session.
+  # Broadsword's mac_wine), next to hold-launcher's lines about the session.
   case " $* " in
     *swtor.exe*) ;;
     *) printf '%s [wrapper %d] wine start: %s (parent %d %s)\n' "$(date '+%Y-%m-%d %H:%M:%S')" $$ \
          "${1##*[/\\]}" "$PPID" "$(ps -o comm= -p "$PPID" 2>/dev/null | sed 's|.*/||')" >>"$LOG_DIR/hold.log" 2>/dev/null ;;
   esac
-  # Start this engine's wineserver ourselves, in its own session, so it is not in the
-  # launcher's process group; a no-op if one is already running. Not enough on its own:
-  # when the launcher exits, this wineserver still dies (see hold-launcher below).
-  # setsid-exec sits next to the real preloaders (not perl: macOS strips DYLD_* when it
-  # starts SIP-protected binaries, and Wine needs them).
-  setsid_exec() { exec "$(dirname "$REAL")/setsid-exec" "$@"; }
-  # First, if no wineserver of the engine runs: end leftover Wine processes of the engine
-  # (a session whose server is gone, e.g. the launcher's last Wine call after a game, when
-  # the launcher stayed open longer than hold-launcher waits). Each is logged in hold.log.
-  "$(dirname "$REAL")/hold-launcher" --reap </dev/null >/dev/null 2>>"$LOG_DIR/hold.log" || true
-  ( setsid_exec "$SWTOR_ENGINE/bin/wineserver" -p 10 ) </dev/null >/dev/null 2>>"$LOG_DIR/wineserver.log"
+  # The prefix's Wine session, brought up by hold-launcher (next to the real preloaders): it
+  # ends this prefix's leftover Wine processes (a session whose server is gone), starts the
+  # engine's wineserver -p10 (it ends by itself 10 s after the last Wine process) in its own
+  # session with nothing of this process open, and if that server is new, a bootstrap Wine
+  # call starts Wine's system processes, so they don't inherit this command's stdout/stderr
+  # (mac_wine reads its Wine calls' output to EOF) or the launcher's files. A no-op if the
+  # session runs. Each step is logged in hold.log.
+  if ! "$(dirname "$REAL")/hold-launcher" --start-session "$LOG_DIR/wineserver.log" </dev/null >/dev/null 2>>"$LOG_DIR/hold.log"; then
+    # (no or an older hold-launcher: the server alone; setsid-exec closes the inherited fds)
+    ( exec "$(dirname "$REAL")/setsid-exec" "$SWTOR_ENGINE/bin/wineserver" -p10 ) </dev/null >/dev/null 2>>"$LOG_DIR/wineserver.log"
+  fi
   case " $* " in
     *swtor.exe*)
       # Debug Logging: Wine debug channels for the game only (RAWMOUSE, THREADCPU lines)
@@ -100,9 +100,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
       if [ "$SWTOR_UPDATE_CHECK" = 1 ] && [ -n "$SWTOR_UPDATE_FEED" ] && [ -d "$SWTOR_APP_DIR" ]; then
         ( update_check & ) </dev/null >/dev/null 2>&1
       fi
-      # The game's stdout/stderr go to a file instead of the launcher's pipe: the held
-      # (stopped) launcher does not drain that pipe, so a full pipe would block the game,
-      # and once the launcher has quit, writes to it raise SIGPIPE and kill the game.
+      # The game's stdout/stderr go to a file instead of the launcher's pipe, which closes when
+      # the launcher quits (~30 s after starting the game).
       # SWTOR_LOG_FILTER set: keep the game's Wine/d9mt output in wine.log.
       if [ -n "$SWTOR_LOG_FILTER" ]; then
         exec >/dev/null 2>"$LOG_DIR/wine.log"
@@ -113,13 +112,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
       else
         exec >/dev/null 2>/dev/null
       fi
-      # The launcher quits ~30 s after starting the game, and its exit takes this engine's
-      # wineserver with it, so the game would hang. hold-launcher hides the launcher and
-      # freezes it (SIGSTOP) until the game exits, then lets it finish quitting (SIGCONT).
-      # It waits in kqueue for the exit of $$, which stays the game (the exec below keeps
-      # this pid). Returns once the launcher is stopped; does nothing if it cannot find it.
-      # After the launcher has quit, it ends the engine's session and its leftovers.
-      "$(dirname "$REAL")/hold-launcher" $$ </dev/null >/dev/null 2>>"$LOG_DIR/hold.log"
+      # Nothing holds the launcher: it quits ~30 s after starting the game, as with Broadsword's
+      # own Wine, and macOS leaves the game (a foreground app) and the Wine session running.
       # macOS Game Mode: point the name CrossOver's ntdll starts the game from (a hard link
       # of the engine's loader in winetemp-<ino>-<size>-<mtime_s>-<mtime_ns>/, reused if
       # present) at the identical copy inside SWTOR.app, so gamepolicyd sees a bundle

@@ -1,66 +1,64 @@
-// hold-launcher GAME_PID
+// hold-launcher --start-session WINESERVER_LOG
 // hold-launcher --reap
 // hold-launcher --paths
+// hold-launcher GAME_PID   (0.1.1's wrappers: nothing to do any more)
 //
-// Freezes the SWTOR launcher (SIGSTOP) while the game runs on another Wine engine
-// (SWTOR_ENGINE) and lets it go on (SIGCONT) once the game has exited.
-// Why: the launcher quits ~30 s after starting the game, and when it exits the
-// engine's wineserver dies too (even in its own session), so the game hangs.
-// A stopped launcher cannot quit; resumed after the game, it just finishes its
-// shutdown.
+// The Wine session helper of the wrapper (src/wine-wrapper.sh), next to Broadsword's real
+// preloaders in bin-real. (The name is 0.1.1's, when it held the launcher: SIGSTOP while the
+// game ran, because the launcher's exit seemed to take the engine's wineserver with it. It
+// doesn't: the launcher quits ~30 s after starting the game, as with Broadsword's own Wine, and
+// macOS spares the game and the Wine processes then. See launcher-lifecycle/REPORT.md.)
 //
-// GAME_PID is the wrapper's own pid: the wrapper then execs the engine's wine, which becomes
-// the game itself or `start.exe /exec swtor.exe` (the exec keeps the pid) and stays until the
-// game process exits.
-// The launcher is looked up among GAME_PID's ancestors (then its process-group
-// leader) by executable path, so nothing else is ever stopped. Not found: log, exit.
+// Environment, from the wrapper: SWTOR_ENGINE (SWTOR on Mac's Wine engine), WINEPREFIX (its
+// prefix), and whatever Wine reads (WINEMSYNC, WINEDEBUG, DYLD_FALLBACK_LIBRARY_PATH, ...).
 //
-// Run it in the foreground: it forks a detached child and returns once the launcher
-// is stopped, so the game only starts after that. The child gets its own session
-// (out of reach of group kills), stdin/stdout on /dev/null, stderr kept as the log,
-// every other fd closed (it must not hold the launcher's pipes open). It waits in
-// kevent() for the game's exit (EVFILT_PROC NOTE_EXIT): no polling, no CPU.
-// It also resumes the launcher if it is told to quit (SIGTERM/SIGINT/SIGHUP/SIGQUIT)
-// or kevent() fails, and does nothing if the launcher exited first (pid reuse).
-// Once the launcher has quit (within 2 min of the game), it ends the engine's Wine session
-// and whatever is left of it (see end_session_after_launcher, reap_leftovers).
+// A Wine session of a prefix is its wineserver and Wine's system processes (services.exe,
+// winedevice.exe, plugplay.exe, svchost.exe, rpcss.exe), which the session's first Wine
+// process starts through `wineboot --init`. They inherit that process's stdout and stderr: when
+// it is a `reg` call of Broadsword's mac_wine, mac_wine's pipe stays open for as long as the
+// session lives, and mac_wine (Rust's Command::output, which reads to EOF) waits for that.
 //
-// --reap: only end leftover Wine processes of SWTOR_ENGINE (processes of the engine while
-// no wineserver of it runs), logging each to stderr. The wrapper runs it before it starts
-// the engine's wineserver.
+// --start-session: makes sure a session of WINEPREFIX runs, started so that it holds nothing
+// of the caller's: under a lock per prefix (concurrent Wine starts wait for each other), first
+// --reap, then the engine's wineserver -p10 (it ends 10 s after the last Wine process; "-p 10",
+// with a space, would make it persistent forever: Wine's getopt takes the value only attached)
+// in its own session with stdin/stdout on /dev/null, stderr appended to WINESERVER_LOG and every
+// other fd closed. If that started a new server (exit 0; 2 = one already runs), a bootstrap Wine
+// call (reg query, stdio on /dev/null, own session, nothing else open) brings up Wine's system
+// processes, so they inherit nothing either. Logs one line to stderr. Exit 0, or 1 if no
+// wineserver could be started (the wrapper then starts one itself).
+//
+// --reap: ends leftover Wine processes of WINEPREFIX's session: processes of SWTOR_ENGINE that
+// belong to it (they map files from its server directory /tmp/.wine-<uid>/server-<dev>-<ino>,
+// or their working directory is in the prefix's drive_c) while no wineserver of it runs (none
+// holds the lock in that directory), each logged to stderr. Other prefixes' Wine processes
+// are never touched. Without WINEPREFIX: 0.1.1's rule (any process of the engine while no
+// wineserver of the engine runs).
 //
 // --paths: "<pid> <executable>" for every process whose executable can be read (the real
 // file, from proc_pidpath), for som.sh: Wine 11 rewrites argv[0], so ps shows C:\...\name.exe
 // instead of the program for its processes.
 //
-// build: clang -O2 -arch x86_64 -arch arm64 -fobjc-arc -framework AppKit \
-//          -o hold-launcher hold_launcher.c hide_app.m
+// No AppKit: a process with an NSApplication counts for macOS as an app of the launcher that
+// started it, and the Dock's Quit on the launcher kills those (0.1.1's hold-launcher, cut off
+// mid-cleanup).
+//
+// build: clang -O2 -arch x86_64 -arch arm64 -o hold-launcher hold_launcher.c
 #include <errno.h>
 #include <fcntl.h>
 #include <libproc.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/event.h>
-#include <sys/proc.h>
+#include <sys/file.h>
 #include <sys/proc_info.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-
-int hide_app(pid_t pid, double timeout);  // hide_app.m
-
-// executable of the launcher's main process (its CEF helpers are "... Launcher Helper")
-#define LAUNCHER_SUFFIX ".app/Contents/MacOS/Star Wars - The Old Republic Launcher"
-// Broadsword's Wine helper (registry token, graphics config): its Wine calls go through the
-// wrapper too, onto this engine. Only looked at, never signalled.
-#define MAC_WINE_SUFFIX ".app/Contents/MacOS/mac_wine"
-// after the launcher has quit: how long no wineserver may have come back, and the cap
-#define QUIET_MS 3000
-#define LINGER_MAX_MS 30000
 
 // log lines go to stderr; the wrapper points it at ~/Library/Logs/SWTOR on Mac/hold.log
 static void logf_(const char *fmt, ...)
@@ -76,46 +74,6 @@ static void logf_(const char *fmt, ...)
     fputc('\n', stderr);
 }
 
-static int has_suffix(pid_t pid, const char *suffix)
-{
-    char path[PROC_PIDPATHINFO_MAXSIZE];
-    if (proc_pidpath(pid, path, sizeof(path)) <= 0) return 0;
-    size_t n = strlen(path), m = strlen(suffix);
-    return n >= m && !strcmp(path + n - m, suffix);
-}
-
-static int is_launcher(pid_t pid) { return has_suffix(pid, LAUNCHER_SUFFIX); }
-
-static int bsdinfo(pid_t pid, struct proc_bsdinfo *bi);
-
-// Broadsword's mac_wine processes running now: *IDLE gets those without a Wine call in
-// flight; returns those with one (a child that is not a zombie: the wine64 it started, which
-// the wrapper turns into this engine's wine with the same pid). A mac_wine can stay long after
-// the launcher, idle, with its finished call unreaped.
-static int count_mac_wine(int *idle)
-{
-    *idle = 0;
-    int n = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
-    pid_t *all = n > 0 ? malloc(n) : NULL;
-    if (!all) return 0;
-    n = proc_listpids(PROC_ALL_PIDS, 0, all, n) / (int)sizeof(pid_t);
-    int busy = 0;
-    for (int i = 0; i < n; i++) {
-        if (all[i] <= 1 || !has_suffix(all[i], MAC_WINE_SUFFIX)) continue;
-        pid_t kids[64];
-        // (proc_listchildpids returns a count of pids, not bytes)
-        int k = proc_listchildpids(all[i], kids, sizeof(kids)), live = 0;
-        if (k > 64) k = 64;
-        for (int j = 0; j < k && !live; j++) {
-            struct proc_bsdinfo bi;
-            live = bsdinfo(kids[j], &bi) && bi.pbi_status != SZOMB;
-        }
-        if (live) busy++; else (*idle)++;
-    }
-    free(all);
-    return busy;
-}
-
 static long long now_ms(void)
 {
     struct timespec ts;
@@ -128,22 +86,8 @@ static int bsdinfo(pid_t pid, struct proc_bsdinfo *bi)
     return proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, bi, sizeof(*bi)) == sizeof(*bi);
 }
 
-// The launcher spawns wine64 directly, but walk a few levels in case something sits
-// in between; the game is in the launcher's process group, so try its leader last.
-static pid_t find_launcher(pid_t game)
-{
-    struct proc_bsdinfo bi;
-    if (!bsdinfo(game, &bi)) return 0;
-    pid_t pgid = bi.pbi_pgid;
-    for (int depth = 0; depth < 8 && bi.pbi_ppid > 1; depth++) {
-        pid_t p = bi.pbi_ppid;
-        if (is_launcher(p)) return p;
-        if (!bsdinfo(p, &bi)) break;
-    }
-    return pgid > 1 && is_launcher(pgid) ? pgid : 0;
-}
-
-// Everything except stdio and KEEP: the launcher's pipes must not stay open here
+// Everything except stdio and KEEP: nothing of the caller's (the launcher's or mac_wine's
+// pipes and sockets) may stay open in a process that outlives it
 static void close_inherited_fds(int keep)
 {
     int size = proc_pidinfo(getpid(), PROC_PIDLISTFDS, 0, NULL, 0);
@@ -158,31 +102,6 @@ static void close_inherited_fds(int keep)
     for (int i = 0; i < size / (int)sizeof(*fds); i++)
         if (fds[i].proc_fd > 2 && fds[i].proc_fd != keep) close(fds[i].proc_fd);
     free(fds);
-}
-
-// Before letting the launcher go: shut the engine's Wine session down cleanly
-// (wineserver -k, with the WINEPREFIX the wrapper exported). Otherwise the launcher's
-// exit kills the wineserver and leaves its winedevice.exe orphaned, ticking forever.
-// (wineserver -k exits 0 once it has ended a server, 1 if none was running.)
-static void stop_wine_session(void)
-{
-    const char *engine = getenv("SWTOR_ENGINE");
-    if (!engine || !getenv("WINEPREFIX")) return;
-    char path[1024];
-    snprintf(path, sizeof(path), "%s/bin/wineserver", engine);
-    pid_t pid = fork();
-    if (pid == 0) {
-        alarm(15);  // survives exec: a stuck wineserver -k must not keep the launcher stopped
-        execl(path, "wineserver", "-k", (char *)NULL);
-        _exit(127);
-    }
-    int st = 0;
-    if (pid > 0)
-        while (waitpid(pid, &st, 0) < 0 && errno == EINTR)
-            ;
-    if (pid < 0) logf_("wineserver -k: %s", strerror(errno));
-    else if (WIFEXITED(st)) logf_("wineserver -k: exit %d%s", WEXITSTATUS(st), WEXITSTATUS(st) == 1 ? " (no server was running)" : "");
-    else logf_("wineserver -k: timed out");
 }
 
 // The engine's processes at this moment. Sets *SERVER to a live wineserver of the engine (0:
@@ -233,27 +152,84 @@ static int engine_procs(pid_t *server, pid_t *pids, int max)
     return found < max ? found : max;
 }
 
-// Waits (at most SECONDS, looking once a second) until no wineserver of the engine runs;
-// returns the one still running, or 0.
-static pid_t wait_no_server(int seconds)
+// The prefix's session, as Wine names it: its server directory /tmp/.wine-<uid>/server-<dev>-<ino>
+// (server/request.c), KEY the part to look for in paths ("/.wine-<uid>/server-<dev>-<ino>/":
+// macOS shows /private/tmp), DRIVE_C the prefix's drive_c with a trailing slash (real path).
+struct session {
+    char dir[PATH_MAX], key[128], drive_c[PATH_MAX];
+    dev_t dev;
+    ino_t ino;
+};
+
+static int session_of(const char *prefix, struct session *s)
 {
-    pid_t server;
-    for (int i = 0;; i++) {
-        engine_procs(&server, NULL, 0);
-        if (!server || i >= seconds) return server;
-        sleep(1);
-    }
+    struct stat st;
+    char real[PATH_MAX];
+    if (!prefix || !*prefix || stat(prefix, &st) != 0 || !realpath(prefix, real)) return 0;
+    s->dev = st.st_dev;
+    s->ino = st.st_ino;
+    snprintf(s->key, sizeof(s->key), "/.wine-%u/server-%llx-%llx/", getuid(),
+             (unsigned long long)st.st_dev, (unsigned long long)st.st_ino);
+    snprintf(s->dir, sizeof(s->dir), "/tmp%.*s", (int)strlen(s->key) - 1, s->key);
+    snprintf(s->drive_c, sizeof(s->drive_c), "%s/drive_c/", real);
+    return 1;
 }
 
-// Leftovers: processes of the engine while no wineserver of it runs. Without a server there
-// is no Wine session they could belong to (every Wine start brings up its server first, the
-// wrapper before anything else), so they only tick on: Wine's system processes
-// (winedevice.exe, services.exe, ...) of a session whose server is gone, waiting forever on
-// msync, whatever their parent. All of them end (SIGKILL), each logged; with a server
-// running, none. QUIET: no log line when there is nothing to do.
-static void reap_leftovers(int quiet)
+// The pid of the session's wineserver (it holds the lock in the server directory), or 0
+static pid_t session_server(const struct session *s)
 {
-    pid_t server, pids[256];
+    char lock[PATH_MAX + 8];
+    snprintf(lock, sizeof(lock), "%s/lock", s->dir);
+    int fd = open(lock, O_RDONLY);
+    if (fd < 0) return 0;
+    struct flock fl = { .l_type = F_WRLCK, .l_whence = SEEK_SET, .l_start = 0, .l_len = 1 };
+    pid_t holder = fcntl(fd, F_GETLK, &fl) == 0 && fl.l_type != F_UNLCK ? fl.l_pid : 0;
+    close(fd);
+    return holder;
+}
+
+// Does PID belong to the session: its working directory in the prefix's drive_c (Wine's
+// system processes: C:\windows), or a file of the server directory mapped (every Wine process
+// of the session maps its tmpmap-* files)?
+static int in_session(pid_t pid, const struct session *s)
+{
+    struct proc_vnodepathinfo vpi;
+    if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) == sizeof(vpi) &&
+        !strncmp(vpi.pvi_cdir.vip_path, s->drive_c, strlen(s->drive_c)))
+        return 1;
+    struct proc_regionwithpathinfo rp;
+    uint64_t addr = 0;
+    for (int i = 0; i < 100000; i++) {
+#ifdef PROC_PIDREGIONPATHINFO2
+        int r = proc_pidinfo(pid, PROC_PIDREGIONPATHINFO2, addr, &rp, sizeof(rp));  // file-backed only
+#else
+        int r = proc_pidinfo(pid, PROC_PIDREGIONPATHINFO, addr, &rp, sizeof(rp));
+#endif
+        if (r != sizeof(rp)) break;
+        if (rp.prp_vip.vip_path[0] && strstr(rp.prp_vip.vip_path, s->key)) return 1;
+        uint64_t next = rp.prp_prinfo.pri_address + rp.prp_prinfo.pri_size;
+        if (next <= addr) break;
+        addr = next;
+    }
+    return 0;
+}
+
+static void end_leftover(pid_t pid)
+{
+    char name[2 * MAXCOMLEN + 1] = "?";
+    struct proc_bsdinfo bi;
+    int ppid = bsdinfo(pid, &bi) ? (int)bi.pbi_ppid : -1;
+    proc_name(pid, name, sizeof(name));
+    if (kill(pid, SIGKILL) == 0)
+        logf_("ended leftover Wine process %d (%s, parent %d)", pid, name, ppid);
+    else if (errno != ESRCH)
+        logf_("could not end leftover Wine process %d (%s): %s", pid, name, strerror(errno));
+}
+
+// 0.1.1's rule, without a prefix: processes of the engine while no wineserver of it runs
+static void reap_engine(int quiet)
+{
+    pid_t server, again, pids[256];
     int n = engine_procs(&server, pids, 256);
     if (server) {
         if (!quiet) logf_("Wine session running (wineserver %d): leaving the engine's processes alone", server);
@@ -264,183 +240,121 @@ static void reap_leftovers(int quiet)
         return;
     }
     // once more right before: a new session (a game start) may have begun in between
-    pid_t again;
     engine_procs(&again, NULL, 0);
-    if (again) {
-        if (!quiet) logf_("Wine session started (wineserver %d): leaving the engine's processes alone", again);
-        return;
-    }
-    for (int i = 0; i < n; i++) {
-        char name[2 * MAXCOMLEN + 1] = "?";
-        struct proc_bsdinfo bi;
-        int ppid = bsdinfo(pids[i], &bi) ? (int)bi.pbi_ppid : -1;
-        proc_name(pids[i], name, sizeof(name));
-        if (kill(pids[i], SIGKILL) == 0)
-            logf_("ended leftover Wine process %d (%s, parent %d)", pids[i], name, ppid);
-        else if (errno != ESRCH)
-            logf_("could not end leftover Wine process %d (%s): %s", pids[i], name, strerror(errno));
-    }
+    if (again) return;
+    for (int i = 0; i < n; i++) end_leftover(pids[i]);
 }
 
-// After the launcher has quit. Its last Wine calls go through Broadsword's mac_wine, a
-// separate process that can outlive it, and each of them brings the engine's wineserver up
-// again (the wrapper starts it with -p 10, so it stays 10 s and keeps Wine's system processes
-// alive): one -k is not enough. Every half second: while a mac_wine has a Wine call in flight,
-// wait (it is never cut short, and mac_wine itself is never touched); else, if a wineserver
-// of the engine runs, end the session (-k) again. Done once neither has been seen for
-// QUIET_MS, or at LINGER_MAX_MS (then one last -k). Then the leftovers go, if no server is left.
-static void end_session_after_launcher(void)
+// Leftovers of the prefix's session: its Wine processes while no wineserver of it runs.
+// Without a server there is no session they could belong to (every Wine start brings up its
+// server first), so they only tick on: e.g. system processes that wait (msync) forever after
+// their server was killed. All of them end (SIGKILL), each logged; with a server running, none.
+// QUIET: no log line when there is nothing to do.
+static void reap(int quiet)
 {
-    long long start = now_ms(), quiet_from = start, t;
-    int rounds = 0, waited_for_mac_wine = 0, logged_idle = 0, idle;
-    pid_t server = 0;
-    for (;;) {
-        int mac_wine = count_mac_wine(&idle);
-        engine_procs(&server, NULL, 0);
-        t = now_ms();
-        if (idle && !logged_idle) {
-            logf_("mac_wine running without a Wine call (%d): not waiting for it", idle);
-            logged_idle = 1;
-        }
-        if (mac_wine) {
-            if (!waited_for_mac_wine)
-                logf_("mac_wine running a Wine call (%d): waiting for it before ending the session", mac_wine);
-            waited_for_mac_wine = 1;
-            quiet_from = t;
-        } else if (server) {
-            if (rounds) logf_("wineserver %d came back %.1f s after the launcher quit", server, (t - start) / 1000.0);
-            stop_wine_session();
-            rounds++;
-            // (it can take a moment to go)
-            if ((server = wait_no_server(5)))
-                logf_("wineserver %d still running 5 s after -k", server);
-            quiet_from = now_ms();
-        } else if (t - quiet_from >= QUIET_MS) {
-            logf_("no wineserver for %.1f s (%.1f s after the launcher quit, %d time(s) -k)",
-                  QUIET_MS / 1000.0, (t - start) / 1000.0, rounds);
-            break;
-        }
-        if (t - start >= LINGER_MAX_MS) {
-            logf_("still %s %d s after the launcher quit: ending the session once more",
-                  mac_wine ? "a mac_wine Wine call running" : "a wineserver coming back", LINGER_MAX_MS / 1000);
-            stop_wine_session();
-            server = wait_no_server(5);
-            break;
-        }
-        usleep(500000);
+    struct session s;
+    const char *prefix = getenv("WINEPREFIX");
+    if (!prefix || !*prefix) { reap_engine(quiet); return; }
+    if (!session_of(prefix, &s)) {
+        if (!quiet) logf_("no prefix at %s: nothing to end", prefix);
+        return;
     }
+    pid_t server = session_server(&s), dummy, pids[256], mine[256];
     if (server) {
-        logf_("wineserver %d still running: leaving the engine's processes alone", server);
+        if (!quiet) logf_("Wine session running (wineserver %d): leaving its processes alone", server);
         return;
     }
-    sleep(1);  // let the session's clients exit on their own first
-    reap_leftovers(0);
+    int n = engine_procs(&dummy, pids, 256), m = 0;
+    for (int i = 0; i < n; i++)
+        if (in_session(pids[i], &s)) mine[m++] = pids[i];
+    if (m == 0) {
+        if (!quiet) logf_("no leftover Wine processes of the prefix");
+        return;
+    }
+    // once more right before: a new session (a game start) may have begun in between
+    if (session_server(&s)) return;
+    for (int i = 0; i < m; i++) end_leftover(mine[i]);
 }
 
-static void resume(pid_t launcher, const char *why)
+// Runs PATH (ARGV) in its own session with stdin/stdout on /dev/null, stderr on ERRPATH
+// (appended; NULL: /dev/null) and nothing else open; TIMEOUT s at most (SIGKILL, survives exec).
+// Returns its wait status, or -1.
+static int run_detached(const char *path, char *const argv[], const char *errpath, int timeout)
 {
-    if (kill(launcher, SIGCONT) == 0)
-        logf_("launcher %d resumed (%s)", launcher, why);
-    else
-        logf_("launcher %d: SIGCONT failed: %s (%s)", launcher, strerror(errno), why);
+    pid_t pid = fork();
+    if (pid == 0) {
+        setsid();
+        close_inherited_fds(-1);
+        int null = open("/dev/null", O_RDWR);
+        int err = errpath ? open(errpath, O_WRONLY | O_CREAT | O_APPEND, 0644) : -1;
+        dup2(null, 0);
+        dup2(null, 1);
+        dup2(err >= 0 ? err : null, 2);
+        if (null > 2) close(null);
+        if (err > 2) close(err);
+        // (a stuck call must not keep the Wine start waiting: SIGALRM ends it)
+        if (timeout > 0) alarm(timeout);
+        execv(path, argv);
+        _exit(127);
+    }
+    if (pid < 0) return -1;
+    int st = 0;
+    while (waitpid(pid, &st, 0) < 0)
+        if (errno != EINTR) return -1;
+    return st;
 }
 
-// The detached child. READY gets one byte once the launcher is stopped, or closes
-// (we exit) if there is nothing to hold; either way the wrapper goes on.
-static int hold(pid_t game, int ready)
+static void on_alarm(int sig) { (void)sig; }
+
+static int start_session(const char *wslog)
 {
-    pid_t launcher = find_launcher(game);
-    if (!launcher) {
-        logf_("game %d: launcher not found among its ancestors, not holding", game);
-        return 0;
-    }
-
-    static const int sigs[] = { SIGTERM, SIGINT, SIGHUP, SIGQUIT };
-    struct kevent ch[2 + sizeof(sigs) / sizeof(*sigs)];
-    int nch = 0;
-    EV_SET(&ch[nch++], game, EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, NULL);
-    EV_SET(&ch[nch++], launcher, EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, NULL);
-    // signals arrive as events (kqueue sees them even when ignored): no handler races
-    for (size_t i = 0; i < sizeof(sigs) / sizeof(*sigs); i++) {
-        signal(sigs[i], SIG_IGN);
-        EV_SET(&ch[nch++], sigs[i], EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-    }
-    int kq = kqueue();
-    if (kq < 0) {
-        logf_("kqueue: %s, not holding", strerror(errno));
+    const char *engine = getenv("SWTOR_ENGINE");
+    const char *prefix = getenv("WINEPREFIX");
+    struct session s;
+    if (!engine || !*engine || !session_of(prefix, &s)) {
+        logf_("start-session: no engine or prefix (SWTOR_ENGINE, WINEPREFIX)");
         return 1;
     }
-    // registered one by one, so an exited pid (ESRCH) is attributed correctly
-    for (int i = 0; i < nch; i++) {
-        if (kevent(kq, &ch[i], 1, NULL, 0, NULL) == 0) continue;
-        if (ch[i].filter == EVFILT_PROC)
-            logf_("%s %d already gone (%s), not holding",
-                  ch[i].ident == (uintptr_t)game ? "game" : "launcher",
-                  (int)ch[i].ident, strerror(errno));
-        else
-            logf_("kevent signal %d: %s, not holding", (int)ch[i].ident, strerror(errno));
-        return 1;
+    // One start at a time per prefix: mac_wine starts two Wine calls at once, and only one may
+    // bring the session up (the other would be its first Wine process, with mac_wine's pipe).
+    // Next to the server directory, not in the prefix; at most 150 s.
+    char lockdir[PATH_MAX], lock[PATH_MAX + 64];
+    snprintf(lockdir, sizeof(lockdir), "/tmp/.wine-%u", getuid());
+    mkdir(lockdir, 0700);
+    snprintf(lock, sizeof(lock), "%s/swtor-on-mac-%llx-%llx.lock", lockdir,
+             (unsigned long long)s.dev, (unsigned long long)s.ino);
+    int lfd = open(lock, O_RDWR | O_CREAT, 0600);
+    if (lfd >= 0) {
+        struct sigaction sa = { .sa_handler = on_alarm };  // (no SA_RESTART: flock returns EINTR)
+        sigaction(SIGALRM, &sa, NULL);
+        alarm(150);
+        if (flock(lfd, LOCK_EX) != 0) logf_("start-session: lock: %s, going on without it", strerror(errno));
+        alarm(0);
     }
 
-    // Hide it first (the launcher only minimizes itself a while after starting the game,
-    // too late once it is stopped, and its frozen window would cover the game)
-    logf_("launcher %d %s", launcher, hide_app(launcher, 1.0) ? "hidden" : "not hidden (timed out)");
-
-    if (kill(launcher, SIGSTOP) < 0) {
-        logf_("launcher %d: SIGSTOP failed: %s, not holding", launcher, strerror(errno));
-        return 1;
+    reap(1);
+    char server[PATH_MAX], wine[PATH_MAX];
+    snprintf(server, sizeof(server), "%s/bin/wineserver", engine);
+    snprintf(wine, sizeof(wine), "%s/bin/wine", engine);
+    char *sargv[] = { "wineserver", "-p10", NULL };
+    int st = run_detached(server, sargv, wslog, 30);
+    int code = st >= 0 && WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+    int ret = 0;
+    if (code == 0) {
+        // a new server: its system processes come up now, from a call that holds nothing
+        long long t0 = now_ms();
+        char *bargv[] = { "wine", "reg", "query", "HKCU\\Software\\Wine", "/v", "SWTORonMacSession", NULL };
+        int bst = run_detached(wine, bargv, NULL, 120);
+        logf_("Wine session started (wineserver %d, -p10); system processes up in %.1f s (%s)",
+              session_server(&s), (now_ms() - t0) / 1000.0,
+              bst >= 0 && WIFSIGNALED(bst) ? "bootstrap timed out" : "bootstrap done");
+    } else if (code != 2) {
+        logf_("start-session: wineserver -p10 failed (%s %d)", code < 0 ? "signal" : "exit",
+              code < 0 && st >= 0 && WIFSIGNALED(st) ? WTERMSIG(st) : code);
+        ret = 1;
     }
-    logf_("launcher %d stopped, waiting for game %d to exit", launcher, game);
-    char one = 1;
-    ssize_t w = write(ready, &one, 1);
-    (void)w;
-    close(ready);
-
-    for (;;) {
-        struct kevent ev[4];
-        int n = kevent(kq, NULL, 0, ev, 4, NULL);
-        if (n < 0 && errno == EINTR) continue;
-        if (n < 0) {
-            int e = errno;
-            resume(launcher, strerror(e));
-            return 1;
-        }
-        // a launcher exit wins over anything else in the batch: its pid may be reused
-        for (int i = 0; i < n; i++)
-            if (ev[i].filter == EVFILT_PROC && ev[i].ident == (uintptr_t)launcher) {
-                logf_("launcher %d exited while held, nothing to resume", launcher);
-                return 0;
-            }
-        for (int i = 0; i < n; i++) {
-            if (ev[i].filter == EVFILT_PROC) {
-                stop_wine_session();
-                resume(launcher, "game exited");
-                // wait (no polling) for the launcher to finish quitting, at most 2 min
-                struct kevent t;
-                EV_SET(&t, 1, EVFILT_TIMER, EV_ADD | EV_ONESHOT, NOTE_SECONDS, 120, NULL);
-                kevent(kq, &t, 1, NULL, 0, NULL);
-                struct kevent e;
-                while (kevent(kq, NULL, 0, &e, 1, NULL) < 0 && errno == EINTR)
-                    ;
-                if (e.filter == EVFILT_PROC && e.ident == (uintptr_t)launcher) {
-                    // The launcher's last Wine calls (on this engine too) may have left a
-                    // session running, and more may come: end it until it stays gone.
-                    logf_("launcher %d quit", launcher);
-                    end_session_after_launcher();
-                } else if (e.filter == EVFILT_TIMER) {
-                    logf_("launcher %d still open 2 min after the game: leftover Wine processes "
-                          "are ended at the next Wine start or by SWTOR on Mac", launcher);
-                }
-                return 0;
-            }
-            if (ev[i].filter == EVFILT_SIGNAL) {
-                char why[32];
-                snprintf(why, sizeof(why), "got signal %d", (int)ev[i].ident);
-                resume(launcher, why);
-                return 0;
-            }
-        }
-    }
+    if (lfd >= 0) close(lfd);  // (releases the lock)
+    return ret;
 }
 
 // --paths: every process's real executable, "<pid> <path>" lines
@@ -460,47 +374,20 @@ static void print_paths(void)
 
 int main(int argc, char **argv)
 {
-    // --reap: end leftover processes of the engine (none if its wineserver runs), at once
+    if (argc == 3 && !strcmp(argv[1], "--start-session")) return start_session(argv[2]);
+    // --reap: end leftover processes of the prefix's session (none if its wineserver runs), at once
     if (argc == 2 && !strcmp(argv[1], "--reap")) {
-        reap_leftovers(1);
+        reap(1);
         return 0;
     }
     if (argc == 2 && !strcmp(argv[1], "--paths")) {
         print_paths();
         return 0;
     }
-    pid_t game = argc == 2 ? (pid_t)atoi(argv[1]) : 0;
-    if (game <= 1) {
-        fprintf(stderr, "usage: hold-launcher GAME_PID | hold-launcher --reap | hold-launcher --paths\n");
-        return 2;
-    }
-    int fds[2];
-    if (pipe(fds) < 0) {
-        logf_("pipe: %s, not holding", strerror(errno));
+    if (argc == 2 && atoi(argv[1]) > 1) {
+        logf_("game %s: not holding the launcher (no longer needed)", argv[1]);
         return 0;
     }
-    pid_t child = fork();
-    if (child < 0) {
-        logf_("fork: %s, not holding", strerror(errno));
-        return 0;
-    }
-    if (child > 0) {
-        // return once the child has stopped the launcher (or given up: pipe closed)
-        close(fds[1]);
-        char c;
-        while (read(fds[0], &c, 1) < 0 && errno == EINTR)
-            ;
-        return 0;
-    }
-
-    close(fds[0]);
-    setsid();
-    close_inherited_fds(fds[1]);
-    int devnull = open("/dev/null", O_RDWR);
-    if (devnull >= 0) {
-        dup2(devnull, 0);
-        dup2(devnull, 1);
-        if (devnull > 2) close(devnull);
-    }
-    _exit(hold(game, fds[1]));
+    fprintf(stderr, "usage: hold-launcher --start-session WINESERVER_LOG | --reap | --paths\n");
+    return 2;
 }

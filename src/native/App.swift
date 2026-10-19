@@ -95,9 +95,10 @@ final class Installer {
   var rosetta: Bool { status["rosetta"] == "yes" }
   var installed: Bool { status["installed"] == "yes" }
   var running: Bool { status["running"] == "yes" }
-  // What runs (som.sh status "busy"): launcher (the SWTOR launcher), game, wine (Broadsword's
-  // Wine), session (a Wine session of SWTOR on Mac's engine), leftovers (only leftover
-  // processes of its engine, no wineserver: install and uninstall end them first), none
+  // What runs (som.sh status "busy"): launcher (the SWTOR launcher), game, wine (a Wine
+  // session of Broadsword's Wine), session (a Wine session of SWTOR on Mac's engine), leftovers
+  // (only leftover processes of either, no wineserver: install and uninstall end them first),
+  // none
   var busy: String { status["busy"] ?? (running ? "launcher" : "none") }
   var busyDetail: String { status["busy_detail"] ?? "" }
   var leftovers: Bool { busy == "leftovers" }
@@ -148,7 +149,7 @@ final class Installer {
     case "game": return "The game is running\(names). Quit it first."
     case "wine": return "Broadsword's Wine is still running\(names). Quit the SWTOR launcher and the game first."
     case "session":
-      return "SWTOR on Mac's Wine is still running\(names). It ends by itself a few seconds after the "
+      return "SWTOR on Mac's Wine is still running\(names). It ends by itself about 10 seconds after the "
         + "launcher and the game have quit; try again then."
     default: return nil
     }
@@ -234,8 +235,8 @@ final class Installer {
   private func swtorQuit() {
     refresh()
     onSWTORQuit?()
-    // After the launcher quits, its Wine session ends and hold-launcher clears what is left of
-    // it within about 12 s: one more look then.
+    // After the launcher and the game quit, the Wine session ends by itself about 10 s after
+    // the last Wine process (Broadsword's mac_wine may make one more call): one more look then.
     recheck?.cancel()
     let work = DispatchWorkItem { [weak self] in
       MainActor.assumeIsolated {

@@ -223,9 +223,14 @@ wrapper_state() {
 }
 
 # The processes that matter for install/uninstall, one per line, "<kind> <pid> <program>":
-#   launcher  the official launcher (anything in its app)
+#   helper    Broadsword's mac_wine (registry token, graphics settings): it can outlive the
+#             launcher, waiting for its last Wine calls; Broadsword's, never ended, keeps
+#             nothing from going ahead
+#   launcher  the official launcher (anything else in its app)
 #   game      the game, swtor.exe (any engine)
-#   wine      Broadsword's Wine
+#   wine      a wineserver of Broadsword's Wine: a Wine session of it is running
+#   bswine    any other process of Broadsword's Wine (without its wineserver: a leftover,
+#             e.g. of a game start while the hook was not active)
 #   session   a wineserver of SWTOR on Mac's engine: a Wine session of it is running
 #   engine    any other process of SWTOR on Mac's engine (its folder, or CrossOver's
 #             winetemp-<loader inode>-... hard links of its loader)
@@ -241,27 +246,31 @@ proc_list() {
     { pid = $2; prog = $0; sub(/^C [0-9]+ /, "", prog)
       exe = (pid in real) ? real[pid] : prog
       sub(/\/lib\/wine\/\.\.\/\.\.\/bin\//, "/bin/", exe) }   # a wineserver started by wine
+    exe == a "Contents/MacOS/mac_wine" { print "helper", pid, prog; next }
     index(prog, a) || index(exe, a) || prog ~ /\/Star Wars - The Old Republic Launcher$/ { print "launcher", pid, prog; next }
     tolower(prog) ~ /[\/\\]swtor\.exe$/ || tolower(exe) ~ /\/swtor\.exe$/ { print "game", pid, prog; next }
-    index(exe, w) { print "wine", pid, prog; next }
+    index(exe, w) && exe ~ /\/wineserver$/ { print "wine", pid, prog; next }
+    index(exe, w) { print "bswine", pid, prog; next }
     exe == s { print "session", pid, prog; next }
     index(exe, e) == 1 || (t != "" && index(exe, t)) { print "engine", pid, prog }' || true
 }
 
 # busy_of <proc_list output>: what keeps install/uninstall from going ahead, the first of
-# launcher, game, wine, session; else leftovers (only processes of SWTOR on Mac's engine,
-# without its wineserver: what is left of a session whose server is gone), else none
+# launcher, game, wine, session; else leftovers (only processes of SWTOR on Mac's engine
+# without its wineserver, or of Broadsword's Wine without its wineserver: what is left of a
+# session whose server is gone), else none. (Broadsword's mac_wine counts for none of them.)
 busy_of() {
   local k
   for k in launcher game wine session; do
     if printf '%s\n' "$1" | grep -q "^$k "; then echo "$k"; return; fi
   done
-  if printf '%s\n' "$1" | grep -q '^engine '; then echo leftovers; else echo none; fi
+  if printf '%s\n' "$1" | grep -q -e '^engine ' -e '^bswine '; then echo leftovers; else echo none; fi
 }
 
-# proc_names <proc_list output> <kind>: the programs' names, "a, b"
+# proc_names <proc_list output> <kind>...: the programs' names, "a, b"
 proc_names() {
-  printf '%s\n' "$1" | awk -v k="$2" '$1 == k { $1 = ""; $2 = ""; sub(/^ +/, ""); n = split($0, p, /[\/\\]/); print p[n] }' |
+  local l=$1; shift
+  printf '%s\n' "$l" | awk -v k=" $* " 'index(k, " " $1 " ") { $1 = ""; $2 = ""; sub(/^ +/, ""); n = split($0, p, /[\/\\]/); print p[n] }' |
     sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g'
 }
 
@@ -270,8 +279,8 @@ busy_message() {
   case "$1" in
     launcher) echo "Quit the SWTOR launcher first. Still running: $(proc_names "$2" launcher)" ;;
     game) echo "Quit the game first. Still running: $(proc_names "$2" game)" ;;
-    wine) echo "Quit the SWTOR launcher and the game first: Broadsword's Wine is still running ($(proc_names "$2" wine))." ;;
-    session) echo "SWTOR on Mac's Wine is still running (a Wine session: $(proc_names "$2" session)$(n=$(proc_names "$2" engine); [ -z "$n" ] || echo ", $n")). It ends by itself a few seconds after the launcher and the game have quit; try again then." ;;
+    wine) echo "Quit the SWTOR launcher and the game first: Broadsword's Wine is still running ($(proc_names "$2" wine bswine))." ;;
+    session) echo "SWTOR on Mac's Wine is still running (a Wine session: $(proc_names "$2" session)$(n=$(proc_names "$2" engine); [ -z "$n" ] || echo ", $n")). It ends by itself about 10 seconds after the launcher and the game have quit; try again then." ;;
   esac
 }
 
@@ -279,20 +288,21 @@ busy_message() {
 # are ended first, see end_leftovers)
 running_now() { case "$(busy_of "$(proc_list)")" in launcher|game|wine|session) return 0 ;; esac; return 1; }
 
-# Ends leftover Wine processes of SWTOR on Mac's engine: only when nothing else of SWTOR runs
-# (no launcher, game, Broadsword's Wine, or wineserver of the engine), so they cannot belong
-# to a Wine session. Only processes running from the engine's folder or from hard links of
-# its loader; each is logged.
+# Ends leftover Wine processes of SWTOR on Mac's engine and of Broadsword's Wine: only when
+# nothing else of SWTOR runs (no launcher, game, or wineserver of either), so they cannot
+# belong to a Wine session. Only processes running from the engine's folder or from hard links
+# of its loader, or from Broadsword's Wine folder (Broadsword's mac_wine is left alone); each
+# is logged.
 end_leftovers() {
   local l pids names
   l=$(proc_list)
   [ "$(busy_of "$l")" = leftovers ] || return 0
-  pids=$(printf '%s\n' "$l" | awk '$1 == "engine" { print $2 }' | tr '\n' ' ')
-  names=$(proc_names "$l" engine)
+  pids=$(printf '%s\n' "$l" | awk '$1 == "engine" || $1 == "bswine" { print $2 }' | tr '\n' ' ')
+  names=$(proc_names "$l" engine bswine)
   if [ -n "$DRY" ]; then echo "[dry-run] end leftover Wine processes: $names (${pids% })"; return 0; fi
   # shellcheck disable=SC2086
   kill -9 $pids 2>/dev/null || true
-  say "Ended leftover Wine processes of SWTOR on Mac's engine (no Wine session was running): $names (pids ${pids% })"
+  say "Ended leftover Wine processes (no Wine session was running): $names (pids ${pids% })"
 }
 
 # CrossOver's ntdll runs Wine processes of an engine from hard links in
@@ -346,7 +356,7 @@ status() {
   case "$b" in
     launcher|game|wine) echo "busy_detail=$(proc_names "$l" "$b")"; echo "running=yes" ;;
     session) echo "busy_detail=$(proc_names "$l" session)"; echo "running=yes" ;;
-    leftovers) echo "busy_detail=$(proc_names "$l" engine)"; echo "running=no" ;;
+    leftovers) echo "busy_detail=$(proc_names "$l" engine bswine)"; echo "running=no" ;;
     *) echo "busy_detail="; echo "running=no" ;;
   esac
   echo "app_dir=$SOM"
@@ -1257,7 +1267,7 @@ cmd_end_leftovers() {
     none) echo "@done No leftover Wine processes are running." ;;
     leftovers)
       end_leftovers
-      echo "@done Ended the leftover Wine processes ($(proc_names "$l" engine))." ;;
+      echo "@done Ended the leftover Wine processes ($(proc_names "$l" engine bswine))." ;;
     *) die "$(busy_message "$b" "$l")" ;;
   esac
 }

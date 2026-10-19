@@ -77,11 +77,13 @@ extension Installer {
     return path.hasPrefix(folder + "/") || std(path).hasPrefix(std(folder) + "/")
   }
 
-  // The launcher and the game, if they run (in a sandbox: only the sandbox's).
+  // The launcher and the game, if they run (in a sandbox: only the sandbox's). An app whose
+  // process is gone does not count: macOS keeps a quit launcher listed (and in the Dock) while
+  // processes it started still run (Broadsword's mac_wine, the game's Wine session).
   nonisolated static func runningSWTOR(_ status: [String: String]) -> (launcher: NSRunningApplication?, game: NSRunningApplication?) {
     let root = sandboxRoot(status)
     let apps = NSWorkspace.shared.runningApplications.filter { app in
-      guard !app.isTerminated, isSWTOR(app) else { return false }
+      guard !app.isTerminated, isSWTOR(app), processAlive(app.processIdentifier) else { return false }
       guard let root else { return true }
       return [app.bundleURL?.path, app.executableURL?.path].contains { $0.map { inside($0, root) } == true }
     }
@@ -89,6 +91,10 @@ extension Installer {
       app.bundleIdentifier == gameBundleID || app.executableURL?.path.hasSuffix("/swtor.exe") == true
     }
     return (apps.first { !isGame($0) }, apps.first(where: isGame))
+  }
+
+  nonisolated static func processAlive(_ pid: pid_t) -> Bool {
+    pid > 0 && (kill(pid, 0) == 0 || errno == EPERM)
   }
 
   // The button. then: an error to show, if any.

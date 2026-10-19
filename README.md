@@ -315,6 +315,13 @@ game start, at some cost in performance, so turn it off again afterwards.
   what your layout types (Czech: *+ ě š* … on the number row). With it, keys are named by
   their US positions, so on QWERTZ layouts Z and Y swap names in the game. It can only be
   changed while the launcher and the game are closed.
+- **The launcher in the Dock while you play.** About 30 seconds after you press Play the
+  official launcher quits (and plays the system alert sound once as it does), and macOS keeps
+  showing it in the Dock as *running in the background* until the processes it started have
+  ended: the game, Broadsword's `mac_wine` helper and the game's Wine. That is how the
+  official setup behaves too; the icon goes by itself shortly after you quit the game. Don't
+  **Quit** it from the Dock while the game runs: macOS then ends those processes, and the game
+  with its Wine.
 - **Official launcher updates** replace SWTOR on Mac's hook. The launchd job puts it back by
   itself, but if the update looks unfinished it only notifies, and you click **Reinstall**.
 - **Blurry or missing textures in busy places** on 8 or 16 GB Macs: the game gets 2 or 3 GB of
@@ -439,20 +446,28 @@ The official launcher starts every Wine process through `bin/wine64`, which load
 `bin/wine64-preloader`. The wrapper (`src/wine-wrapper.sh`) sits in its place, reads
 `~/Library/Application Support/SWTOR on Mac/env` and runs the command on SWTOR on Mac's engine
 and prefix instead (falling back to Broadsword's real preloader if those are missing). It first
-ends leftover Wine processes of the engine, if any (`hold-launcher --reap`, see below). For the
-game (`swtor.exe`) it also:
+brings up the prefix's Wine session through `hold-launcher --start-session` (a no-op if it
+runs), one start at a time:
 
-- starts the engine's wineserver in its own session (`setsid-exec`), and sends the game's output
-  to `wine.log` instead of the launcher's pipe;
-- runs `hold-launcher`: the launcher quits ~30 s after starting the game, and its exit takes the
-  engine's wineserver with it, so the launcher is hidden and frozen (SIGSTOP) until the game
-  exits, then resumed to finish quitting. It waits in kqueue: nothing polls while the game
-  runs. Once the launcher has quit (within 2 minutes of the game), it ends the engine's Wine
-  session (`wineserver -k`). Broadsword's `mac_wine` (its helper for the registry token) can
-  outlive the launcher, and each of its Wine calls brings the engine's wineserver back; so for
-  at most 30 s, every half second, it waits while a `mac_wine` has a Wine call running (a live
-  child; never touching it or its call, and not waiting for an idle one), ends the session
-  again whenever a wineserver is back, and stops once none has been seen for 3 s. Then it ends whatever is left of the engine, each logged in `hold.log`;
+- it ends the prefix's leftover Wine processes, if any: Wine processes of the engine that
+  belong to this prefix's session (they map files from its server directory
+  `/tmp/.wine-<uid>/server-<dev>-<inode>`, or work in its `drive_c`) while no wineserver of
+  it runs; other prefixes' are never touched;
+- it starts the engine's wineserver with `-p10`: it ends by itself 10 s after the last Wine
+  process (`-p 10`, with a space, would keep it forever: Wine's option takes its value only
+  attached), in its own session, with nothing of the caller open (the launcher's and
+  `mac_wine`'s pipes and sockets);
+- if that server is new, a bootstrap Wine call (`reg query`, output to `/dev/null`) brings up
+  Wine's system processes (`services.exe`, `winedevice.exe`, ...). They inherit the stdout and
+  stderr of the session's first Wine process: were that a call of Broadsword's `mac_wine`,
+  which reads its calls' output to the end, `mac_wine` would wait for the whole session.
+
+Nothing holds the launcher: it quits ~30 s after starting the game, as with Broadsword's own
+Wine, and macOS leaves the game (a foreground app) and the Wine session running. For the game
+(`swtor.exe`) the wrapper also:
+
+- sends the game's output to `wine.log` instead of the launcher's pipe, which closes when the
+  launcher quits;
 - links the name CrossOver's ntdll starts the game from to `gamemode/SWTOR.app`, a bundle
   with `LSSupportsGameMode` around an identical clone of the engine's loader
   (`lib/wine/x86_64-unix/wine`; the engine has no `wine-preloader`) and a link to its
@@ -504,10 +519,12 @@ Broadsword Wine folder and a stand-in for the official app (its `Info.plist`, ad
 with the test's stand-ins for the launcher built in, so Gatekeeper never sees a changed copy
 of Broadsword's signed app) and runs install, the settings, reinstall, the wrapper's update check (with a
 stub engine and a local feed), a simulated launcher update and the launchd job's repair (run as
-launchd would), leftover Wine processes (dummy programs under the sandbox engine: what
-`status` reports, that only they end, from `end-leftovers`, install, uninstall, the wrapper and
-`hold-launcher` after a fake launcher and game, also with a fake `mac_wine` that outlives the
-launcher and a wineserver that comes back, and never while a wineserver runs), a failed
+launchd would), leftover Wine processes (dummy programs under the sandbox engine and in
+Broadsword's Wine folder: what `status` reports, that only they end, from `end-leftovers`,
+install, uninstall and the wrapper, never while a wineserver of theirs runs, never another
+prefix's, never Broadsword's `mac_wine`), the Wine session (a `mac_wine`-like call that starts
+it returns at once although its system process lives on, `-p10`, nothing of the caller
+inherited, one start for two calls at once), a failed
 install, Collect Logs, what Play SWTOR would open, *Game keys by keyboard position* and *Raw
 mouse-look* (the Mac driver's three files and the registry values, and what the game sees: a
 probe program run as `swtor.exe` with Czech, German and US layouts, picked through the

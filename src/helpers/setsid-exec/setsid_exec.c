@@ -1,12 +1,15 @@
 // setsid-exec [--daemon] PROGRAM [ARGS...]
 //
-// Runs PROGRAM in a new session, out of reach of the SWTOR launcher, which shuts
-// down right after starting the game and takes things with it.
+// Runs PROGRAM in a new session, out of reach of signals to the SWTOR launcher's process
+// group. (The wrapper's fallback for starting the engine's wineserver when hold-launcher
+// --start-session can't.)
 // A plain binary instead of `perl -e setsid`: macOS strips DYLD_* variables when it
 // starts SIP-protected system binaries like /usr/bin/perl, and Wine needs them.
 //
-// default   setsid() + exec. If setsid() fails (we are a process-group leader),
-//           fork: the child gets the session and runs PROGRAM, we wait for it.
+// default   setsid() + exec, with every fd but stdio closed first (a wineserver outlives its
+//           caller and must not keep the launcher's or mac_wine's pipes and sockets open).
+//           If setsid() fails (we are a process-group leader), fork: the child gets the
+//           session and runs PROGRAM, we wait for it.
 // --daemon  fully detach, like a daemon: fork, new session, fork again, so PROGRAM
 //           ends up an orphan outside the launcher's process tree and group, with
 //           stdin/stdout on /dev/null and stderr on $SWTOR_GAME_STDERR (or /dev/null).
@@ -110,6 +113,7 @@ int main(int argc, char **argv)
         _exit(run(prog));
     }
 
+    for (int fd = 3; fd < 1024; fd++) close(fd);
     if (setsid() < 0) {
         logf_("setsid failed (group leader): forking");
         pid_t pid = fork();

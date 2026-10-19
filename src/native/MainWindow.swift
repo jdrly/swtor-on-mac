@@ -591,7 +591,7 @@ struct LeftoversNote: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Label("Leftover Wine processes of SWTOR on Mac's engine are still running"
+      Label("Leftover Wine processes are still running"
             + (installer.busyDetail.isEmpty ? "" : " (\(installer.busyDetail))")
             + ", from a session that has ended. The SWTOR launcher and the game are not running. "
             + "They are not needed; Install and Uninstall end them first.",
