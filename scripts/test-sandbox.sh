@@ -579,6 +579,15 @@ som set debug on >/dev/null && check "set debug: flags file edits kept" grep -qx
 som set memory high >/dev/null && check "set memory high" grep -qx 'D9MT_MEMORY_PROFILE=high' "$SOM/env"
 som set gamemode off >/dev/null && check "set gamemode off" grep -q '^#SWTOR_GAMEMODE_APP=' "$SOM/env"
 som set updates off >/dev/null && check "set updates off" grep -qx 'SWTOR_UPDATE_CHECK=0' "$SOM/env"
+check "settings: Frame Rate Limit off, only on battery off by default" test "$(som settings | sed -n 's/^fpslimit=//p')/$(som settings | sed -n 's/^fpsbattery=//p')" = off/off
+check "settings: no limit in the env by default" eval 'grep -qx SWTOR_FPS_LIMIT=0 "$SOM/env" && grep -qx SWTOR_FPS_LIMIT_BATTERY=0 "$SOM/env"'
+som set fpslimit 30 >/dev/null && check "set fpslimit 30" eval 'grep -qx SWTOR_FPS_LIMIT=30 "$SOM/env" && grep -qx fpslimit=30 "$SOM/settings.conf"'
+som set fpsbattery on >/dev/null && check "set fpsbattery on" eval 'grep -qx SWTOR_FPS_LIMIT_BATTERY=1 "$SOM/env" && grep -qx fpsbattery=on "$SOM/settings.conf"'
+for v in 40 45 60; do som set fpslimit $v >/dev/null; done
+check "set fpslimit 40, 45, 60" grep -qx SWTOR_FPS_LIMIT=60 "$SOM/env"
+check "set fpslimit: 25 refused" eval '! som set fpslimit 25 >/dev/null 2>&1 && grep -qx SWTOR_FPS_LIMIT=60 "$SOM/env"'
+check "set fpslimit: empty refused" eval '! som set fpslimit "" >/dev/null 2>&1'
+som set fpslimit 45 >/dev/null
 check "set: bad value refused" eval '! som set memory huge >/dev/null 2>&1'
 check "set: bad key refused" eval '! som set foo on >/dev/null 2>&1'
 cp "$SANDBOX/fake" "$SOM/engine/bin/test-leftover"; l5=$(orphan "$SOM/engine/bin/test-leftover"); sleep 0.3
@@ -695,6 +704,9 @@ if [ "$CHANNEL" = dev ]; then
   check "ab: an unknown switch refused, the switches kept" eval '! "$AB" turbo >/dev/null 2>&1 && [ "$(envv D9MT_TEX_PFV)" = 1 ]'
   check "ab: a bad cold name refused" eval '! "$AB" "cold=../x" >/dev/null 2>&1 && [ "$(envv SWTOR_D9MT_AB)" = pfv ]'
   check "ab: status names them" eval '"$AB" | grep "for the next game start: pfv$" >/dev/null'
+  "$AB" cap=30 cap-noalign dxvkcap=40 >/dev/null
+  check "ab: cap=30 cap-noalign dxvkcap=40" eval '[ "$(envv D9MT_FPS_CAP)/$(envv D9MT_FPS_CAP_ALIGN)/$(envv DXVK_CONFIG)" = "30/0/d3d9.maxFrameRate=40" ]'
+  check "ab: cap=10 and cap=x refused, the switches kept" eval '! "$AB" cap=10 >/dev/null 2>&1 && ! "$AB" cap=x >/dev/null 2>&1 && [ "$(envv D9MT_FPS_CAP)" = 30 ]'
   mkdir -p "$H/Library/Caches/SWTOR on Mac/d9mt-ab/t1"
   check "ab: a cold name used before: warned" eval '"$AB" cold=t1 | grep "used before" >/dev/null'
   "$AB" reset --clean >/dev/null
@@ -717,6 +729,7 @@ check "reinstall: wrapper ours" test "$(st wrapper)" = ours
 check "reinstall: no Wine left running" test -z "$(sandbox_wine)"
 check "reinstall: settings kept" eval 'grep -qx memory=high "$SOM/settings.conf" && grep -qx D9MT_MEMORY_PROFILE=high "$SOM/env" && grep -qx DXVK_LOG_LEVEL=info "$SOM/env"'
 check "reinstall: vsync stays off" eval '! grep -q "^d3d9.presentInterval" "$SOM/dxvk.conf"'
+check "reinstall: Frame Rate Limit 45 only on battery stays" eval 'grep -qx SWTOR_FPS_LIMIT=45 "$SOM/env" && grep -qx SWTOR_FPS_LIMIT_BATTERY=1 "$SOM/env"'
 check "reinstall: Retina stays on" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
 check "reinstall: the app's Mac driver stays" wm_is app
 check "reinstall: PhysicalKeyboard stays y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="y"'
@@ -728,7 +741,8 @@ som set hud off >/dev/null; som set hudpos topcenter >/dev/null
 som set physkeys off >/dev/null && check "set physkeys off again: the app's driver (raw mouse-look on)" wm_is app
 som set vsync on >/dev/null; som set debug off >/dev/null; som set memory auto >/dev/null
 som set gamemode on >/dev/null; som set updates on >/dev/null
-check "settings: back to the defaults" test "$(som settings | sed -n 's/^debug=//p')" = off
+som set fpslimit off >/dev/null; som set fpsbattery off >/dev/null
+check "settings: back to the defaults" eval '[ "$(som settings | sed -n "s/^debug=//p")" = off ] && grep -qx SWTOR_FPS_LIMIT=0 "$SOM/env"' 
 
 echo "== 6b. the wrapper's daily update check (stub engine; the game is never started)"
 U="$SANDBOX/update-check"
@@ -805,6 +819,29 @@ printf 'SWTOR_LOG_FILTER=.\nSWTOR_D9MT_AB="pfv cold=x"\n' >>"$U/env"; game
 check "wrapper: wine.log's second line names the A/B switches" eval 'sed -n 2p "$U/logs/wine.log" | grep -qx "SWTOR on Mac d9mt-ab: pfv cold=x"'
 sed -i '' '/^SWTOR_D9MT_AB=/d' "$U/env"; game
 check "wrapper: no A/B line without switches" eval '! grep -q "d9mt-ab" "$U/logs/wine.log"'
+# Frame Rate Limit: D9MT_FPS_CAP for the game; with only on battery, by the power source at the
+# game's start (a stand-in for pmset -g ps)
+cat >"$U/pmset" <<'PMSET'
+#!/bin/bash
+[ "$*" = "-g ps" ] || exit 1
+echo "Now drawing from '$(cat "$(dirname "$0")/power")'"
+echo " -InternalBattery-0 (id=1234)	80%; discharging; 3:00 remaining present: true"
+PMSET
+chmod +x "$U/pmset"
+fx() { sed -n 's/^D9MT_FPS_CAP=//p' "$U/logs/effective-env.txt"; }
+printf 'SWTOR_FPS_LIMIT=30\nSWTOR_FPS_LIMIT_BATTERY=0\nSWTOR_PMSET="%s/pmset"\n' "$U" >>"$U/env"; echo "AC Power" >"$U/power"; game
+check "wrapper: Frame Rate Limit 30: D9MT_FPS_CAP=30 for the game ($(fx))" test "$(fx)" = 30
+check "wrapper: wine.log names the limit" grep -qx "SWTOR on Mac frame rate limit: 30 fps" "$U/logs/wine.log"
+sed -i '' 's/^SWTOR_FPS_LIMIT_BATTERY=0$/SWTOR_FPS_LIMIT_BATTERY=1/' "$U/env"; game
+check "wrapper: only on battery, on AC power: no cap" eval '[ -z "$(fx)" ] && grep -qx "SWTOR on Mac frame rate limit: off (only on battery: on AC power)" "$U/logs/wine.log"'
+echo "Battery Power" >"$U/power"; game
+check "wrapper: only on battery, on battery: D9MT_FPS_CAP=30" eval '[ "$(fx)" = 30 ] && grep -qx "SWTOR on Mac frame rate limit: 30 fps (only on battery: on battery)" "$U/logs/wine.log"'
+rm -f "$U/pmset"; game
+check "wrapper: only on battery, no answer from pmset: no cap" test -z "$(fx)"
+sed -i '' 's/^SWTOR_FPS_LIMIT=30$/SWTOR_FPS_LIMIT=0/' "$U/env"; game
+check "wrapper: limit off: no D9MT_FPS_CAP, no line" eval '[ -z "$(fx)" ] && ! grep -q "frame rate limit" "$U/logs/wine.log"'
+check "wrapper: other Wine starts get no cap" eval '! grep -q D9MT_FPS_CAP "$U/logs/hold.log"'
+check "pmset -g ps names the power source as the wrapper reads it" eval '/usr/bin/pmset -g ps | head -1 | grep -qE "^Now drawing from '"'"'(AC|Battery|UPS) Power'"'"'"'
 
 echo "== 6f. session-report.sh: the lines of d9mt 6fa5df7 (a sample log)"
 R="$SANDBOX/report"
@@ -812,6 +849,8 @@ mkdir -p "$R"
 cat >"$R/wine.log" <<'LOG'
 SWTOR on Mac 0.1.1-dev.1: engine cx26 cx-26.3.0-8, d9mt 6fa5df7, started 2026-10-18 20:00:00
 SWTOR on Mac d9mt-ab: pfv vsync-off
+SWTOR on Mac frame rate limit: 30 fps (only on battery: on battery)
+warn:  D9MT: 20:00:01.100 frame cap 30 fps: timer, cadence 33.33 ms (vsync off)
 info:  Found config env: d3d9.presentInterval=0
 info:  D9MT: PixelFormatView on every texture (D9MT_TEX_PFV=1): no lossless compression
 info:  D9MT: end-of-pass barrier before Fragment|Blit|Dispatch, vertex fences for vertex textures
@@ -834,6 +873,8 @@ has() { grep -qF -- "$1" "$R/report.txt"; }
 check "report: the A/B switches" grep -qE '^  A/B switches \(d9mt-ab\.sh\) +pfv vsync-off$' "$R/report.txt"
 check "report: the GPU path" has "lossless compression off (D9MT_TEX_PFV=1), narrow pass barrier, clears skip stores"
 check "report: DXVK_CONFIG" has "d3d9.presentInterval=0"
+check "report: the Frame Rate Limit" grep -qE '^  Frame Rate Limit +30 fps \(only on battery: on battery\)$' "$R/report.txt"
+check "report: d9mt's frame cap" grep -qE "^    d9mt's frame cap +30 fps: timer, cadence 33\.33 ms \(vsync off\)$" "$R/report.txt"
 check "report: pass splits (frame-weighted)" has "6.0 (4.0 with a submit), 260 MiB loaded again"
 check "report: state cache loaded" has "ok, 40 entries, 39 to prewarm, 1 invalid dropped"
 check "report: prewarm" has "built 37, failed 1, skipped 0, done 0.8 s after the start (991 ms of builds, paused 201 ms)"
@@ -1349,7 +1390,7 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   envnorm() {
     sed -e "s/$PREVV/V/g; s/$APPV/V/g" -e 's/^SWTOR_D9MT=.*/SWTOR_D9MT=H/' "$1" |
       { if [ "$CHANNEL" = dev ]; then sed 's/^SWTOR_UPDATE_CHECK=.*/SWTOR_UPDATE_CHECK=X/'; else cat; fi; } |
-      grep -v -e '^#' -e '^$' -e '^D9MT_STATE_CACHE=' -e 'd9mt-ab\.env'
+      grep -v -e '^#' -e '^$' -e '^D9MT_STATE_CACHE=' -e 'd9mt-ab\.env' -e '^SWTOR_FPS_LIMIT=' -e '^SWTOR_FPS_LIMIT_BATTERY='
   }
   prefix_snap >"$SANDBOX/prev-prefix.txt"
   snap "$SOM/engine" >"$SANDBOX/prev-engine.txt"
@@ -1371,10 +1412,10 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   check "over $PREVV: the app's ntdll.so, the engine's own kept as .stock" eval 'ntdll_is_apps && { cmp -s "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" || macho_same "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so"; }'
   check "over $PREVV: winemetal.so is $PREVV's code (LC_UUID $(dwarfdump -u "$WM/winemetal.so" | awk '{ print $2 }'))" eval 'macho_same "$PREV_APP/Contents/Resources/d9mt/winemetal.so" "$WM/winemetal.so" && [ "$(dwarfdump -u "$WM/winemetal.so" | awk "{ print \$2 }")" = "$(dwarfdump -u "$PREV_APP/Contents/Resources/d9mt/winemetal.so" | awk "{ print \$2 }")" ]'
   check "over $PREVV: winemetal.dll byte for byte $PREVV's" cmp -s "$PREV_APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll"
-  # (settings.conf: this version writes every setting it knows, so one $PREVV does not know,
-  # hudpos, comes in with its default)
-  check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter), dxvk.conf unchanged" eval 'diff <(grep -v "^hudpos=" "$SANDBOX/prev-settings.conf") <(grep -v "^hudpos=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
-  check "over $PREVV: env: the state cache line$([ "$CHANNEL" = dev ] && echo " and the A/B include") added, the rest as before (versions aside)" eval 'diff <(envnorm "$SANDBOX/prev-env") <(envnorm "$SOM/env") >"$SANDBOX/prev-env.diff" && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ]'
+  # (settings.conf: this version writes every setting it knows, so the ones $PREVV does not know,
+  # hudpos, fpslimit and fpsbattery, come in with their defaults)
+  check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter, fpslimit=off, fpsbattery=off), dxvk.conf unchanged" eval 'diff <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/prev-settings.conf") <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && grep -qx fpslimit=off "$SOM/settings.conf" && grep -qx fpsbattery=off "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
+  check "over $PREVV: env: the state cache line, the Frame Rate Limit lines (off)$([ "$CHANNEL" = dev ] && echo " and the A/B include") added, the rest as before (versions aside)" eval 'diff <(envnorm "$SANDBOX/prev-env") <(envnorm "$SOM/env") >"$SANDBOX/prev-env.diff" && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && [ "$(envv SWTOR_FPS_LIMIT)/$(envv SWTOR_FPS_LIMIT_BATTERY)" = 0/0 ]'
   check "over $PREVV: no Wine left running" test -z "$(sandbox_wine)"
   [ "$CHANNEL" != dev ] || "$APP/Contents/Resources/d9mt-ab.sh" pfv >/dev/null
 
