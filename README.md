@@ -28,8 +28,8 @@ engine SWGL on Mac uses), with macOS Game Mode. You start the game with **Play S
 
 - **d9mt**: the game's Direct3D 9 goes straight to Metal, on CrossOver 26.3 (Wine 11), with
   macOS **Game Mode** and Retina rendering.
-- **Settings** (SWTOR on Mac > Settings…, ⌘,): Retina mode, vsync, d9mt's video memory
-  profile, Game Mode, the Metal HUD, game keys by keyboard position (for non-US layouts),
+- **Settings** (SWTOR on Mac > Settings…, ⌘,): Retina mode, vsync, a frame rate limit (for
+  heat and battery, optionally only on battery), d9mt's video memory profile, Game Mode, the Metal HUD, game keys by keyboard position (for non-US layouts),
   raw mouse-look and its speed, debug logging, automatic update checks.
 - **Updates**: the app updates itself with [Sparkle](https://sparkle-project.org) (SWTOR on
   Mac > Check for Updates…), and the game's start looks for a new version once a day.
@@ -106,6 +106,8 @@ the one used last) and the selected pane's settings. Changes take effect the nex
 |---|---|---|---|
 | Graphics | Retina Mode | on | Wine's Mac driver `RetinaMode` in the prefix's registry (only while the launcher and the game are closed) |
 | Graphics | Vsync | on | `d3d9.presentInterval = 1` in `dxvk.conf` (off: unset) |
+| Graphics | Frame Rate Limit | Off | `SWTOR_FPS_LIMIT` in `env` (0, 30, 40, 45, 60): the wrapper gives the game d9mt's `D9MT_FPS_CAP`. Even frame times, for less heat and a longer battery life: with vsync, a cap that divides the refresh rate keeps every frame on screen for the same number of refreshes (30 at 60 Hz: two; 40 at 120 Hz: three); 40 and 45 at 60 Hz keep the load even but show frames for one or two refreshes; at or above the refresh rate with vsync on it does nothing. `wine.log` names it (`frame rate limit:`, then d9mt's `frame cap` line) |
+| Graphics | Only on battery | off | `SWTOR_FPS_LIMIT_BATTERY=1` in `env`: the limit only if the Mac draws from its battery when the game starts (the wrapper asks `pmset -g ps` once; nothing watches it while the game runs) |
 | Graphics | Video Memory Profile | Automatic | `D9MT_MEMORY_PROFILE` (auto, low, medium, high, ultra, unlimited). The video memory the game is told it has: Low 2 GB, Medium 3 GB, High and above 4 GB. Automatic picks by the Mac's memory: 8 GB Low, 16 GB Medium, 24 GB High, more Ultra |
 | Game | Game Mode | on | `SWTOR_GAMEMODE_APP` in `env` |
 | Game | Show Metal HUD | off | `MTL_HUD_ENABLED=1` in `env`, from the next game start. In the game Shift+F9 hides and shows it; Shift+F12, or a triple-click inside the HUD's area (also while it is hidden), opens macOS's own HUD settings panel (Apple's `libMTLHud`, which has no option to turn that off) |
@@ -210,7 +212,9 @@ they differ from releases in four ways:
   d9mt's test switches for the next game starts, without editing `env`: `state-off` (no
   pipeline state cache), `pfv`, `barrier-all`, `clear-keep` (each undoes one of 0.1.1's GPU
   savings; `gpu-old` all three), `vsync-off`, `repro` (`DXVK_CONFIG`
-  `d3d9.reproducibleCommandStream=True`) and `cold=<name>` (an empty shader cache and pipeline
+  `d3d9.reproducibleCommandStream=True`), `cap=<fps>`, `cap-noalign` and `dxvkcap=<fps>` (d9mt's
+  frame cap, its timer without vsync alignment, and DXVK's limiter as before 0.1.3, for
+  comparison; Settings' Frame Rate Limit wins over `cap=` while it is on) and `cold=<name>` (an empty shader cache and pipeline
   archives of their own in `~/Library/Caches/SWTOR on Mac/d9mt-ab/<name>`, d9mt's own caches
   untouched). Each call sets exactly the switches it names; `d9mt-ab.sh` alone shows them,
   `reset` clears them (`--clean` also deletes the cold caches). They are kept in
