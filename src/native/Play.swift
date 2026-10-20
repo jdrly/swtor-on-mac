@@ -11,6 +11,9 @@
 //   SWTORonMac --play-target   prints what the button would do and exits (no window, nothing
 //                              is opened): "launch <path>", "show launcher|game" or
 //                              "unavailable <reason>"
+//   SWTORonMac --is-game BUNDLE_ID PATH PID   "game" or "not game": whether an app with that
+//                              bundle id ("-": none), executable path and process counts as the
+//                              game (isGame), for tests
 
 import AppKit
 
@@ -85,14 +88,55 @@ extension Installer {
     let apps = NSWorkspace.shared.runningApplications.filter { app in
       guard !app.isTerminated, isSWTOR(app), processAlive(app.processIdentifier) else { return false }
       guard let root else { return true }
-      return [app.bundleURL?.path, app.executableURL?.path].contains { $0.map { inside($0, root) } == true }
+      return inSandbox(app, root)
     }
     return (apps.first { !isGame($0) }, apps.first(where: { isGame($0) }))
   }
 
-  // the game: its Game Mode bundle, or a swtor.exe program
+  // The game: its Game Mode bundle, or a swtor.exe program. Launch Services knows the game by
+  // the path CrossOver starts it from, winetemp-<...>/wine: a link to the Game Mode copy of the
+  // engine's loader (.../SWTOR.app/Contents/MacOS/swtor.exe), with no bundle id. Wine rewrites
+  // the process's argv[0] to the game's path (.../retailclient/swtor.exe), with Game Mode off too.
   nonisolated static func isGame(_ app: NSRunningApplication) -> Bool {
-    app.bundleIdentifier == gameBundleID || app.executableURL?.path.hasSuffix("/swtor.exe") == true
+    isGame(bundleID: app.bundleIdentifier, executable: app.executableURL?.path, pid: app.processIdentifier)
+  }
+
+  nonisolated static func isGame(bundleID: String?, executable: String?, pid: pid_t) -> Bool {
+    if bundleID == gameBundleID { return true }
+    guard let path = executable, !path.isEmpty else { return false }
+    if isSwtorExe(resolved(path)) { return true }
+    return path.contains("/winetemp-") && isSwtorExe(argv0(pid) ?? "")
+  }
+
+  // (a Unix or a Windows path)
+  nonisolated static func isSwtorExe(_ path: String) -> Bool {
+    path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last?.lowercased() == "swtor.exe"
+  }
+
+  // the file a path ends up at, links resolved
+  nonisolated static func resolved(_ path: String) -> String {
+    URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+  }
+
+  // the process's argv[0] as ps shows it (KERN_PROCARGS2: argc, the executable path, then argv)
+  nonisolated static func argv0(_ pid: pid_t) -> String? {
+    var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+    var size = 0
+    guard pid > 0, sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
+    var buf = [UInt8](repeating: 0, count: size)
+    guard sysctl(&mib, 3, &buf, &size, nil, 0) == 0 else { return nil }
+    var i = MemoryLayout<Int32>.size
+    while i < size, buf[i] != 0 { i += 1 }
+    while i < size, buf[i] == 0 { i += 1 }
+    let start = i
+    while i < size, buf[i] != 0 { i += 1 }
+    return i > start ? String(decoding: buf[start..<i], as: UTF8.self) : nil
+  }
+
+  // in the sandbox: its bundle or executable there (links resolved)
+  nonisolated static func inSandbox(_ app: NSRunningApplication, _ root: String) -> Bool {
+    let paths = [app.bundleURL?.path, app.executableURL?.path, app.executableURL.map { resolved($0.path) }]
+    return paths.contains { $0.map { inside($0, root) } == true }
   }
 
   // The game's window comes up behind the app that is active (macOS 14+'s cooperative
@@ -104,10 +148,7 @@ extension Installer {
   // its window (a regular app). Once per game start, for 2 minutes at most (no fighting the
   // user later); a game already running when the app starts is left alone.
   func gameStarted(_ game: NSRunningApplication) {
-    if let root = Installer.sandboxRoot(status),
-       ![game.bundleURL?.path, game.executableURL?.path].contains(where: { $0.map { Installer.inside($0, root) } == true }) {
-      return
-    }
+    if let root = Installer.sandboxRoot(status), !Installer.inSandbox(game, root) { return }
     guard startingGame?.processIdentifier != game.processIdentifier else { return }
     startingGame = game
     startingGameSince = .now

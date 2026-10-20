@@ -414,6 +414,26 @@ pkill -f "$SANDBOX/decoy/" 2>/dev/null || true
 rm -f "$EB/wineserver" "$EB/ws.pid"
 # l4 is still running: the next (failed) install ends it first
 
+echo "== 2c. what the app takes for the game (it brings the game to the front when it starts)"
+# Launch Services knows the game by the path CrossOver starts it from: winetemp-<...>/wine, a
+# link to the Game Mode bundle's swtor.exe, no bundle id (T2 2026-10-20); with Game Mode off a
+# hard link of the loader, whose process Wine shows as .../retailclient/swtor.exe (argv[0])
+is_game() { "$APP/Contents/MacOS/SWTORonMac" --is-game "$@" 2>/dev/null; }
+GT="$SANDBOX/usertmp/winetemp-9-8-7-6"
+mkdir -p "$GT" "$SANDBOX/gm/SWTOR.app/Contents/MacOS"
+cp "$SANDBOX/fake" "$SANDBOX/gm/SWTOR.app/Contents/MacOS/swtor.exe"
+ln -sf "$SANDBOX/gm/SWTOR.app/Contents/MacOS/swtor.exe" "$GT/wine"
+cp "$SANDBOX/fake" "$GT/loader" && ln -f "$GT/loader" "$GT/wine2"
+check "game: the Game Mode link (no bundle id)" test "$(is_game - "$GT/wine" 0)" = game
+g1=$(orphan_as '/Games/SWTOR/retailclient/swtor.exe' "$GT/wine2")
+g2=$(orphan_as 'C:\windows\explorer.exe' "$GT/wine2"); sleep 0.3
+check "game: a winetemp loader whose argv[0] is swtor.exe (Game Mode off)" test "$(is_game - "$GT/wine2" "$g1")" = game
+check "game: not another Wine program from the same loader" test "$(is_game - "$GT/wine2" "$g2")" = "not game"
+check "game: the Game Mode bundle id" test "$(is_game cz.jandrly.swtoronmac.game /x/y 0)" = game
+check "game: not another app" test "$(is_game com.apple.Safari /Applications/Safari.app/Contents/MacOS/Safari 1)" = "not game"
+kill "$g1" "$g2" 2>/dev/null || true
+rm -rf "$GT" "$SANDBOX/gm"
+
 echo "== 3. failed install rolls back (bin not writable)"
 chmod a-w "$BS_WINE/bin"
 if som install >"$SANDBOX/fail.txt" 2>&1; then bad "install with read-only bin succeeded"; fi

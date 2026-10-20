@@ -245,9 +245,8 @@ final class Installer {
 
   nonisolated static func isSWTOR(_ app: NSRunningApplication?) -> Bool {
     guard let app else { return false }
-    if let id = app.bundleIdentifier, id == launcherBundleID || id == gameBundleID { return true }
-    let path = app.executableURL?.path ?? ""
-    return path.hasSuffix("/swtor.exe") || path.hasSuffix("/Star Wars - The Old Republic Launcher")
+    if app.bundleIdentifier == launcherBundleID || isGame(app) { return true }
+    return app.executableURL?.path.hasSuffix("/Star Wars - The Old Republic Launcher") == true
   }
 
   private func swtorQuit() {
@@ -646,6 +645,13 @@ struct SWTORonMacApp: App {
     // what the Play button would do, for tests (Play.swift)
     if CommandLine.arguments.contains("--play-target") {
       Installer.printPlayTarget()
+      exit(0)
+    }
+    // whether an app counts as the game, for tests (Play.swift)
+    let args = CommandLine.arguments
+    if let i = args.firstIndex(of: "--is-game"), args.count > i + 3 {
+      let id = args[i + 1] == "-" ? nil : args[i + 1]
+      print(Installer.isGame(bundleID: id, executable: args[i + 2], pid: pid_t(args[i + 3]) ?? 0) ? "game" : "not game")
       exit(0)
     }
   }
