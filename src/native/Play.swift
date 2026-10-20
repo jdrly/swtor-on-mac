@@ -16,6 +16,7 @@
 //                              game (isGame), for tests
 
 import AppKit
+import os
 
 enum PlayAction: Equatable {
   case launch(URL)
@@ -168,7 +169,9 @@ extension Installer {
     // (without a window yet it is not a regular app: then it can activate itself when it shows
     // one, as we have yielded)
     guard game.activationPolicy == .regular else { return }
-    NSLog("SWTOR on Mac: handing the activation to the game (pid %d)", game.processIdentifier)
+    // (NSLog's text is <private> in the unified log; this one is readable for t2-collect.sh)
+    Logger(subsystem: "cz.jandrly.swtoronmac", category: "play")
+      .notice("handing the activation to the game (pid \(game.processIdentifier, privacy: .public))")
     game.activate()
   }
 
