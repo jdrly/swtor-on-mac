@@ -1379,7 +1379,9 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: the prefix as $DEVV left it" eval 'prefix_snap | diff "$SANDBOX/dev-prefix.txt" - >"$SANDBOX/dev-prefix.diff"'
   { snap "$SOM/engine" | diff "$SANDBOX/dev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/dev-engine.diff"
   check "over $DEVV: the engine unchanged, signatures aside, but ntdll.so ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev
-  check "over $DEVV: the app's ntdll.so, $DEVV's (the engine's own) kept as .stock" eval 'ntdll_is_apps && cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock"'
+  # ($DEVV's ntdll.so: the engine's own, or, from 0.1.2-dev.1 on, the app's build in its own
+  # signature, its code ours)
+  check "over $DEVV: the app's ntdll.so, the engine's own kept as .stock ($DEVV had $(cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" && echo "the engine's" || echo "the app's build"))" eval 'ntdll_is_apps && { cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" || macho_same "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so"; }'
   check "over $DEVV: no Wine left running" test -z "$(sandbox_wine)"
   som install >"$SANDBOX/dev-reinstall.txt" 2>&1 || bad "reinstall after $DEVV exit"
   check "over $DEVV: a Reinstall after it has nothing more to remove" eval 'grep -q "^@done" "$SANDBOX/dev-reinstall.txt" && ! grep -q "^Removed a development build" "$SANDBOX/dev-reinstall.txt"'
