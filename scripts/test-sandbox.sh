@@ -1362,11 +1362,13 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   check "over $PREVV: @done, manifest $APPV" eval 'grep -q "^@done" "$SANDBOX/prev-upgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$APPV" ]'
   check "over $PREVV: the engine already in place, no download" eval 'grep -q "is already in place" "$SANDBOX/prev-upgrade.txt" && ! grep -q "Unpacking the Wine engine" "$SANDBOX/prev-upgrade.txt"'
   { prefix_snap | diff "$SANDBOX/prev-prefix.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-prefix.diff"
-  check "over $PREVV: in the prefix only d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" test "$(cat "$SANDBOX/prev-prefix.diff")" = ./drive_c/windows/system32/d3d9.dll
+  # (a previous release with this version's d3d9.dll, 0.1.2 for 0.1.3: nothing changes)
+  check "over $PREVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" eval '[ -z "$(grep -v -x ./drive_c/windows/system32/d3d9.dll "$SANDBOX/prev-prefix.diff")" ]'
   check "over $PREVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/prev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-engine.diff"
   check "over $PREVV: the engine unchanged, signatures aside, but ntdll.so ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same prev
-  check "over $PREVV: the app's ntdll.so, $PREVV's (the engine's own) kept as .stock" eval 'ntdll_is_apps && cmp -s "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock"'
+  # ($PREVV's ntdll.so: the engine's own, or, from 0.1.2 on, the app's build in its own signature)
+  check "over $PREVV: the app's ntdll.so, the engine's own kept as .stock" eval 'ntdll_is_apps && { cmp -s "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" || macho_same "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so"; }'
   check "over $PREVV: winemetal.so is $PREVV's code (LC_UUID $(dwarfdump -u "$WM/winemetal.so" | awk '{ print $2 }'))" eval 'macho_same "$PREV_APP/Contents/Resources/d9mt/winemetal.so" "$WM/winemetal.so" && [ "$(dwarfdump -u "$WM/winemetal.so" | awk "{ print \$2 }")" = "$(dwarfdump -u "$PREV_APP/Contents/Resources/d9mt/winemetal.so" | awk "{ print \$2 }")" ]'
   check "over $PREVV: winemetal.dll byte for byte $PREVV's" cmp -s "$PREV_APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll"
   # (settings.conf: this version writes every setting it knows, so one $PREVV does not know,
@@ -1379,8 +1381,13 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   prevsom install >"$SANDBOX/prev-downgrade.txt" 2>&1 || { tail -20 "$SANDBOX/prev-downgrade.txt"; bad "$PREVV over this version exit"; }
   check "back to $PREVV: @done, manifest $PREVV" eval 'grep -q "^@done" "$SANDBOX/prev-downgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$PREVV" ]'
   check "back to $PREVV: the prefix as $PREVV left it" eval 'prefix_snap | diff "$SANDBOX/prev-prefix.txt" - >"$SANDBOX/prev-back.diff"'
-  # ($PREVV checks ntdll.so only when it unpacks the engine: it keeps this version's, the fix)
-  check "back to $PREVV: the engine as $PREVV left it, but ntdll.so this version's (and the engine's own as .stock)" eval '[ "$({ snap "$SOM/engine" | diff "$SANDBOX/prev-engine.txt" - || true; } | sed -n "s/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p" | sort -u | tr "\n" " ")" = "./lib/wine/x86_64-unix/ntdll.so ./lib/wine/x86_64-unix/ntdll.so.stock " ] && ntdll_is_apps'
+  # ($PREVV without an ntdll.so of its own, 0.1.0/0.1.1, checks it only when it unpacks the
+  # engine: it keeps this version's, the fix; one with its own, 0.1.2 on, puts its own back)
+  if [ -f "$PREV_APP/Contents/Resources/wine/ntdll.so" ]; then
+    check "back to $PREVV: the engine as $PREVV left it (its own ntdll.so back)" eval 'snap "$SOM/engine" | diff -q "$SANDBOX/prev-engine.txt" - >/dev/null && cmp -s "$PREV_APP/Contents/Resources/wine/ntdll.so" "$WM/ntdll.so"'
+  else
+    check "back to $PREVV: the engine as $PREVV left it, but ntdll.so this version's (and the engine's own as .stock)" eval '[ "$({ snap "$SOM/engine" | diff "$SANDBOX/prev-engine.txt" - || true; } | sed -n "s/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p" | sort -u | tr "\n" " ")" = "./lib/wine/x86_64-unix/ntdll.so ./lib/wine/x86_64-unix/ntdll.so.stock " ] && ntdll_is_apps'
+  fi
   out=$(sbx_wine cmd /c echo prev-ok 2>/dev/null | tr -d '\r' || true)
   check "back to $PREVV: Wine runs a program with it (cmd: $out)" test "$out" = prev-ok
   check "back to $PREVV: env byte for byte as $PREVV wrote it (no state cache line, no A/B switches)" eval 'cmp -s "$SANDBOX/prev-env" "$SOM/env" && [ "$(envv D9MT_TEX_PFV)" = "<unset>" ]'
