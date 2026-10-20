@@ -11,6 +11,8 @@
 #                      HUD_POSITIONS)
 #   som.sh watch       the launchd job (cz.jandrly.swtoronmac.watch): Broadsword's Wine/bin
 #                      changed; hook the wrapper back in if a launcher update replaced it
+#   som.sh fetch-engine  download and verify the Wine engine into the cache (an install takes
+#                      it from there)
 #   som.sh end-leftovers  end leftover Wine processes of the engine (only if no launcher,
 #                      game or Wine session runs); install, uninstall and the settings in the
 #                      prefix's registry (retina, physkeys, rawmouse, mousespeed) do it too
@@ -564,9 +566,21 @@ backup_foreign() {
   say "Copy of the previous wrapper: $dst"
 }
 
-# fetch <url> <sha256> <size> <label>: verified download into the cache; sets FETCHED
+# fetch <url> <sha256> <size> <label>: verified download into the cache; sets FETCHED.
+# A file of that name already in the cache is used if its checksum is right (one downloaded by
+# hand, e.g. in a browser, works too). Up to FETCH_TRIES attempts: one that stops early (a
+# dropped connection, a stall: under 10 KB/s for a minute) is resumed where it stopped; one
+# that brought something else than the file (more than its size, or not an xz archive: a
+# captive portal's or a proxy's page) starts over. Each attempt is logged (curl's status, the
+# HTTP code, the size; the first bytes if they are not an archive; the checksum), and the
+# message says what went wrong and what to do. (curl alone reports success for a page sent
+# with HTTP 200 and for a transfer without a length that breaks off: both used to end in
+# "damaged (checksum mismatch)" with nothing in the log.) An incomplete download stays for the
+# next try.
+FETCH_TRIES=4
+is_xz() { [ "$(head -c 6 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = fd377a585a00 ]; }
 fetch() {
-  local url=$1 sha=$2 size=$3 label=$4 dir="$CACHE/downloads" f pid
+  local url=$1 sha=$2 size=$3 label=$4 dir="$CACHE/downloads" f pid try rc=0 got=0 http info actual start
   f="$dir/$(basename "$url")"
   FETCHED=$f
   if [ -f "$f" ] && [ "$(sha256 "$f")" = "$sha" ]; then
@@ -578,19 +592,69 @@ fetch() {
     return
   fi
   mkdir -p "$dir"
-  rm -f "$f.part"
+  if [ -f "$f" ]; then log "$f in the cache is not the expected file (sha256 $(sha256 "$f")); downloading it again"; rm -f "$f"; fi
   say "Downloading $label from $url"
-  curl -fsSL --retry 3 --connect-timeout 20 -o "$f.part" "$url" 2>>"$LOGFILE" &
-  pid=$!
-  FETCH_PID=$pid
-  while kill -0 "$pid" 2>/dev/null; do
-    echo "@progress $label $(stat -f %z "$f.part" 2>/dev/null || echo 0) $size"
-    sleep 1
+  info="$dir/.curl-info"
+  for try in $(seq 1 "$FETCH_TRIES"); do
+    # a partial download is resumed only if it is the start of the archive
+    if [ -f "$f.part" ]; then
+      got=$(stat -f %z "$f.part")
+      if [ "$got" -gt "$size" ] || ! is_xz "$f.part"; then
+        log "attempt $try: the partial download ($got bytes) is not the start of the file; starting over"
+        rm -f "$f.part"
+      elif [ "$got" -eq "$size" ]; then
+        break
+      else
+        log "attempt $try: resuming at $got of $size bytes"
+      fi
+    fi
+    rc=0
+    curl -fsSL --connect-timeout 20 --speed-limit 10240 --speed-time 60 -C - \
+      -w '%{http_code}' -o "$f.part" "$url" >"$info" 2>>"$LOGFILE" &
+    pid=$!
+    FETCH_PID=$pid
+    while kill -0 "$pid" 2>/dev/null; do
+      echo "@progress $label $(stat -f %z "$f.part" 2>/dev/null || echo 0) $size"
+      sleep 1
+    done
+    wait "$pid" || rc=$?
+    FETCH_PID=
+    got=$(stat -f %z "$f.part" 2>/dev/null || echo 0)
+    http=$(cat "$info" 2>/dev/null || true)
+    log "attempt $try: curl status $rc, HTTP ${http:-none}, $got of $size bytes"
+    case "$rc" in
+      23) rm -f "$f.part" "$info"; die "Not enough free disk space for the $label download ($((size / 1048576)) MB). Free some space and try again." ;;
+      33) log "attempt $try: the server can't resume; starting over"; rm -f "$f.part"; got=0; continue ;;
+    esac
+    [ "$got" -lt "$size" ] && is_xz "$f.part" || break   # complete, or not the file: judged below
+    [ "$try" -eq "$FETCH_TRIES" ] || sleep 2
   done
-  wait "$pid" || { FETCH_PID=; rm -f "$f.part"; die "The download of $label failed. Check your internet connection and try again."; }
-  FETCH_PID=
-  echo "@progress $label $size $size"
-  [ "$(sha256 "$f.part")" = "$sha" ] || { rm -f "$f.part"; die "The download of $label is damaged (checksum mismatch). Try again."; }
+  rm -f "$info"
+  echo "@progress $label $got $size"
+  if [ ! -s "$f.part" ]; then
+    rm -f "$f.part"
+    die "The download of $label failed (curl status $rc). Check your internet connection and try again."
+  fi
+  if ! is_xz "$f.part"; then
+    start=$(head -c 200 "$f.part" | LC_ALL=C tr -c '[:print:]' ' ' | tr -s ' ')
+    log "not the file: $got bytes starting with: $start"
+    rm -f "$f.part"
+    case "$start" in
+      *[Hh][Tt][Mm][Ll]*|*'<?xml'*)
+        die "The download of $label brought a web page instead of the file. A captive portal (hotel or public Wi-Fi), a proxy, a VPN or a content filter is in the way: log in to the network or turn it off, then try again. Or download $url in your browser, put the file into $dir and click Update again." ;;
+      *)
+        die "The download of $label brought something else than the file ($got bytes). A proxy, VPN or content filter may be in the way. Try again, or download $url in your browser, put the file into $dir and click Update again." ;;
+    esac
+  fi
+  if [ "$got" -lt "$size" ]; then
+    die "The download of $label stopped at $((got / 1048576)) of $((size / 1048576)) MB (curl status $rc). Check your internet connection and click Update again: it continues where it stopped."
+  fi
+  actual=$(sha256 "$f.part")
+  if [ "$got" -ne "$size" ] || [ "$actual" != "$sha" ]; then
+    log "not the expected file: $got bytes (expected $size), sha256 $actual (expected $sha)"
+    rm -f "$f.part"
+    die "The download of $label is complete but not the expected file (sha256 ${actual:0:12}…, expected ${sha:0:12}…): something on the way changed it. Try again, or download $url in your browser, put the file into $dir and click Update again."
+  fi
   mv -f "$f.part" "$f"
   log "verified $f (sha256 $sha)"
 }
@@ -1391,6 +1455,19 @@ remove_dev_leftovers() {
   fi
 }
 
+# som.sh fetch-engine: download and verify the Wine engine into the cache, where an install
+# takes it from (tests; also to fetch it ahead). In a sandbox SWTOR_ON_MAC_ENGINE_URL may name
+# another server for the same file (scripts/test-sandbox.sh's download tests).
+cmd_fetch_engine() {
+  local url="$ENGINE_URL"
+  [ -z "$ROOT" ] || url="${SWTOR_ON_MAC_ENGINE_URL:-$ENGINE_URL}"
+  if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
+  log "---- fetch-engine $url"
+  trap '[ -z "${FETCH_PID:-}" ] || kill "$FETCH_PID" 2>/dev/null || true' EXIT
+  fetch "$url" "$ENGINE_SHA256" "$ENGINE_SIZE" "Wine engine"
+  echo "@done $FETCHED"
+}
+
 cmd_install() {
   CREATED="" MOVED="" WRAPPER_PHASE="" NEW_PREFIX="" WRAPPER_STATE="" FIRST_INSTALL="" SETTINGS_USER="" UPGRADE=""
   [ -f "$MANIFEST" ] || FIRST_INSTALL=1
@@ -1522,5 +1599,6 @@ case "${1:-}" in
   set) shift; cmd_set "$@" ;;
   watch) cmd_watch ;;
   end-leftovers) cmd_end_leftovers ;;
+  fetch-engine) cmd_fetch_engine ;;
   *) sed -n '2,/^# Environment/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac

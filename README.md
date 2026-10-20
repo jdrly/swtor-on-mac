@@ -177,6 +177,14 @@ messages. With the setting on:
   prefix and settings are put back as they were; the old engine and its libraries are removed
   only once it has gone through. Going back is a Reinstall with the older app: 0.0.6 takes
   the updated prefix back (tested).
+- **The engine download** (0.1.2 and later) is checked by its size, its start (an xz archive)
+  and its sha256. A download that breaks off is resumed (up to four tries, and the next
+  Update continues where it stopped); a web page instead of the file (a captive portal, a
+  proxy, a VPN or a content filter) or a changed file is named as such, and `install.log`
+  records each try (curl's status, the HTTP code, the size, the checksum). If it keeps failing,
+  download [the engine](https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz)
+  in a browser, put the file into `~/Library/Caches/SWTOR on Mac/downloads/` and click Update
+  again: a file there with the right checksum is used as it is.
 
 ### Development builds
 
