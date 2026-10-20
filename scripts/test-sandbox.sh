@@ -1035,6 +1035,23 @@ n=20; for f in $small; do
   n=$((n + 1))
 done
 fake_report wine-2026-10-10-090000.ips $((8 * 24 * 60))
+# GPU errors: a fake unified log ($SANDBOX/bin/log, which collect-logs.sh reads in a sandbox):
+# the game's and Wine's page faults, another app's (its name must stay out), Metal's full
+# shader cache, the GPU driver with the home folder in it, and 30 other Metal errors
+mkdir -p "$SANDBOX/bin"
+cat >"$SANDBOX/bin/log" <<EOF
+#!/bin/bash
+[ "\$1 \$2 \$3" = "show --last 2h" ] || exit 2
+echo "Timestamp               Ty Process[PID:TID]"
+echo "2026-10-20 19:04:10.100 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+echo "2026-10-20 19:04:10.101 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+echo "2026-10-20 19:05:00.000 E  swtor.exe[4300:1b] (IOGPU) IOGPUMetalError: <private>"
+echo "2026-10-20 19:05:01.000 E  Secret Diary[777:1c] (IOGPU) IOGPUMetalError: <private>"
+echo "2026-10-20 19:06:00.000 E  wine[4242:1e] (Metal) mdb_txn_commit error: MDB_MAP_FULL: Environment mapsize limit reached"
+echo "2026-10-20 19:07:00.000 Df kernel[0:2f] (AGXG14X) GPU restart, $HOME/x"
+for i in \$(seq 10 39); do echo "2026-10-20 19:08:00.\$i E  wine[4242:1f] (Metal) error \$i"; done
+EOF
+chmod +x "$SANDBOX/bin/log"
 zip=$("$APP/Contents/Resources/collect-logs.sh" 2>"$SANDBOX/collect.err" || true)
 check "logs: zip on the sandbox Desktop" test -f "$zip" -a "${zip#"$H/Desktop/"}" != "$zip"
 if [ -f "$zip" ]; then
@@ -1050,6 +1067,11 @@ if [ -f "$zip" ]; then
   check "logs: crash reports redacted (home, user name, keys, e-mail)" eval '! grep -rq -e "$HOME" -e "/Users/$(id -un)/" -e SECRETKEY123 -e player@example.com "$CR" && grep -q "\"procPath\" : \"~/Library/Application Support/SWTOR on Mac/engine/bin/wine\"" "$CR/swtor.exe-2026-10-18-120000.ips"'
   check "logs: system info lists the crash reports, the newest first" eval '[ "$(sed -n "/^Crash reports/,/^\$/p" "$SI" | sed -n "2s/^  \([^ ]*\) .*/\1/p")" = swtor.exe-2026-10-18-120000.ips ] && [ "$(grep -c "^  [^l].*KB)\$" "$SI")" = 20 ]'
   check "logs: system info names the ones left out and why" eval 'grep -q "^  left out: wineserver-2026-10-18-110004.ips (over 10 MB together)" "$SI" && grep -q "^  left out: Star Wars - The Old Republic Launcher-2026-10-18-110005.ips (3500 KB, too large)" "$SI" && [ "$(grep -c "(more than 20 reports)" "$SI")" = 5 ]'
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  GE=$(echo "$SANDBOX"/zip/*/gpu-errors.txt)
+  check "logs: GPU errors counted per game and Wine process, other apps only as a number" eval 'grep -q "^IOGPUMetalError .*: 3 in the game and Wine, 1 in other apps\$" "$GE" && grep -q "^  wine (pid 4242): 2, " "$GE" && grep -q "^  swtor.exe (pid 4300): 1, " "$GE" && ! grep -q "Secret Diary" "$GE"'
+  check "logs: GPU errors: the fault and driver lines, the last 20 other Metal errors, the full shader cache only counted" eval '[ "$(grep -c "IOGPUMetalError: <private>" "$GE")" = 3 ] && grep -q "^2026-10-20 19:07:00.000 Df kernel\[0:2f\] (AGXG14X) GPU restart, ~/x\$" "$GE" && [ "$(grep -c "(Metal) error " "$GE")" = 20 ] && grep -q "(Metal) error 39\$" "$GE" && ! grep -q "(Metal) error 19\$" "$GE" && ! grep -q "mdb_txn" "$GE" && grep -q "^Metal shader cache full (MDB_MAP_FULL) in the game and Wine: 1 lines\$" "$GE"'
+  check "logs: system info has the GPU error count" grep -q "^  IOGPUMetalError .*: 3 in the game and Wine, 1 in other apps\$" "$SI"
 fi
 # the Game Mode links the wrapper would have made at game start ("wine", or "swtor.exe" for a
 # start.exe command)
