@@ -1126,39 +1126,47 @@ NEW_ENGINE=$(cached "$(val ENGINE_URL "$SOMSH")" "$(val ENGINE_SHA256 "$SOMSH")"
 
 echo "== 10b. the engine download (a local server that misbehaves; som.sh fetch-engine, no Wine)"
 # What a captive portal, a proxy or a broken connection does to the 235 MB download: the
-# messages, what is logged, a resume where it stopped. (curl alone reports success for a page
-# sent with HTTP 200 and for a transfer without a length that breaks off.)
+# messages, what is logged, a resume where it stopped, and the second address (GitHub's API,
+# here /assets/<mode>, which answers only with Accept: application/octet-stream). (curl alone
+# reports success for a page sent with HTTP 200 and for a transfer without a length that
+# breaks off.)
 FPORT=$((18000 + $$ % 1000))
 python3 -I "$REPO/scripts/fetch-test-server.py" "$NEW_ENGINE" "$FPORT" >"$SANDBOX/fetch-server.log" 2>&1 &
 fserver=$!
 sleep 1
 ILOG="$LOGS/install.log"
 ENGINE_FILE=$(basename "$NEW_ENGINE")
-fetch_mode() { # <mode> <name>: som.sh fetch-engine from the local server; output in <name>.txt, its log lines in <name>.log
+# shellcheck disable=SC2034 # (used in check's eval strings)
+ESHA=$(val ENGINE_SHA256 "$SOMSH")
+fetch_mode() { # <mode> <API mode> <name>: som.sh fetch-engine from the local server; output in <name>.txt, its log lines in <name>.log
   local n
   n=$(wc -l <"$ILOG" 2>/dev/null || echo 0)
-  SWTOR_ON_MAC_ENGINE_URL="http://127.0.0.1:$FPORT/$1/$ENGINE_FILE" som fetch-engine >"$SANDBOX/$2.txt" 2>&1 || true
-  tail -n +"$((n + 1))" "$ILOG" >"$SANDBOX/$2.log"
+  SWTOR_ON_MAC_ENGINE_URL="http://127.0.0.1:$FPORT/$1/$ENGINE_FILE" SWTOR_ON_MAC_ENGINE_API_URL="http://127.0.0.1:$FPORT/assets/$2" \
+    som fetch-engine >"$SANDBOX/$3.txt" 2>&1 || true
+  tail -n +"$((n + 1))" "$ILOG" >"$SANDBOX/$3.log"
 }
 rm -rf "$DLC"
-fetch_mode html fetch-html
-check "download: a web page with HTTP 200 is named as such, nothing kept" eval 'grep -q "^@error The download of Wine engine brought a web page instead of the file" "$SANDBOX/fetch-html.txt" && grep -q "starting with: <!DOCTYPE html>" "$SANDBOX/fetch-html.log" && [ -z "$(ls -A "$DLC" 2>/dev/null)" ]'
-fetch_mode dropnolen fetch-dropnolen
-check "download: a transfer without a length that breaks off is resumed and verified" eval 'grep -q "^@done " "$SANDBOX/fetch-dropnolen.txt" && grep -q "resuming at 33554432 of" "$SANDBOX/fetch-dropnolen.log" && grep -q "^.* verified " "$SANDBOX/fetch-dropnolen.log"'
+fetch_mode html html fetch-html
+check "download: a web page with HTTP 200 is named as such (both addresses), nothing kept" eval 'grep -q "^@error The download of Wine engine brought a web page instead of the file" "$SANDBOX/fetch-html.txt" && [ "$(grep -c "starting with: <!DOCTYPE html>" "$SANDBOX/fetch-html.log")" = 2 ] && [ -z "$(ls -A "$DLC" 2>/dev/null)" ]'
+fetch_mode dropnolen ok fetch-dropnolen
+check "download: a transfer without a length that breaks off is resumed and verified (no second address)" eval 'grep -q "^@done " "$SANDBOX/fetch-dropnolen.txt" && grep -q "resuming at 33554432 of" "$SANDBOX/fetch-dropnolen.log" && grep -q " verified " "$SANDBOX/fetch-dropnolen.log" && ! grep -q "other address" "$SANDBOX/fetch-dropnolen.log"'
 rm -rf "$DLC"
-fetch_mode droplen fetch-droplen
-check "download: a dropped connection is resumed (twice) and verified" eval 'grep -q "^@done " "$SANDBOX/fetch-droplen.txt" && [ "$(grep -c "resuming at" "$SANDBOX/fetch-droplen.log")" = 2 ] && [ "$(shasum -a 256 "$DLC/$ENGINE_FILE" | cut -d" " -f1)" = "$(val ENGINE_SHA256 "$SOMSH")" ]'
+fetch_mode droplen ok fetch-droplen
+check "download: a dropped connection is resumed (twice) and verified" eval 'grep -q "^@done " "$SANDBOX/fetch-droplen.txt" && [ "$(grep -c "resuming at" "$SANDBOX/fetch-droplen.log")" = 2 ] && [ "$(shasum -a 256 "$DLC/$ENGINE_FILE" | cut -d" " -f1)" = "$ESHA" ]'
 rm -rf "$DLC"
-fetch_mode norange fetch-norange
+fetch_mode norange ok fetch-norange
 check "download: a server that can't resume: started over, verified" eval 'grep -q "^@done " "$SANDBOX/fetch-norange.txt" && grep -q "can.t resume; starting over" "$SANDBOX/fetch-norange.log"'
 rm -rf "$DLC"
-fetch_mode changed fetch-changed
-check "download: a complete but changed file is named so, with both checksums in the log, nothing kept" eval 'grep -q "^@error The download of Wine engine is complete but not the expected file" "$SANDBOX/fetch-changed.txt" && grep -q "sha256 [0-9a-f]\{64\} (expected $(val ENGINE_SHA256 "$SOMSH"))" "$SANDBOX/fetch-changed.log" && [ -z "$(ls -A "$DLC" 2>/dev/null)" ]'
-fetch_mode alwaysdrop fetch-stopped
-check "download: a connection that keeps dropping: stopped at 128 of 224 MB, the part kept" eval 'grep -q "^@error The download of Wine engine stopped at 128 of 224 MB" "$SANDBOX/fetch-stopped.txt" && [ "$(stat -f %z "$DLC/$ENGINE_FILE.part")" = 134217728 ]'
-fetch_mode ok fetch-resumed
-check "download: the next try continues where it stopped" eval 'grep -q "^@done " "$SANDBOX/fetch-resumed.txt" && grep -q "resuming at 134217728 of" "$SANDBOX/fetch-resumed.log" && [ ! -e "$DLC/$ENGINE_FILE.part" ]'
-check "download: only the sandbox may name another server (the real one stays on the pinned URL)" eval '(unset SWTOR_ON_MAC_ROOT; SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$SOMSH" fetch-engine 2>&1 | grep -q "verified download in the cache\|download $(val ENGINE_URL "$SOMSH")")'
+fetch_mode changed ok fetch-second
+check "download: a changed file at the release URL, the right one through GitHub's API address (with Accept: application/octet-stream): verified" eval 'grep -q "^@done " "$SANDBOX/fetch-second.txt" && grep -q "sha256 [0-9a-f]\{64\} (expected $ESHA)" "$SANDBOX/fetch-second.log" && grep -q "trying GitHub.s other address" "$SANDBOX/fetch-second.log" && [ "$(shasum -a 256 "$DLC/$ENGINE_FILE" | cut -d" " -f1)" = "$ESHA" ] && ! grep -q "without Accept" "$SANDBOX/fetch-server.log"'
+rm -rf "$DLC"
+fetch_mode changed changed fetch-changed
+check "download: changed at both addresses: the message names the size and both checksums, nothing kept" eval 'grep -q "^@error The download of Wine engine is not the expected file: got 224 MB of 224 MB, sha256 [0-9a-f]\{12\}… (expected ${ESHA:0:12}…), also through GitHub.s second address" "$SANDBOX/fetch-changed.txt" && [ "$(grep -c "sha256 [0-9a-f]\{64\} (expected $ESHA)" "$SANDBOX/fetch-changed.log")" = 2 ] && [ -z "$(ls -A "$DLC" 2>/dev/null)" ]'
+fetch_mode alwaysdrop alwaysdrop fetch-stopped
+check "download: a connection that keeps dropping (both addresses): stopped at 192 of 224 MB, the part kept" eval 'grep -q "^@error The download of Wine engine stopped at 192 of 224 MB" "$SANDBOX/fetch-stopped.txt" && [ "$(stat -f %z "$DLC/$ENGINE_FILE.part")" = 201326592 ]'
+fetch_mode ok ok fetch-resumed
+check "download: the next try continues where it stopped" eval 'grep -q "^@done " "$SANDBOX/fetch-resumed.txt" && grep -q "resuming at 201326592 of" "$SANDBOX/fetch-resumed.log" && [ ! -e "$DLC/$ENGINE_FILE.part" ]'
+check "download: only the sandbox may name another server (the real one stays on the pinned URLs)" eval '(unset SWTOR_ON_MAC_ROOT; SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$SOMSH" fetch-engine 2>&1 | grep -q "verified download in the cache\|download $(val ENGINE_URL "$SOMSH")")'
 kill "$fserver" 2>/dev/null || true; wait "$fserver" 2>/dev/null || true
 rm -rf "$DLC"
 

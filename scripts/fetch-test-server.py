@@ -1,6 +1,7 @@
 """A local HTTP server for scripts/test-sandbox.sh's download tests (som.sh fetch-engine with
-SWTOR_ON_MAC_ENGINE_URL): it serves one file under /<mode>/<its name> and misbehaves the way
-networks do.
+SWTOR_ON_MAC_ENGINE_URL, SWTOR_ON_MAC_ENGINE_API_URL): it serves one file under
+/<mode>/<its name>, and as GitHub's API does under /assets/<mode> (only with Accept:
+application/octet-stream, else 415), and misbehaves the way networks do.
 
     python3 -I scripts/fetch-test-server.py <file> <port>
 
@@ -51,16 +52,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         parts = self.path.strip("/").split("/")
+        if len(parts) == 2 and parts[0] == "assets":
+            if self.headers.get("Accept", "") != "application/octet-stream":
+                print("assets without Accept: application/octet-stream", flush=True)
+                self.send_response(415)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            parts = ["assets-" + parts[1], NAME]
         if len(parts) != 2 or parts[1] != NAME:
             self.send_response(404)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        mode = parts[0]
-        n = tries[mode] = tries.get(mode, 0) + 1
+        key = parts[0]
+        mode = key[len("assets-"):] if key.startswith("assets-") else key
+        n = tries[key] = tries.get(key, 0) + 1
         rng = self.headers.get("Range", "")
         start = int(rng[len("bytes="):].split("-")[0]) if rng.startswith("bytes=") else 0
-        print(mode, rng or "-", flush=True)
+        print(key, rng or "-", flush=True)
         if mode == "html":
             page = b"<!DOCTYPE html><html><head><title>Wi-Fi login</title></head><body>Please log in</body></html>"
             self.send_response(200)
