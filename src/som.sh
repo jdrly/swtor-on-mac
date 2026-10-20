@@ -7,7 +7,8 @@
 #   som.sh settings    KEY=VALUE lines: the settings (Settings window) and whether they can change
 #   som.sh set K V     change one setting (retina, hud, gamemode, vsync, debug, physkeys,
 #                      rawmouse: on/off; memory: auto/low/medium/high/ultra/unlimited;
-#                      updates: on/off; mousespeed: one of MOUSE_SPEEDS)
+#                      updates: on/off; mousespeed: one of MOUSE_SPEEDS; hudpos: one of
+#                      HUD_POSITIONS)
 #   som.sh watch       the launchd job (cz.jandrly.swtoronmac.watch): Broadsword's Wine/bin
 #                      changed; hook the wrapper back in if a launcher update replaced it
 #   som.sh end-leftovers  end leftover Wine processes of the engine (only if no launcher,
@@ -378,10 +379,16 @@ status() {
 #               input thread, the macOS cursor frozen; patches/winemac-swgl-*.patch)
 #   mousespeed  "Mouse-Look Speed": RawMouseGameControllerScale for swtor.exe, a factor on the
 #               macOS pointer's speed (1: as with SWTOR on Mac 0.0.x)
+#   hudpos      "Metal HUD Position" (with hud on): MTL_HUD_ALIGNMENT, one of HUD_POSITIONS
+#               (libMTLHud's values). A triple-click inside the HUD's area opens macOS's HUD
+#               settings panel, also while Shift+F9 hides the HUD: top center by default, where
+#               SWTOR has no buttons that get clicked quickly (top right, libMTLHud's own
+#               default, has character creation's Randomize and sliders)
 # With physkeys or rawmouse on, the engine's Mac driver is the app's patched build
 # (Resources/wine/), else the engine's own (install_winemac).
-SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed"
+SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos"
 MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
+HUD_POSITIONS="topleft topcenter topright centerleft centered centerright bottomleft bottomcenter bottomright"
 setting_default() {
   case "$1" in
     retina|gamemode|vsync|updates|rawmouse) echo on ;;
@@ -389,6 +396,7 @@ setting_default() {
     hud|physkeys) echo off ;;
     memory) echo auto ;;
     mousespeed) echo 1 ;;
+    hudpos) echo topcenter ;;
   esac
 }
 setting_valid() { # <key> <value>
@@ -398,6 +406,7 @@ setting_valid() { # <key> <value>
     rawmouse:on|rawmouse:off) return 0 ;;
     memory:auto|memory:low|memory:medium|memory:high|memory:ultra|memory:unlimited) return 0 ;;
     mousespeed:*) case " $MOUSE_SPEEDS " in *" $2 "*) [ -n "$2" ] && return 0 ;; esac ;;
+    hudpos:*) case " $HUD_POSITIONS " in *" $2 "*) [ -n "$2" ] && return 0 ;; esac ;;
   esac
   return 1
 }
@@ -865,8 +874,14 @@ write_env() {
   say "Writing the settings file $SOM/env"
   gm="SWTOR_GAMEMODE_APP=\"$SOM/gamemode/SWTOR.app\""
   [ "$(setting gamemode)" = on ] || gm="#$gm   (Game Mode is off in Settings)"
-  hud="MTL_HUD_ENABLED=1"
-  [ "$(setting hud)" = on ] || hud="#$hud   (off in Settings)"
+  if [ "$(setting hud)" = on ]; then
+    hud="MTL_HUD_ENABLED=1
+# where the HUD sits (Settings: Metal HUD Position); Shift+F9 hides and shows it in the game,
+# Shift+F12 or a triple-click inside its area opens macOS's HUD settings panel
+MTL_HUD_ALIGNMENT=$(setting hudpos)"
+  else
+    hud="#MTL_HUD_ENABLED=1   (off in Settings)"
+  fi
   if [ "$(setting debug)" = on ]; then
     dbg="# Debug logging is on in Settings: d9mt's info messages, per-frame timing (HITCH, PSOBUILD,
 # STATS and RESTORE once a second) and memory statistics (DIAG MEM) in wine.log. Costs some

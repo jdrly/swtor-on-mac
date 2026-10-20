@@ -108,7 +108,8 @@ the one used last) and the selected pane's settings. Changes take effect the nex
 | Graphics | Vsync | on | `d3d9.presentInterval = 1` in `dxvk.conf` (off: unset) |
 | Graphics | Video Memory Profile | Automatic | `D9MT_MEMORY_PROFILE` (auto, low, medium, high, ultra, unlimited). The video memory the game is told it has: Low 2 GB, Medium 3 GB, High and above 4 GB. Automatic picks by the Mac's memory: 8 GB Low, 16 GB Medium, 24 GB High, more Ultra |
 | Game | Game Mode | on | `SWTOR_GAMEMODE_APP` in `env` |
-| Game | Show Metal HUD | off | `MTL_HUD_ENABLED=1` in `env`. It can't be toggled with a key in the game; turn it on here before starting the game |
+| Game | Show Metal HUD | off | `MTL_HUD_ENABLED=1` in `env`, from the next game start. In the game Shift+F9 hides and shows it; Shift+F12, or a triple-click inside the HUD's area (also while it is hidden), opens macOS's own HUD settings panel (Apple's `libMTLHud`, which has no option to turn that off) |
+| Game | Metal HUD Position | Top Center | `MTL_HUD_ALIGNMENT` (top left, top center, top right, center left, centered, center right, bottom left, bottom center, bottom right) while the HUD is on. Top Center keeps the HUD's area away from buttons that get clicked quickly, such as Randomize in character creation (top right, Apple's default) |
 | Keyboard | Game keys by keyboard position | off | The game sees every key by its position on a US keyboard (see below): SWTOR on Mac's build of Wine's Mac driver in its engine and `PhysicalKeyboard=y` for `swtor.exe` in the prefix's registry; off, the engine's own driver (only while the launcher and the game are closed) |
 | Mouse | Raw mouse-look | on | While the game hides the pointer to turn the camera, the mouse's own moves from GameController's `GCMouse`, sent by an input thread of the Mac driver as they come, the macOS pointer frozen (see below): SWTOR on Mac's build of Wine's Mac driver in its engine and `RawMouseWhenCursorHidden=y` for `swtor.exe`; off, `n` (and the engine's own driver if *Game keys by keyboard position* is off too). Only while the launcher and the game are closed |
 | Mouse | Mouse-Look Speed | 1× | `RawMouseGameControllerScale` for `swtor.exe` (0.5× to 3×): a factor on the macOS pointer's speed, which raw mouse-look matches at 1× |
@@ -309,8 +310,12 @@ game start, at some cost in performance, so turn it off again afterwards.
   shaders (see [Install](#install)). It gets smooth after that.
 - **Retina Mode** can only be changed while the launcher and the game are closed (it is in the
   Wine prefix's registry).
-- **The Metal HUD** can't be toggled with a key in the game; turn it on in Settings before
-  starting the game.
+- **The Metal HUD** is turned on in Settings before starting the game; in the game Shift+F9
+  only hides and shows it. Shift+F12, or three quick clicks inside the HUD's area (also while
+  it is hidden), open macOS's own HUD settings panel: Apple's HUD has no option to turn that
+  off, so SWTOR on Mac puts the HUD at the top center by default (Settings > Game > *Metal HUD
+  Position*), away from buttons that get clicked quickly. Turn the HUD off in Settings to be
+  rid of it entirely.
 - **Non-US keyboard layouts**: without *Game keys by keyboard position* the game names keys by
   what your layout types (Czech: *+ ě š* … on the number row). With it, keys are named by
   their US positions, so on QWERTZ layouts Z and Y swap names in the game. It can only be

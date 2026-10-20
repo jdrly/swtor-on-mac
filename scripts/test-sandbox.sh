@@ -565,6 +565,9 @@ mv "$SANDBOX/official-app-away" "$BS_APP"
 echo "== 4b. settings"
 check "settings: listed" test "$(som settings | sed -n 's/^vsync=//p')" = on
 som set hud on >/dev/null && check "set hud: MTL_HUD_ENABLED=1" grep -qx 'MTL_HUD_ENABLED=1' "$SOM/env"
+check "hudpos: top center by default, MTL_HUD_ALIGNMENT=topcenter with the HUD on" eval '[ "$(som settings | sed -n "s/^hudpos=//p")" = topcenter ] && grep -qx MTL_HUD_ALIGNMENT=topcenter "$SOM/env"'
+som set hudpos bottomleft >/dev/null && check "set hudpos bottomleft: settings.conf and env" eval 'grep -qx hudpos=bottomleft "$SOM/settings.conf" && grep -qx MTL_HUD_ALIGNMENT=bottomleft "$SOM/env" && [ "$(grep -c "^MTL_HUD_ALIGNMENT=" "$SOM/env")" = 1 ]'
+check "set hudpos: a value libMTLHud doesn't know refused, the setting kept" eval '! som set hudpos middle >/dev/null 2>&1 && grep -qx hudpos=bottomleft "$SOM/settings.conf"'
 som set vsync off >/dev/null && check "set vsync off: presentInterval unset" eval '! grep -q "^d3d9.presentInterval" "$SOM/dxvk.conf"'
 check "set vsync off: other options kept" grep -q '^d3d9.allowOutOfRangeVsDefs = True' "$SOM/dxvk.conf"
 som set debug on >/dev/null && check "set debug: info + profile + memstats" eval 'grep -qx DXVK_LOG_LEVEL=info "$SOM/env" && grep -qx D9MT_PROFILE=1 "$SOM/env" && grep -qx D9MT_MEMSTATS=1 "$SOM/env"'
@@ -590,6 +593,8 @@ check "set retina: no Wine left running" test -z "$(sandbox_wine)"
 check "set retina: refused while the launcher runs" eval '! som set retina on >/dev/null 2>&1'
 check "play: shows the launcher while it runs ($(play_target))" test "$(play_target)" = "show launcher"
 check "set hud: allowed while the launcher runs" eval 'som set hud off >/dev/null'
+check "set hudpos: allowed while the launcher runs" eval 'som set hudpos bottomleft >/dev/null'
+check "set hud off: no HUD lines in env, the position kept in settings.conf" eval '! grep -q "^MTL_HUD_" "$SOM/env" && grep -qx hudpos=bottomleft "$SOM/settings.conf"'
 kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true
 som set retina on >/dev/null && check "set retina on again" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
 check "settings: physkeys off by default" test "$(som settings | sed -n 's/^physkeys=//p')" = off
@@ -717,6 +722,9 @@ check "reinstall: the app's Mac driver stays" wm_is app
 check "reinstall: PhysicalKeyboard stays y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="y"'
 check "reinstall: RawMouseWhenCursorHidden stays y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"RawMouseWhenCursorHidden"="y"'
 check "reinstall: manifest winemac app" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = app
+check "reinstall: the HUD position kept (bottomleft)" grep -qx hudpos=bottomleft "$SOM/settings.conf"
+som set hud on >/dev/null && check "reinstall: with the HUD on, MTL_HUD_ALIGNMENT=bottomleft" grep -qx MTL_HUD_ALIGNMENT=bottomleft "$SOM/env"
+som set hud off >/dev/null; som set hudpos topcenter >/dev/null
 som set physkeys off >/dev/null && check "set physkeys off again: the app's driver (raw mouse-look on)" wm_is app
 som set vsync on >/dev/null; som set debug off >/dev/null; som set memory auto >/dev/null
 som set gamemode on >/dev/null; som set updates on >/dev/null
@@ -1170,6 +1178,7 @@ if [ -x "$OLD_APP/Contents/Resources/som.sh" ]; then
   check "upgrade: old engine, its libraries and the copies removed" test ! -e "$SOM/engine/bin/wine-preloader" -a ! -e "$SOM/frameworks" -a ! -e "$SOM/upgrade-backup"
   check "upgrade: manifest version $APPV, engine_id cx26" test "$(plutil -extract version raw -o - "$SOM/install-manifest.json")/$(plutil -extract engine_id raw -o - "$SOM/install-manifest.json")" = "$APPV/cx26"
   check "upgrade: settings kept" eval 'grep -qx physkeys=on "$SOM/settings.conf" && grep -qx memory=high "$SOM/settings.conf" && grep -qx retina=off "$SOM/settings.conf" && grep -qx D9MT_MEMORY_PROFILE=high "$SOM/env"'
+  check "upgrade: the HUD position, new to $OLDV's settings, top center" grep -qx hudpos=topcenter "$SOM/settings.conf"
   check "upgrade: RetinaMode=n kept" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="n"'
   check "upgrade: PhysicalKeyboard=y kept, the app's Mac driver" eval 'reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"y\"" && cmp -s "$APP/Contents/Resources/wine/winemac.so" "$WM/winemac.so"'
   check "upgrade: raw mouse-look on (the new setting's default), the app's Mac driver, all three files" eval 'grep -qx rawmouse=on "$SOM/settings.conf" && reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"RawMouseWhenCursorHidden\"=\"y\"" && wm_is app'

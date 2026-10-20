@@ -94,6 +94,17 @@ final class GameSettings {
     Binding(get: { self.values["mousespeed"] ?? "1" }, set: { self.set("mousespeed", $0) })
   }
 
+  // Metal HUD Position: MTL_HUD_ALIGNMENT (som.sh HUD_POSITIONS, libMTLHud's values)
+  static let hudPositions: [(String, String)] = [
+    ("topleft", "Top Left"), ("topcenter", "Top Center"), ("topright", "Top Right"),
+    ("centerleft", "Center Left"), ("centered", "Centered"), ("centerright", "Center Right"),
+    ("bottomleft", "Bottom Left"), ("bottomcenter", "Bottom Center"), ("bottomright", "Bottom Right"),
+  ]
+
+  var hudPosition: Binding<String> {
+    Binding(get: { self.values["hudpos"] ?? "topcenter" }, set: { self.set("hudpos", $0) })
+  }
+
   private func set(_ key: String, _ value: String) {
     let previous = values[key]
     values[key] = value
@@ -261,9 +272,18 @@ struct SettingsView: View {
         }
         Toggle(isOn: settings.toggle("hud")) {
           Text("Show Metal HUD")
-          Text("Apple's overlay with the frame rate and frame times, over the game. Turn it on here "
-               + "before starting the game: it can't be switched with a key while the game runs.")
+          Text("Apple's overlay with the frame rate and frame times, over the game, from the next "
+               + "game start. In the game, Shift+F9 hides and shows it. Shift+F12, or three quick "
+               + "clicks on the HUD (also while it is hidden), open macOS's HUD settings panel.")
         }
+        Picker(selection: settings.hudPosition) {
+          ForEach(GameSettings.hudPositions, id: \.0) { value, title in Text(title).tag(value) }
+        } label: {
+          Text("Metal HUD Position")
+          Text("Where the HUD sits. Top Center keeps it away from the buttons you click quickly, "
+               + "such as Randomize in character creation.")
+        }
+        .disabled(settings.values["hud"] != "on")
       }
 
     case .keyboard:
