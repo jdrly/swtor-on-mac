@@ -35,7 +35,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # SWTOR_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.2-dev.1}
+APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.2-dev.2}
 
 # Development builds: a version with a prerelease suffix, X.Y.Z-dev.N. They are published only
 # as GitHub pre-releases, never in the appcast. CFBundleShortVersionString is the version as is;
