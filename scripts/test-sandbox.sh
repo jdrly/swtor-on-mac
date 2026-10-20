@@ -1323,7 +1323,9 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   check "over $PREVV: the app's ntdll.so, $PREVV's (the engine's own) kept as .stock" eval 'ntdll_is_apps && cmp -s "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock"'
   check "over $PREVV: winemetal.so is $PREVV's code (LC_UUID $(dwarfdump -u "$WM/winemetal.so" | awk '{ print $2 }'))" eval 'macho_same "$PREV_APP/Contents/Resources/d9mt/winemetal.so" "$WM/winemetal.so" && [ "$(dwarfdump -u "$WM/winemetal.so" | awk "{ print \$2 }")" = "$(dwarfdump -u "$PREV_APP/Contents/Resources/d9mt/winemetal.so" | awk "{ print \$2 }")" ]'
   check "over $PREVV: winemetal.dll byte for byte $PREVV's" cmp -s "$PREV_APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll"
-  check "over $PREVV: settings.conf and dxvk.conf unchanged" eval 'cmp -s "$SANDBOX/prev-settings.conf" "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
+  # (settings.conf: this version writes every setting it knows, so one $PREVV does not know,
+  # hudpos, comes in with its default)
+  check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter), dxvk.conf unchanged" eval 'diff <(grep -v "^hudpos=" "$SANDBOX/prev-settings.conf") <(grep -v "^hudpos=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
   check "over $PREVV: env: the state cache line$([ "$CHANNEL" = dev ] && echo " and the A/B include") added, the rest as before (versions aside)" eval 'diff <(envnorm "$SANDBOX/prev-env") <(envnorm "$SOM/env") >"$SANDBOX/prev-env.diff" && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ]'
   check "over $PREVV: no Wine left running" test -z "$(sandbox_wine)"
   [ "$CHANNEL" != dev ] || "$APP/Contents/Resources/d9mt-ab.sh" pfv >/dev/null
