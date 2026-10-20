@@ -1223,12 +1223,16 @@ fi
 # run (any version), and of dosdevices only c: and z: (wineboot maps the other letters to
 # whatever volumes are mounted at the time); in the registry also without the values every
 # wineboot -u sets anew (PendingFileRenameOperations for those .tmp files, the input devices'
-# ContainerId)
+# ContainerId), and without the monitors the display driver enumerates (while the Mac's display
+# sleeps, wineboot adds virtual ones: Enum\DISPLAY, the monitor class and interface keys, and
+# the display adapter class, which gains a link to them)
 prefix_snap() {
   snap "$SOM/prefix" | grep -v -e '\.reg$' -e '\.reg|' -e '/dll[0-9a-f]*\.tmp$' -e '/dll[0-9a-f]*\.tmp|' \
     -e '^\./dosdevices/[a-y]:' -e '^\./dosdevices/z::'
   for r in system.reg user.reg userdef.reg; do
     printf '%s ' "$r"; sed -e 's/^\(\[.*\]\) [0-9]*$/\1/' -e '/^#time=/d' -e '/^"PendingFileRenameOperations"=/d' -e '/^"ContainerId"=/d' "$SOM/prefix/$r" |
+      awk 'index($0, "[") == 1 { skip = index($0, "\\\\Enum\\\\DISPLAY\\\\") || index($0, "{E6F07B5F-EE97-4A90-B076-33F57BF4EAA7}") ||
+             index($0, "\\\\Class\\\\{4D36E96E-E325-11CE-BFC1-08002BE10318}") || index($0, "\\\\Class\\\\{4D36E968-E325-11CE-BFC1-08002BE10318}") } !skip' |
       shasum -a 256 | cut -d' ' -f1
   done
 }
@@ -1270,7 +1274,7 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   snap "$SOM/engine" >"$SANDBOX/prev-engine.txt"
   rm -rf "$SANDBOX/prev-engine" && cp -c -R -p "$SOM/engine" "$SANDBOX/prev-engine"
   cp "$SOM/env" "$SANDBOX/prev-env"; cp "$SOM/settings.conf" "$SANDBOX/prev-settings.conf"; cp "$SOM/dxvk.conf" "$SANDBOX/prev-dxvk.conf"
-  check "$PREVV: env has no D9MT_STATE_CACHE" eval '! grep -q "^D9MT_STATE_CACHE=" "$SOM/env"'
+  check "$PREVV: env has the D9MT_STATE_CACHE line exactly if $PREVV writes it" eval '[ "$(grep -c "^D9MT_STATE_CACHE=" "$SOM/env")" = "$(grep -q "^D9MT_STATE_CACHE=" "$PREVSOM" && echo 1 || echo 0)" ]'
   check "$PREVV: no Wine left running" test -z "$(sandbox_wine)"
 
   som install >"$SANDBOX/prev-upgrade.txt" 2>&1 || { tail -20 "$SANDBOX/prev-upgrade.txt"; bad "install over $PREVV exit"; }
