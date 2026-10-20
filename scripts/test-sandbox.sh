@@ -384,6 +384,12 @@ check "game: end-leftovers refuses" eval '! som end-leftovers >/dev/null 2>&1'
 check "game: nothing ended" all_alive "$l4" "$g"
 check "game: install refuses" eval '! som install >"$SANDBOX/game.txt" 2>&1 && grep -q "^@error Quit the game first" "$SANDBOX/game.txt"'
 kill "$g"
+# a game outside the sandbox (another sandbox's test run, the real game) does not count here
+OUTSIDE=$(mktemp -d /tmp/som-outside.XXXXXX)
+cp "$SANDBOX/fake" "$OUTSIDE/game"
+og=$(orphan_as 'C:\Program Files\SWTOR\retailclient\swtor.exe' "$OUTSIDE/game"); sleep 0.3
+check "game outside the sandbox: not this sandbox's (busy=$(st busy))" test "$(st busy)" = leftovers
+kill "$og" 2>/dev/null || true; rm -rf "$OUTSIDE"
 # Broadsword's Wine: with its wineserver, a session of it (wait); without, its processes are
 # leftovers like the engine's (e.g. of a game start while the hook was not active)
 mkdir -p "$BS_WINE/test-bin"

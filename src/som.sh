@@ -237,18 +237,23 @@ wrapper_state() {
 # Programs are matched by their real executable (proc_pidpath, from hold-launcher --paths):
 # Wine 11 rewrites argv[0], so ps shows C:\...\name.exe for its processes. The game is still
 # found by that name (C:\...\swtor.exe, or a winetemp/... or Game Mode .../swtor.exe path).
+# In a sandbox only the sandbox's launcher and game count (another sandbox's test run, or the
+# real game, must not stop this one).
 proc_list() {
-  local helper="$RES/helpers/hold-launcher"
+  local helper="$RES/helpers/hold-launcher" r="" rr=""
+  if [ -n "$ROOT" ]; then r="$ROOT/"; rr="$(cd "$ROOT" 2>/dev/null && pwd -P)"; rr="${rr:+$rr/}"; rr="${rr:-$r}"; fi
   { if [ -x "$helper" ]; then "$helper" --paths 2>/dev/null | sed 's/^/P /'; fi
     ps -axww -o pid=,comm= 2>/dev/null | sed 's/^ */C /'; } |
-  awk -v a="$BS_APP/" -v w="$BS_WINE/" -v e="$ENG/" -v s="$ENG/bin/wineserver" -v t="$(winetemp_tag)" '
+  awk -v a="$BS_APP/" -v w="$BS_WINE/" -v e="$ENG/" -v s="$ENG/bin/wineserver" -v t="$(winetemp_tag)" -v r="$r" -v rr="$rr" '
     $1 == "P" { x = $0; sub(/^P [0-9]+ /, "", x); real[$2] = x; next }
     { pid = $2; prog = $0; sub(/^C [0-9]+ /, "", prog)
       exe = (pid in real) ? real[pid] : prog
       sub(/\/lib\/wine\/\.\.\/\.\.\/bin\//, "/bin/", exe) }   # a wineserver started by wine
+    { ours = r == "" || index(exe, r) == 1 || index(exe, rr) == 1 || index(prog, r) == 1 || index(prog, rr) == 1 ||
+        (t != "" && index(exe, t)) }
     exe == a "Contents/MacOS/mac_wine" { print "helper", pid, prog; next }
-    index(prog, a) || index(exe, a) || prog ~ /\/Star Wars - The Old Republic Launcher$/ { print "launcher", pid, prog; next }
-    tolower(prog) ~ /[\/\\]swtor\.exe$/ || tolower(exe) ~ /\/swtor\.exe$/ { print "game", pid, prog; next }
+    index(prog, a) || index(exe, a) || (ours && prog ~ /\/Star Wars - The Old Republic Launcher$/) { print "launcher", pid, prog; next }
+    ours && (tolower(prog) ~ /[\/\\]swtor\.exe$/ || tolower(exe) ~ /\/swtor\.exe$/) { print "game", pid, prog; next }
     index(exe, w) && exe ~ /\/wineserver$/ { print "wine", pid, prog; next }
     index(exe, w) { print "bswine", pid, prog; next }
     exe == s { print "session", pid, prog; next }
