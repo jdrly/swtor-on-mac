@@ -87,10 +87,57 @@ extension Installer {
       guard let root else { return true }
       return [app.bundleURL?.path, app.executableURL?.path].contains { $0.map { inside($0, root) } == true }
     }
-    let isGame = { (app: NSRunningApplication) in
-      app.bundleIdentifier == gameBundleID || app.executableURL?.path.hasSuffix("/swtor.exe") == true
+    return (apps.first { !isGame($0) }, apps.first(where: { isGame($0) }))
+  }
+
+  // the game: its Game Mode bundle, or a swtor.exe program
+  nonisolated static func isGame(_ app: NSRunningApplication) -> Bool {
+    app.bundleIdentifier == gameBundleID || app.executableURL?.path.hasSuffix("/swtor.exe") == true
+  }
+
+  // The game's window comes up behind the app that is active (macOS 14+'s cooperative
+  // activation: an app only gets activated if the active one yields to it). After starting the
+  // game the launcher deactivates itself, and macOS activates the app that was active before
+  // it, often this one (Play): the game's own request to come forward is then turned down, and
+  // its window stays behind ours. So while a game that has just started waits for the
+  // activation, this app, whenever it is active, yields to it and activates it once it shows
+  // its window (a regular app). Once per game start, for 2 minutes at most (no fighting the
+  // user later); a game already running when the app starts is left alone.
+  func gameStarted(_ game: NSRunningApplication) {
+    if let root = Installer.sandboxRoot(status),
+       ![game.bundleURL?.path, game.executableURL?.path].contains(where: { $0.map { Installer.inside($0, root) } == true }) {
+      return
     }
-    return (apps.first { !isGame($0) }, apps.first(where: isGame))
+    guard startingGame?.processIdentifier != game.processIdentifier else { return }
+    startingGame = game
+    startingGameSince = .now
+    startingGamePolicy = game.observe(\.activationPolicy, options: [.initial, .new]) { [weak self] _, _ in
+      DispatchQueue.main.async { MainActor.assumeIsolated { self?.handOffToGame() } }
+    }
+  }
+
+  func handOffToGame() {
+    guard let game = startingGame else { return }
+    if game.isTerminated || game.isActive || Date.now.timeIntervalSince(startingGameSince) > 120 {
+      endGameHandOff()
+      return
+    }
+    guard NSApp.isActive else { return }
+    NSApp.yieldActivation(to: game)
+    // (without a window yet it is not a regular app: then it can activate itself when it shows
+    // one, as we have yielded)
+    guard game.activationPolicy == .regular else { return }
+    NSLog("SWTOR on Mac: handing the activation to the game (pid %d)", game.processIdentifier)
+    game.activate()
+  }
+
+  func gameActivated(_ pid: pid_t) {
+    if pid != 0, pid == startingGame?.processIdentifier { endGameHandOff() }
+  }
+
+  private func endGameHandOff() {
+    startingGame = nil
+    startingGamePolicy = nil
   }
 
   nonisolated static func processAlive(_ pid: pid_t) -> Bool {

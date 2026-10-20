@@ -202,15 +202,30 @@ final class Installer {
   private var activeObserver: NSObjectProtocol?
   private var appsObserver: NSKeyValueObservation?
   private var recheck: DispatchWorkItem?
+  // the game that has just started and still waits for the activation (Play.swift)
+  var startingGame: NSRunningApplication?
+  var startingGameSince = Date.distantPast
+  var startingGamePolicy: NSKeyValueObservation?
+  var gameActivatedObserver: NSObjectProtocol?
 
   // Re-check when the user comes back to the app, and when the launcher or the game starts or
   // quits: NSWorkspace's runningApplications (KVO; its didTerminate notification leaves out
-  // LSUIElement apps, and the game runs from the Game Mode bundle, which is one).
+  // LSUIElement apps, and the game runs from the Game Mode bundle, which is one). A game that
+  // starts gets the activation from here once it shows its window (handOffToGame, Play.swift).
   func observe() {
     guard activeObserver == nil else { return }
     activeObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-      MainActor.assumeIsolated { self?.refresh() }
+      MainActor.assumeIsolated {
+        self?.refresh()
+        self?.handOffToGame()
+      }
+    }
+    gameActivatedObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+      let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+      let pid = app?.processIdentifier ?? 0
+      MainActor.assumeIsolated { self?.gameActivated(pid) }
     }
     let swtorPids = PidSet()
     appsObserver = NSWorkspace.shared.observe(\.runningApplications, options: [.initial, .old, .new]) { [weak self] _, change in
@@ -218,6 +233,9 @@ final class Installer {
       for app in change.newValue ?? [] where Installer.isSWTOR(app) {
         swtorPids.insert(app.processIdentifier)
         started = true
+        if change.kind == .insertion, Installer.isGame(app) {
+          DispatchQueue.main.async { MainActor.assumeIsolated { self?.gameStarted(app) } }
+        }
       }
       let quit = (change.oldValue ?? []).contains { swtorPids.remove($0.processIdentifier) || Installer.isSWTOR($0) }
       guard quit || started else { return }
