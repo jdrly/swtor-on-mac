@@ -297,7 +297,7 @@ game start, at some cost in performance, so turn it off again afterwards.
 
 ## Known issues
 
-- **The Wine engine changed in 0.1.0** (CrossOver 26.3 with Wine 11, before CrossOver 24.0.7
+- **The Wine engine changed in 0.1** (CrossOver 26.3 with Wine 11, before CrossOver 24.0.7
   with Wine 9). If the game doesn't start or behaves worse than on 0.0.6, please report it
   (Debug Logging on, then **Collect Logs…**), and go back to 0.0.6 if you need to: download it
   from [Releases](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.0.6), copy it over the
@@ -308,6 +308,8 @@ game start, at some cost in performance, so turn it off again afterwards.
   first mouse-look; *Mouse-Look Speed* scales it.
 - **Stutter the first time** you see an area or effect, while d9mt compiles and caches its
   shaders (see [Install](#install)). It gets smooth after that.
+- **The Cartel Market sometimes ignores a reopen**: if you open it again right after closing
+  it, the game sometimes ignores that press. The game does this on Windows too; press again.
 - **Retina Mode** can only be changed while the launcher and the game are closed (it is in the
   Wine prefix's registry).
 - **The Metal HUD** is turned on in Settings before starting the game; in the game Shift+F9
@@ -565,7 +567,9 @@ local feed, as in SWGL on Mac.
   then a build from scratch every time. It is reproducible: `SOURCE_DATE_EPOCH` is the commit's
   time, and the same `D9MT_WORK` path gives the same `d3d9.dll`. (0.1.1's `winemetal.dll` is
   0.1.0's: the bridge's source is the same, and `SOURCE_DATE_EPOCH=1792149856` builds it byte
-  for byte.)
+  for byte. 0.1.2's `d3d9.dll` is d9mt main `2a1bc00` built with `SOURCE_DATE_EPOCH=1792457826`,
+  the time of `c3f46ce`, which has the same tree: byte for byte the file 0.1.2-dev.2 and dev.3
+  were tested with.)
 - `build.sh` assembles `dist/SWTOR on Mac.app` with Sparkle (pinned download; ad-hoc signed;
   `--install` copies it to /Applications). Needs Xcode 27 (macOS 27 SDK); the app runs on
   macOS 26 and later.
@@ -641,7 +645,7 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 |---|---|---|
 | Wine engine `cx-26.3.0-8` (CrossOver 26.3, Wine 11.0, x86_64 WoW64; the one SWGL on Mac uses) | [athei/wine-build cx-26.3.0-8](https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
 | Sparkle 2.10.0 (bundled) | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
-| d9mt `c3f46ce` (bundled, `prebuilt/d9mt`; branch `fix/view-lifetime-dtor`: main `6fa5df7` plus texture views released only once the GPU is past their last command buffer) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/c3f46ce7f628c0f647870b04e8306e71024313d9) | see `prebuilt/d9mt` |
+| d9mt `2a1bc00` (bundled, `prebuilt/d9mt`; main after jdrly/d9mt#24: texture views kept until the GPU has retired them, on top of `6fa5df7`) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/2a1bc001536267de29a367b3edaebe741ccbadc6) | see `prebuilt/d9mt` |
 | The engine's Wine sources (for the Mac driver, `prebuilt/winemac`, and `ntdll.so`, `prebuilt/ntdll`): athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0) (codeload tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006 (only for configuring that build) | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
