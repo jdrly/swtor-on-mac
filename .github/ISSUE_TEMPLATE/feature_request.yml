@@ -1,6 +1,6 @@
 name: Idea or request
 description: Suggest an improvement to SWTOR on Mac.
-labels: [enhancement]
+labels: [enhancement, needs-triage]
 body:
   - type: textarea
     id: idea
@@ -9,3 +9,10 @@ body:
       description: What you'd like SWTOR on Mac to do, and why it would help you.
     validations:
       required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What do you do today instead?
+      description: How you work around it now, if at all.
+    validations:
+      required: false

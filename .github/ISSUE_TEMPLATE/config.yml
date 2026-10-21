@@ -3,6 +3,12 @@ contact_links:
   - name: Troubleshooting
     url: https://github.com/jdrly/swtor-on-mac#troubleshooting
     about: Common problems and what to do about them.
+  - name: Ask Pharaphobia on Discord
+    url: https://discord.gg/AnV3fZWz2b
+    about: Questions and help from SWTOR on Mac's developer.
+  - name: swonmac.com
+    url: https://swonmac.com
+    about: Downloads and the release notes of SWTOR on Mac and SWGL on Mac.
   - name: Problems with SWTOR itself (not caused by SWTOR on Mac)
     url: https://www.swtor.com
     about: If it also happens after Uninstall (with the official app alone), it is a question for Broadsword. Please don't mention SWTOR on Mac to them.

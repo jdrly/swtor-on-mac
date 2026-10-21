@@ -1,0 +1,99 @@
+name: Task
+description: A planned change, written as a precise specification (developers and agents)
+title: ""
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write the title as `Context: Actionable result`, for example
+        `Engine download: Resume a download that broke off`, and use **the same title for the pull request**
+        (see [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md#issues)). The area is a label, not a
+        title prefix. Use the terms from [CONTEXT.md](../blob/main/CONTEXT.md).
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What should happen and why, and where the request came from.
+      placeholder: |
+        Where it came from (a player's report, a measurement, a review, an upstream change), what
+        problem it solves and what happens if it isn't done. Link the evidence.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Affected areas
+      description: >-
+        Files, functions, scripts, settings or pages this touches. **List only what you have
+        verified in the repository**: a wrong path costs whoever picks this up more time than
+        an empty field.
+    validations:
+      required: false
+
+  - type: textarea
+    id: changes
+    attributes:
+      label: What's needed
+      description: A numbered list of concrete changes.
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Technical, observable conditions for done. The developer checks them.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: uat
+    attributes:
+      label: Verification (UAT)
+      description: >-
+        Not the same as the acceptance criteria. **UAT is a scenario a non-technical player can
+        click through** and answer yes or no at the end. Each step is an action and, after the
+        arrow, the expected result. No commands, no reading logs.
+        For work without a visible effect, say where the result shows (the window, Settings,
+        Collect Logs, the game), but do not leave it out.
+      value: |
+        **SWTOR on Mac version (build):**
+        **Mac, chip and macOS:**
+        **Starting point:** (for example: 0.1.3 installed, the launcher and the game closed)
+
+        1. Action.
+           → Expected result.
+        2.
+           →
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Implementation notes
+      description: Constraints, traps, what to watch out for, what deliberately not to do.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contract
+    attributes:
+      label: Contract check
+      options:
+        - label: >-
+            The terms used match `CONTEXT.md`, or adding them to the glossary is part of this task.
+          required: false
+        - label: >-
+            The task contradicts no `accepted` ADR, or the conflict is described and a new ADR is
+            part of the task.
+          required: false
