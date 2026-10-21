@@ -78,7 +78,11 @@ If two sources conflict, report the conflict instead of silently choosing one.
 - Keep the PR a **draft** until it meets the Definition of Done.
 - Keep changes focused: don't mix a change with unrelated refactoring, which gets its own issue
   and PR. Update the README when behaviour changes.
-- Merge with **squash**; the squash commit's subject is the PR title.
+- **Review and merge.** Every PR gets an **independent agent review** (preferably GPT-6.1-Sol)
+  by an agent that didn't write the change; its verdict goes into the PR, as a comment or in the
+  description. The PR is **squash-merged**, with the PR title as the commit subject, once that
+  verdict has no open `Blocker` or `High` **and** the repository's checks (the Checks workflow)
+  are green. The maintainer doesn't review code by hand.
 
 ## Code review
 
@@ -126,8 +130,8 @@ A change is done only when all of these hold:
 - [ ] The README describes the new behaviour. Terms follow `CONTEXT.md`; a new term is added in
       the same PR.
 - [ ] A changed decision has an ADR in the same PR, or links an existing `accepted` ADR.
-- [ ] An independent review (by someone, or an agent, that didn't write the change) found no open
-      `Blocker` or `High`.
+- [ ] The independent agent review (preferably GPT-6.1-Sol) has no open `Blocker` or `High`, and
+      its verdict is in the PR.
 - [ ] The issue's UAT scenario has been clicked through and ticked off in the issue.
 
 ## Never do these things

@@ -21,8 +21,14 @@ Closes #
 - [ ] A new d9mt pin updates `scripts/build-d9mt.sh`, `prebuilt/d9mt` and the README's *Pinned components* together.
 - [ ] The README describes the new behaviour; terms follow `CONTEXT.md`, and a new term is added in this PR.
 - [ ] A changed decision has an ADR in this PR, or links an existing `accepted` ADR.
-- [ ] An independent review found no open `Blocker` or `High`.
+- [ ] The independent agent review (preferably GPT-6.1-Sol) has no open `Blocker` or `High`, and its verdict is in the PR.
 - [ ] The issue's UAT scenario has been clicked through and ticked off in the issue.
+
+## Review
+
+<!-- An independent agent (preferably GPT-6.1-Sol) reviews this PR and puts its verdict here or in a comment. Squash-merge (subject = PR title) after a clean verdict (no open Blocker or High) and green checks. -->
+
+- **Verdict:** pending
 
 ## Risks and what I didn't do
 
