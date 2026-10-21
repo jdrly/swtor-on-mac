@@ -175,7 +175,3 @@ _Avoid_: “update server”.
 **Release notes**
 `release-notes/<version>.md`, used unchanged in the GitHub release, the update window and on
 swonmac.com, in the format of [release-notes/README.md](release-notes/README.md).
-
-## Open
-
-- Why the engine is downloaded and never bundled is not written down (ADR-0002).
