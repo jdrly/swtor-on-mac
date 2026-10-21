@@ -164,16 +164,23 @@ crash_reports() {
 # Counted per process of the game and Wine (other apps' only as a number, never their names),
 # then the last GPU_LINES lines of them and of the GPU driver in the kernel (AGX), and the last
 # METAL_LINES of Metal's other errors in the game and Wine (the Metal shader cache's
-# "MDB_MAP_FULL" only counted). The query takes 10-30 s; given up after GPU_TIMEOUT s. In a
-# sandbox the unified log is $ROOT/bin/log if there is one (a test's), else it is not read.
+# "MDB_MAP_FULL" only counted). The GPU driver's own text can name any app or path, so of its
+# lines only the time, the sender, the kind of event and whether it names the game or Wine. The
+# query takes 10-30 s; it is ended after GPU_TIMEOUT s (KILL GPU_GRACE s after TERM). In a
+# sandbox the unified log is $ROOT/bin/log if there is one (a test's), else it is not read, and
+# SWTOR_ON_MAC_GPU_TIMEOUT can shorten the limit.
 GPU_HOURS=2
 GPU_LINES=50
 METAL_LINES=20
 GPU_TIMEOUT=90
+GPU_GRACE=5
 UNIFIED_LOG=/usr/bin/log
-[ -z "$ROOT" ] || UNIFIED_LOG="$ROOT/bin/log"
+if [ -n "$ROOT" ]; then
+  UNIFIED_LOG="$ROOT/bin/log"
+  GPU_TIMEOUT="${SWTOR_ON_MAC_GPU_TIMEOUT:-$GPU_TIMEOUT}"
+fi
 gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
-  local pid killer st
+  local pid killer st timedout=0
   echo "GPU errors in macOS's unified log, the last $GPU_HOURS hours (until $(date '+%F %T %z'))"
   if [ ! -x "$UNIFIED_LOG" ]; then
     echo "not read (no $UNIFIED_LOG)" | tee "$work/gpu-summary"
@@ -184,14 +191,27 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
       AND (sender CONTAINS[c] "metal" OR sender CONTAINS[c] "IOGPU" OR sender CONTAINS[c] "AGX"))
     OR (process == "kernel" AND sender BEGINSWITH "AGX"))' </dev/null >"$work/gpu-log" 2>/dev/null &
   pid=$!
-  ( sleep "$GPU_TIMEOUT" && kill "$pid" ) </dev/null >/dev/null 2>&1 &
+  # (the time limit: TERM, and KILL for a query that ignores it; the mark says it ran out of time.
+  # A query that ends earlier ends the watchdog's sleep, and with it the rest of the chain.)
+  ( sleep "$GPU_TIMEOUT" && : >"$work/gpu-timeout" && kill "$pid" && sleep "$GPU_GRACE" &&
+    kill -KILL "$pid" ) </dev/null >/dev/null 2>&1 &
   killer=$!
   wait "$pid" 2>/dev/null; st=$?  # (2>: not bash's "Terminated" line for a query that ran out of time)
   pkill -P "$killer" sleep 2>/dev/null; wait "$killer" 2>/dev/null
+  [ ! -e "$work/gpu-timeout" ] || timedout=1
   # (a line: date time type process[pid:tid] (sender) message; only other apps' names have spaces)
-  LC_ALL=C awk -v lines="$GPU_LINES" -v mlines="$METAL_LINES" -v st="$st" -v summary="$work/gpu-summary" '
+  LC_ALL=C awk -v lines="$GPU_LINES" -v mlines="$METAL_LINES" -v st="$st" -v timedout="$timedout" \
+      -v summary="$work/gpu-summary" '
     !/^[0-9][0-9][0-9][0-9]-/ { next }
-    { name = $4; sub(/\[.*/, "", name); ours = name ~ /^wine/ || name == "swtor.exe" || name == "kernel" }
+    { name = $4; sub(/\[.*/, "", name); ours = name ~ /^wine/ || name == "swtor.exe" }
+    name == "kernel" {
+      sender = $5; if (sender !~ /^\([A-Za-z0-9_.-]+\)$/) sender = "(AGX)"
+      body = $0; for (i = 1; i <= 5; i++) sub(/^[^ ]+ +/, "", body); body = tolower(body)
+      kind = body ~ /restart|reset|recover/ ? "GPU restart" : body ~ /fault/ ? "GPU fault" : \
+        body ~ /timeout|timed out|hang|stall/ ? "GPU timeout" : body ~ /error|fail/ ? "GPU error" : "other"
+      gpu[++g] = $1 " " $2 " " $3 " kernel " sender ": " kind (body ~ /wine|swtor/ ? ", names the game or Wine" : "")
+      next
+    }
     /IOGPUMetalError/ {
       if (!ours) { other++; next }
       pid = $4; sub(/^[^[]*\[/, "", pid); sub(/:.*/, "", pid)
@@ -204,7 +224,7 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
     /IOGPUMetalError/ || name == "kernel" { gpu[++g] = $0; next }
     { metal[++m] = $0 }
     END {
-      if (st > 128) print "(the query ran out of time: what came until then)"
+      if (timedout) print "(the query ran out of time: what came until then)"
       else if (st) print "(the query failed, status " st ")"
       s = "IOGPUMetalError (GPU command buffer errors, 2 lines each): " total + 0 " in the game and Wine"
       if (other) s = s ", " other " in other apps"
