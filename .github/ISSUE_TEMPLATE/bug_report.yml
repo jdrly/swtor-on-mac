@@ -1,24 +1,80 @@
 name: Bug report
 description: Something in SWTOR on Mac does not work (install, the game, updates, uninstall).
-labels: [bug]
+title: ""
+labels: ["bug", "needs-triage"]
 body:
   - type: markdown
     attributes:
       value: |
         Thanks for reporting! SWTOR on Mac is an unofficial project: please report problems
-        here or to Pharaphobia on Discord, never to Broadsword or SWTOR customer support.
+        here or to Pharaphobia on [Discord](https://discord.gg/AnV3fZWz2b), never to Broadsword
+        or SWTOR customer support.
 
         **Please attach the Collect Logs zip:** in SWTOR on Mac choose
         **SWTOR on Mac > Collect Logs…**; it saves `SWTOR-on-Mac-logs-<date>.zip` to your
         Desktop. Account names, e-mail addresses and your user name are already removed from
         it. Never post your password or the launcher's command line.
+
+        If you can, write the title as `Context: What goes wrong`, for example
+        `Mouse-look: The camera jumps after alt-tab`.
+
   - type: textarea
-    id: what
+    id: observed
     attributes:
       label: What happened?
-      description: What you did, what you expected, and what happened instead. When did it happen (time, in the launcher or in game, which area)?
+      description: >-
+        What you saw, word for word if there was a message; a screenshot helps. When did it
+        happen (time, in the launcher or in game, which area)?
     validations:
       required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: What should have happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: What you did before it happened. "It happens every time I …" is a good start.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: How bad is it?
+      options:
+        - The game doesn't start, or crashes
+        - Install, Reinstall, Update or Uninstall fails
+        - The game runs, but badly (stutter, low frame rate, wrong graphics)
+        - Something doesn't work as described (a setting, Play SWTOR, the mouse, the keys)
+        - Cosmetic
+    validations:
+      required: true
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it happen?
+      options:
+        - The SWTOR on Mac window or Settings
+        - Install, Reinstall or Update
+        - The launcher (login, patching, Play)
+        - Starting the game
+        - In the game
+        - Uninstall
+    validations:
+      required: true
+
   - type: textarea
     id: logs
     attributes:
@@ -27,21 +83,75 @@ body:
       placeholder: Drop the zip here
     validations:
       required: true
+
   - type: input
     id: version
     attributes:
       label: SWTOR on Mac version
       description: SWTOR on Mac > About SWTOR on Mac.
-      placeholder: "0.0.2"
+      placeholder: "0.1.3"
     validations:
       required: true
+
+  - type: dropdown
+    id: macos
+    attributes:
+      label: macOS
+      options:
+        - macOS 26
+        - macOS 27
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: chip
+    attributes:
+      label: Chip
+      options:
+        - M1 (any)
+        - M2 (any)
+        - M3 (any)
+        - M4 (any)
+        - M5 (any)
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: memory
+    attributes:
+      label: Memory (RAM)
+      description: Apple menu > About This Mac.
+      options:
+        - 8 GB
+        - 16 GB
+        - 18 to 24 GB
+        - 32 GB or more
+    validations:
+      required: true
+
   - type: input
     id: mac
     attributes:
-      label: Mac and macOS
+      label: Mac model
       placeholder: "MacBook Pro M3 Pro, 18 GB, macOS 26.4"
     validations:
+      required: false
+
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Did it work in an earlier version of SWTOR on Mac?
+      description: If yes, write the last version that worked under "Anything else".
+      options:
+        - I don't know
+        - "Yes, it worked in an earlier version"
+        - "No, it never worked"
+        - This is the first version I use
+    validations:
       required: true
+
   - type: dropdown
     id: official
     attributes:
@@ -53,8 +163,11 @@ body:
         - "Yes, also without SWTOR on Mac"
     validations:
       required: true
+
   - type: textarea
     id: extra
     attributes:
       label: Anything else
-      description: Screenshots, display setup (external monitor, refresh rate), settings you changed.
+      description: >-
+        Screenshots, display setup (external monitor, refresh rate), settings you changed, the
+        last version that worked.
