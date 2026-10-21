@@ -118,8 +118,8 @@ A change is done only when all of these hold:
       with `scripts/test-update.sh`.
 - [ ] A bug fix has a regression check that fails without the fix: a `test-sandbox.sh` section
       where the sandbox can reach it, otherwise a manual check written in the PR.
-- [ ] Install stays all-or-nothing and Uninstall still puts Broadsword's folder back byte for byte
-      (`test-sandbox.sh` checks both).
+- [ ] Install stays all-or-nothing, and Uninstall still puts Broadsword's folder back byte for
+      byte apart from the game settings it copies back (`test-sandbox.sh` checks both).
 - [ ] No log, `env` or Collect Logs file gains account names, e-mail addresses, the user name or
       the launcher's command line.
 - [ ] A change on the game's path (the wrapper, `env`, the engine's parts, the d9mt pin) is

@@ -10,9 +10,8 @@ deciders: Jan Drlý
 
 SWTOR on Mac 0.0.1 to 0.0.6 ran the game on Sikarugir's CrossOver 24.0.7 (Wine 9), with
 Sikarugir's template libraries in a `frameworks/` folder (`src/som.sh`, `OLD_ENGINE_SHA256`).
-SWGL on Mac already ran on athei's build of CodeWeavers' CrossOver 26.3 (Wine 11). The
-maintainer's plan was to try that engine against CrossOver 24.0.7, also as a step toward an
-arm64 path (the plan lives outside this repository).
+SWGL on Mac already ran on athei's build of CodeWeavers' CrossOver 26.3 (Wine 11)
+(README, *Credits and licenses*).
 
 ## Decision
 

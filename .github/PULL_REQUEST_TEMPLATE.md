@@ -15,7 +15,7 @@ Closes #
 - [ ] `shellcheck -S warning` and `/bin/bash -n` (macOS's bash 3.2) on the scripts, `actionlint` on the workflows, and `./build.sh` (Xcode 27) pass locally.
 - [ ] A change to `src/som.sh`, `src/wine-wrapper.sh`, the helpers or Collect Logs passes `scripts/test-sandbox.sh`; a change to updates is tested with `scripts/test-update.sh`.
 - [ ] A bug fix has a regression check that fails without the fix (a `test-sandbox.sh` section where it can reach; otherwise the manual check is described above).
-- [ ] Install stays all-or-nothing, and Uninstall still puts Broadsword's folder back byte for byte.
+- [ ] Install stays all-or-nothing, and Uninstall still puts Broadsword's folder back byte for byte apart from the game settings it copies back.
 - [ ] No log, `env` or Collect Logs file gains account names, e-mail addresses, the user name or the launcher's command line.
 - [ ] A change on the game's path (wrapper, `env`, the engine's parts, the d9mt pin) is nothing measurably slower: session reports before and after (`session-report.sh --compare`).
 - [ ] A new d9mt pin updates `scripts/build-d9mt.sh`, `prebuilt/d9mt` and the README's *Pinned components* together.
