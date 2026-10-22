@@ -1307,15 +1307,29 @@ fi
 # ContainerId), and without the monitors the display driver enumerates (while the Mac's display
 # sleeps, wineboot adds virtual ones: Enum\DISPLAY, the monitor class and interface keys, and
 # the display adapter class, which gains a link to them)
-prefix_snap() {
-  snap "$SOM/prefix" | grep -v -e '\.reg$' -e '\.reg|' -e '/dll[0-9a-f]*\.tmp$' -e '/dll[0-9a-f]*\.tmp|' \
+prefix_snap() {  # [prefix folder, default $SOM/prefix]
+  local p="${1:-$SOM/prefix}"
+  snap "$p" | grep -v -e '\.reg$' -e '\.reg|' -e '/dll[0-9a-f]*\.tmp$' -e '/dll[0-9a-f]*\.tmp|' \
     -e '^\./dosdevices/[a-y]:' -e '^\./dosdevices/z::'
   for r in system.reg user.reg userdef.reg; do
-    printf '%s ' "$r"; sed -e 's/^\(\[.*\]\) [0-9]*$/\1/' -e '/^#time=/d' -e '/^"PendingFileRenameOperations"=/d' -e '/^"ContainerId"=/d' "$SOM/prefix/$r" |
+    printf '%s ' "$r"; sed -e 's/^\(\[.*\]\) [0-9]*$/\1/' -e '/^#time=/d' -e '/^"PendingFileRenameOperations"=/d' -e '/^"ContainerId"=/d' "$p/$r" |
       awk 'index($0, "[") == 1 { skip = index($0, "\\\\Enum\\\\DISPLAY\\\\") || index($0, "{E6F07B5F-EE97-4A90-B076-33F57BF4EAA7}") ||
              index($0, "\\\\Class\\\\{4D36E96E-E325-11CE-BFC1-08002BE10318}") || index($0, "\\\\Class\\\\{4D36E968-E325-11CE-BFC1-08002BE10318}") } !skip' |
       shasum -a 256 | cut -d' ' -f1
   done
+}
+# prefix_changes <prefix_snap file> [prefix folder] [file for the snapshot now]: what differs in
+# the prefix now, one a line: a file's path (its metadata or its checksum), a registry file's
+# name (system.reg ...), and any other differing snapshot line as it is, so that nothing drops
+# out unnoticed. (Sections 15 and 16 keep both snapshots, so the comparison can be repeated.)
+prefix_changes() {
+  { prefix_snap "${2:-}" | tee "${3:-/dev/null}" | diff "$1" - || true; } | awk '
+    !/^[<>] / { next }
+    { l = substr($0, 3) }
+    l ~ /^\.\/[^|]*\|/ { sub(/\|.*/, "", l); print l; next }
+    l ~ /^[0-9a-f]+  \.\// && index(l, "  ") == 65 { print substr(l, 67); next }
+    l ~ /^(system|user|userdef)\.reg [0-9a-f]+$/ { sub(/ .*/, "", l); print l; next }
+    { print l }' | sort -u
 }
 # engine_same <name>: the engine's files that differ from $SANDBOX/<name>-engine (listed in
 # $SANDBOX/<name>-engine.diff) are the same code, but for ntdll.so and ntdll.so.stock (the
@@ -1336,6 +1350,24 @@ engine_same() {
     macho_same "$SANDBOX/$1-engine/$f" "$SOM/engine/$f" || { echo "  differs: $f"; return 1; }
   done <"$SANDBOX/$1-engine.diff"
 }
+
+# prefix_changes itself (sections 15 and 16 allow only d3d9.dll to change): on a fake prefix,
+# a changed registry value, another file next to d3d9.dll and a new file are each reported,
+# a changed d3d9.dll alone gives just its path
+echo "== 14b. the prefix comparison sees what changed"
+FP="$SANDBOX/fake-prefix"; rm -rf "$FP"; mkdir -p "$FP/drive_c/windows/system32"
+echo dll >"$FP/drive_c/windows/system32/d3d9.dll"; echo x >"$FP/drive_c/windows/system32/d3d9Xdll"
+for r in system.reg user.reg userdef.reg; do printf 'WINE REGISTRY Version 2\n\n[Software\\\\Test] 1\n"A"="1"\n' >"$FP/$r"; done
+prefix_snap "$FP" >"$SANDBOX/fake-prefix.txt"
+echo dll2 >"$FP/drive_c/windows/system32/d3d9.dll"
+check "prefix comparison: a changed d3d9.dll alone gives just its path" eval '[ "$(prefix_changes "$SANDBOX/fake-prefix.txt" "$FP")" = ./drive_c/windows/system32/d3d9.dll ]'
+sed -i '' 's/"A"="1"/"A"="2"/' "$FP/user.reg"
+check "prefix comparison: a changed registry value is reported (user.reg)" eval 'prefix_changes "$SANDBOX/fake-prefix.txt" "$FP" | grep -qx user.reg'
+sed -i '' 's/"A"="2"/"A"="1"/' "$FP/user.reg"; echo y >"$FP/drive_c/windows/system32/d3d9Xdll"
+check "prefix comparison: a file named like d3d9.dll is reported and not taken for it" eval '[ -n "$(prefix_changes "$SANDBOX/fake-prefix.txt" "$FP" | grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll)" ]'
+echo new >"$FP/drive_c/new.txt"
+check "prefix comparison: a new file is reported" eval 'prefix_changes "$SANDBOX/fake-prefix.txt" "$FP" | grep -qx ./drive_c/new.txt'
+rm -rf "$FP"
 
 # engine_same itself (sections 15 and 16): on fake engines, this app's Mac driver over another
 # build passes; a Mac driver that isn't this app's, or another changed file, fails
@@ -1385,9 +1417,9 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   som install >"$SANDBOX/prev-upgrade.txt" 2>&1 || { tail -20 "$SANDBOX/prev-upgrade.txt"; bad "install over $PREVV exit"; }
   check "over $PREVV: @done, manifest $APPV" eval 'grep -q "^@done" "$SANDBOX/prev-upgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$APPV" ]'
   check "over $PREVV: the engine already in place, no download" eval 'grep -q "is already in place" "$SANDBOX/prev-upgrade.txt" && ! grep -q "Unpacking the Wine engine" "$SANDBOX/prev-upgrade.txt"'
-  { prefix_snap | diff "$SANDBOX/prev-prefix.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-prefix.diff"
+  prefix_changes "$SANDBOX/prev-prefix.txt" "" "$SANDBOX/prev-prefix-after.txt" >"$SANDBOX/prev-prefix.diff"
   # (a previous release with this version's d3d9.dll, 0.1.2 for 0.1.3: nothing changes)
-  check "over $PREVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" eval '[ -z "$(grep -v -x ./drive_c/windows/system32/d3d9.dll "$SANDBOX/prev-prefix.diff")" ]'
+  check "over $PREVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" eval '[ -z "$(grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll "$SANDBOX/prev-prefix.diff")" ]'
   check "over $PREVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/prev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-engine.diff"
   check "over $PREVV: the engine unchanged, signatures aside, but ntdll.so and this app's Mac driver ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same prev
@@ -1452,8 +1484,11 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: the cold test caches removed, said so" eval '[ ! -e "$COLD" ] && grep -q "^Removed a development build.s d9mt test caches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: env as a release writes it (no A/B include, state cache on, update check on)" eval '! grep -q d9mt-ab "$SOM/env" && [ "$(envv D9MT_TEX_PFV)/$(envv SWTOR_D9MT_AB)" = "<unset>/<unset>" ] && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && grep -qx SWTOR_UPDATE_CHECK=1 "$SOM/env"'
   check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high)" cmp -s "$SANDBOX/dev-settings.conf" "$SOM/settings.conf"
-  check "over $DEVV: the same d3d9.dll as $DEVV" cmp -s "$DEV_APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
-  check "over $DEVV: the prefix as $DEVV left it" eval 'prefix_snap | diff "$SANDBOX/dev-prefix.txt" - >"$SANDBOX/dev-prefix.diff"'
+  prefix_changes "$SANDBOX/dev-prefix.txt" "" "$SANDBOX/dev-prefix-after.txt" >"$SANDBOX/dev-prefix.diff"
+  # (a development build with this version's d3d9.dll, 0.1.2-dev.3 for 0.1.2 and 0.1.3: nothing
+  # changes; with an older pin, d3d9.dll)
+  check "over $DEVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/dev-prefix.diff"))" eval '[ -z "$(grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll "$SANDBOX/dev-prefix.diff")" ]'
+  check "over $DEVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/dev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/dev-engine.diff"
   check "over $DEVV: the engine unchanged, signatures aside, but ntdll.so and this app's Mac driver ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev
   # ($DEVV's ntdll.so: the engine's own, or, from 0.1.2-dev.1 on, the app's build in its own
