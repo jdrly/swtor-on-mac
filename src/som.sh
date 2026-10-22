@@ -124,7 +124,7 @@ HELPERS="setsid-exec hold-launcher"
 # The launchd job that SWTOR on Mac 0.1.3 and earlier set up to put the wrapper back after a
 # launcher update (with a copy of this script in $AGENT_DIR). Since 0.1.4 nothing runs while the
 # app is closed: the app checks the hook when it opens (rehook); Install and Uninstall remove the
-# job if an older version left it (remove_agent).
+# job if an older version left it (unload_agent first, then remove_agent_files).
 AGENT_LABEL=cz.jandrly.swtoronmac.watch
 AGENT_PLIST="$H/Library/LaunchAgents/$AGENT_LABEL.plist"
 AGENT_DIR="$SOM/agent"
@@ -1227,17 +1227,21 @@ restore_game_settings() {
 
 # --- 0.1.3's launcher-update guard, a launchd job: Install (an update over 0.1.3 or older) and
 # Uninstall remove it, idempotently (unloaded if it is loaded; in a sandbox it never was).
-remove_agent() { # → 1 (and a warning) if the job stays loaded: its files then stay too, for the next try
+# unload_agent: the job unloaded if it is loaded; dies (before anything has changed) if it stays
+# loaded. Install and Uninstall call it first, right after taking the lock.
+unload_agent() {
   local svc
   svc="gui/$(id -u)/$AGENT_LABEL"
-  if [ -n "$LAUNCHCTL" ] && "$LAUNCHCTL" print "$svc" >/dev/null 2>&1; then
-    run "$LAUNCHCTL" bootout "$svc" 2>/dev/null || true
-    if [ -z "$DRY" ] && "$LAUNCHCTL" print "$svc" >/dev/null 2>&1; then
-      warn "Could not unload the launcher-update guard of an older version (the launchd job $AGENT_LABEL); it stays until it can be removed. Click Reinstall again, or run in Terminal: launchctl bootout $svc"
-      return 1
-    fi
-    log "unloaded the launchd job $AGENT_LABEL"
+  [ -n "$LAUNCHCTL" ] && "$LAUNCHCTL" print "$svc" >/dev/null 2>&1 || return 0
+  run "$LAUNCHCTL" bootout "$svc" 2>/dev/null || true
+  if [ -z "$DRY" ] && "$LAUNCHCTL" print "$svc" >/dev/null 2>&1; then
+    die "The launcher-update guard of an older SWTOR on Mac (the launchd job $AGENT_LABEL) could not be stopped, so nothing was changed. Run this in Terminal, then try again: launchctl bootout $svc"
   fi
+  log "unloaded the launchd job $AGENT_LABEL"
+}
+
+# remove_agent_files: the job's plist and agent/ copy, once it is unloaded (unload_agent)
+remove_agent_files() {
   if [ -f "$AGENT_PLIST" ]; then
     run rm -f "$AGENT_PLIST"
     say "Removed the launcher-update guard of an older version (the launchd job $AGENT_LABEL): nothing of SWTOR on Mac runs while it is closed any more"
@@ -1309,10 +1313,17 @@ cmd_rehook() {
   leave=$(rehook_leave "before the lock")
   [ -z "$leave" ] || { echo "$leave"; return 0; }
   # Every change only with the lock held (an install, uninstall or settings change may have
-  # started since the check above), and after looking again under it
+  # started or even finished since the check above), and after looking again under it.
+  # (SWTOR_ON_MAC_TEST_BETWEEN: in a sandbox, a test's command run right here, to stage that.)
+  if [ -n "$ROOT" ] && [ -n "${SWTOR_ON_MAC_TEST_BETWEEN:-}" ]; then eval "$SWTOR_ON_MAC_TEST_BETWEEN"; fi
   mkdir "$SOM/.lock" 2>/dev/null || { log "an install or uninstall just started; leaving it alone"; echo "@notice busy"; return 0; }
   REHOOK_LOCKED=1 MOVED="" WRAPPER_PHASE="" WRAPPER_STATE=replaced
   trap on_rehook_exit EXIT
+  if [ ! -f "$MANIFEST" ] || [ ! -f "$SOM/env" ] || [ ! -d "$ENG" ]; then
+    log "SWTOR on Mac was uninstalled meanwhile; nothing to do"
+    echo "@done not installed"
+    return 0
+  fi
   rehook_inspect
   log "state:$STATES (with the lock)"
   leave=$(rehook_leave "with the lock")
@@ -1483,6 +1494,8 @@ cmd_install() {
   lock
   trap on_install_exit EXIT
   trap 'exit 143' TERM INT HUP   # Cancel in the app: roll back through the EXIT trap
+  # an older version's launchd job: stopped before anything changes (dies if it can't be)
+  unload_agent
   [ -n "$DRY" ] || mkdir -p "$SOM"
   step "Wine engine"
   begin_upgrade
@@ -1501,10 +1514,9 @@ cmd_install() {
   install_wrapper
   write_manifest
   finish_upgrade
-  # an older version's launcher-update guard (a launchd job): nothing of SWTOR on Mac runs while
-  # the app is closed any more (the app checks the hook when it opens). Not part of the
-  # all-or-nothing install: if it can't be unloaded, it stays and the next Install tries again.
-  remove_agent || true
+  # an older version's launcher-update guard (a launchd job, unloaded at the start): nothing of
+  # SWTOR on Mac runs while the app is closed any more (the app checks the hook when it opens)
+  remove_agent_files
   [ -n "$DRY" ] || rm -rf "$CACHE/downloads"
   remove_dev_leftovers
   log "install complete"
@@ -1533,8 +1545,10 @@ cmd_uninstall() {
   # (the folder itself goes too once empty; a backup of another wrapper stays in it)
   trap 'rmdir "$SOM/.lock" "$SOM" 2>/dev/null || true' EXIT
 
+  # an older version's launchd job: stopped before anything changes (dies if it can't be)
+  unload_agent
   step "Restoring the official launcher's Wine"
-  remove_agent || true
+  remove_agent_files
   if [ -d "$real" ]; then
     for b in $PRELOADERS; do
       [ -e "$real/$b" ] || continue

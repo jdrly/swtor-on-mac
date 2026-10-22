@@ -967,8 +967,12 @@ FAKE
 chmod +x "$FL/launchctl"
 old_job() { mkdir -p "${AGENT_PLIST%/*}" "$SOM/agent" && echo plist >"$AGENT_PLIST" && echo old >"$SOM/agent/som.sh" && : >"$FL/loaded"; }
 old_job; : >"$FL/stuck"
-SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-stuck.txt" 2>&1 || bad "install with a stuck old job"
-check "old launchd job that won't unload: Install finishes, warns, keeps the job's files for the next try" eval 'grep -q "^@done" "$SANDBOX/agent-stuck.txt" && grep -q "Could not unload the launcher-update guard of an older version" "$SANDBOX/agent-stuck.txt" && [ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ] && ! grep -q "^Removed the launcher-update guard" "$SANDBOX/agent-stuck.txt"'
+# shellcheck disable=SC2034 # (used in check's eval strings)
+m0=$(shasum -a 256 "$SOM/install-manifest.json" "$SOM/env")
+SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-stuck.txt" 2>&1 && bad "install with a stuck old job went ahead"
+check "old launchd job that won't stop: Install refuses before changing anything, says what to run" eval 'grep -q "^@error The launcher-update guard of an older SWTOR on Mac .* could not be stopped, so nothing was changed. Run this in Terminal, then try again: launchctl bootout gui/" "$SANDBOX/agent-stuck.txt" && [ "$(shasum -a 256 "$SOM/install-manifest.json" "$SOM/env")" = "$m0" ] && [ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ] && [ ! -d "$SOM/.lock" ]'
+SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som uninstall >"$SANDBOX/agent-stuck-un.txt" 2>&1 && bad "uninstall with a stuck old job went ahead"
+check "old launchd job that won't stop: Uninstall refuses before changing anything" eval 'grep -q "^@error The launcher-update guard of an older SWTOR on Mac" "$SANDBOX/agent-stuck-un.txt" && [ "$(st wrapper)" = ours ] && [ -f "$SOM/install-manifest.json" ] && [ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ]'
 rm -f "$FL/stuck"
 SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-unload.txt" 2>&1 || bad "install with a loaded old job"
 check "old launchd job loaded: unloaded, then its files removed, said so" eval 'grep -qx "bootout gui/$(id -u)/cz.jandrly.swtoronmac.watch" "$FL/calls" && [ ! -e "$FL/loaded" ] && [ ! -e "$AGENT_PLIST" ] && [ ! -e "$SOM/agent" ] && grep -q "^Removed the launcher-update guard of an older version" "$SANDBOX/agent-unload.txt"'
@@ -996,6 +1000,14 @@ mkdir "$SOM/.lock"; rehook; rmdir "$SOM/.lock"
 check "rehook: leaves a running install alone, said so" eval '[ "$(st wrapper)" = replaced ] && said "@notice busy"'
 SETTLE=60 rehook
 check "rehook: Wine/bin changed just now (an update still writing): left alone, said so, no waiting" eval '[ "$(st wrapper)" = replaced ] && said "@notice changing"'
+# between rehook's first look and its lock (staged with SWTOR_ON_MAC_TEST_BETWEEN): an install
+# took the lock, or an uninstall finished; either way nothing is changed
+SWTOR_ON_MAC_TEST_BETWEEN='mkdir "$SOM/.lock"' rehook; rmdir "$SOM/.lock"
+check "rehook: an install that started after its first look: left alone, said so" eval '[ "$(st wrapper)" = replaced ] && said "@notice busy"'
+# (the command runs inside som.sh, which has $SOM but not $SANDBOX)
+SWTOR_ON_MAC_TEST_BETWEEN='mv "$SOM/install-manifest.json" "$SOM/manifest.moved"; mv "$SOM/env" "$SOM/env.moved"' rehook
+check "rehook: an uninstall that finished after its first look: nothing hooked in, said so" eval 'said "@done not installed" && is_macho "$BS_WINE/bin/wine64-preloader" && is_macho "$BS_WINE/bin/wine-preloader"'
+mv "$SOM/manifest.moved" "$SOM/install-manifest.json"; mv "$SOM/env.moved" "$SOM/env"
 rehook
 check "rehook: wrapper back, said so" eval '[ "$(st wrapper)" = ours ] && said "@done rehooked"'
 check "rehook: manifest has the new preloader" test "$(plutil -extract original_preloaders_sha256.wine64-preloader raw -o - "$SOM/install-manifest.json")" = "$(shasum -a 256 "$BS_WINE/bin-real/wine64-preloader" | cut -d" " -f1)"

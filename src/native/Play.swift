@@ -206,8 +206,9 @@ extension Installer {
 
   // What a press does after the hook check: playAction on the fresh status, with the reason
   // the check gave if it had to leave the hook alone.
-  nonisolated static func playAfterCheck(answer: String, status: [String: String], launcher: Bool, game: Bool) -> PlayAction {
-    let action = playAction(status: status, working: false, launcher: launcher, game: game)
+  nonisolated static func playAfterCheck(answer: String, status: [String: String], working: Bool = false,
+                                        launcher: Bool, game: Bool) -> PlayAction {
+    let action = playAction(status: status, working: working, launcher: launcher, game: game)
     if answer == "@notice changing", case .unavailable = action { return .unavailable(changingMessage) }
     return action
   }
@@ -222,7 +223,10 @@ extension Installer {
     case .launch:
       rehook { [weak self] answer in
         guard let self else { return }
-        switch Installer.playAfterCheck(answer: answer, status: self.status, launcher: self.runningLauncher, game: self.runningGame) {
+        // the operation state right now (an install or uninstall can't have started meanwhile,
+        // the check held the reservation, but it is what decides)
+        switch Installer.playAfterCheck(answer: answer, status: self.status, working: self.isBusy,
+                                        launcher: self.runningLauncher, game: self.runningGame) {
         case .unavailable(let reason): then(reason)
         case .show: self.showSWTOR(then: then)
         case .launch(let url): self.launch(url, then: then)

@@ -168,18 +168,22 @@ final class Installer {
   func refresh(then: (() -> Void)? = nil) {
     guard !isBusy else { then?(); return }
     Task {
-      let values = Installer.parseStatus(await Installer.capture(script: script, arguments: ["status"]))
-      status = values
-      let running = Installer.runningSWTOR(values)
-      runningLauncher = running.launcher != nil
-      runningGame = running.game != nil
-      if launching && (runningLauncher || runningGame) { launchEnded(nil, error: nil) }
-      if let version = values["update_available"], !version.isEmpty, let dir = values["app_dir"] {
-        // once: the file goes, the app's own updater takes it from here
-        try? FileManager.default.removeItem(atPath: dir + "/update-available")
-        if Installer.isNewer(version, than: appVersion) { onUpdateAvailable?(version) }
-      }
+      applyStatus(Installer.parseStatus(await Installer.capture(script: script, arguments: ["status"])))
       then?()
+    }
+  }
+
+  // A fresh som.sh status: the window's state, running SWTOR apps, a newer version found
+  private func applyStatus(_ values: [String: String]) {
+    status = values
+    let running = Installer.runningSWTOR(values)
+    runningLauncher = running.launcher != nil
+    runningGame = running.game != nil
+    if launching && (runningLauncher || runningGame) { launchEnded(nil, error: nil) }
+    if let version = values["update_available"], !version.isEmpty, let dir = values["app_dir"] {
+      // once: the file goes, the app's own updater takes it from here
+      try? FileManager.default.removeItem(atPath: dir + "/update-available")
+      if Installer.isNewer(version, than: appVersion) { onUpdateAvailable?(version) }
     }
   }
 
@@ -194,16 +198,20 @@ final class Installer {
     rehooking = true
     let script = script
     Task {
+      // the check and the fresh status both inside the reservation: nothing else starts, and
+      // a quit or an app update waits, until both have finished
       let answer = Installer.rehookAnswer(await Installer.capture(script: script, arguments: ["rehook"]))
+      let values = Installer.parseStatus(await Installer.capture(script: script, arguments: ["status"]))
+      applyStatus(values)
       rehooking = false
-      // a quit or an app update that waited for the check goes ahead now
       if terminateWhenIdle {
         terminateWhenIdle = false
         NSApp.reply(toApplicationShouldTerminate: true)
         return
       }
+      // (in the same main-actor turn as the release: no operation can start in between)
+      then?(answer)
       onIdle?()
-      refresh { then?(answer) }
     }
   }
 
