@@ -750,7 +750,7 @@ som set physkeys off >/dev/null && check "set physkeys off again: the app's driv
 som set vsync on >/dev/null; som set debug off >/dev/null; som set memory auto >/dev/null
 som set gamemode on >/dev/null; som set updates on >/dev/null
 som set fpslimit off >/dev/null; som set fpsbattery off >/dev/null
-check "settings: back to the defaults" eval '[ "$(som settings | sed -n "s/^debug=//p")" = off ] && grep -qx SWTOR_FPS_LIMIT=0 "$SOM/env"' 
+check "settings: back to the defaults" eval '[ "$(som settings | sed -n "s/^debug=//p")" = off ] && grep -qx SWTOR_FPS_LIMIT=0 "$SOM/env"'
 
 echo "== 6b. the wrapper's daily update check (stub engine; the game is never started)"
 U="$SANDBOX/update-check"
