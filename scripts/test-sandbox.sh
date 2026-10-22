@@ -959,7 +959,7 @@ cat >"$FL/launchctl" <<'FAKE'
 #!/bin/bash
 d="${0%/*}"; echo "$*" >>"$d/calls"
 case "$1" in
-  print) [ -e "$d/loaded" ] ;;
+  print) [ -e "$d/broken" ] && exit 5; [ -e "$d/loaded" ] && exit 0; exit 113 ;;
   bootout) [ -e "$d/stuck" ] && exit 5; rm -f "$d/loaded" ;;
   *) exit 2 ;;
 esac
@@ -970,14 +970,18 @@ old_job; : >"$FL/stuck"
 # shellcheck disable=SC2034 # (used in check's eval strings)
 m0=$(shasum -a 256 "$SOM/install-manifest.json" "$SOM/env")
 SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-stuck.txt" 2>&1 && bad "install with a stuck old job went ahead"
-check "old launchd job that won't stop: Install refuses before changing anything, says what to run" eval 'grep -q "^@error The launcher-update guard of an older SWTOR on Mac .* could not be stopped, so nothing was changed. Run this in Terminal, then try again: launchctl bootout gui/" "$SANDBOX/agent-stuck.txt" && [ "$(shasum -a 256 "$SOM/install-manifest.json" "$SOM/env")" = "$m0" ] && [ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ] && [ ! -d "$SOM/.lock" ]'
+check "old launchd job that won't stop: Install refuses before changing anything, says what to run" eval 'grep -q "^@error The launcher-update guard of an older SWTOR on Mac .* could not be stopped (loaded), so nothing was changed. Run this in Terminal, then try again: launchctl bootout gui/" "$SANDBOX/agent-stuck.txt" && [ "$(shasum -a 256 "$SOM/install-manifest.json" "$SOM/env")" = "$m0" ] && [ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ] && [ ! -d "$SOM/.lock" ]'
 SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som uninstall >"$SANDBOX/agent-stuck-un.txt" 2>&1 && bad "uninstall with a stuck old job went ahead"
 check "old launchd job that won't stop: Uninstall refuses before changing anything" eval 'grep -q "^@error The launcher-update guard of an older SWTOR on Mac" "$SANDBOX/agent-stuck-un.txt" && [ "$(st wrapper)" = ours ] && [ -f "$SOM/install-manifest.json" ] && [ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ]'
-rm -f "$FL/stuck"
+rm -f "$FL/stuck"; : >"$FL/broken"
+SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-broken.txt" 2>&1 && bad "install with launchctl failing went ahead"
+check "launchctl can't tell whether the old job runs: Install refuses, nothing changed, its files kept" eval 'grep -q "^@error SWTOR on Mac could not check whether the launcher-update guard of an older version .* still runs (unknown (launchctl print: status 5)), so nothing was changed" "$SANDBOX/agent-broken.txt" && [ "$(shasum -a 256 "$SOM/install-manifest.json" "$SOM/env")" = "$m0" ] && [ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ]'
+rm -f "$FL/broken"
 SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-unload.txt" 2>&1 || bad "install with a loaded old job"
 check "old launchd job loaded: unloaded, then its files removed, said so" eval 'grep -qx "bootout gui/$(id -u)/cz.jandrly.swtoronmac.watch" "$FL/calls" && [ ! -e "$FL/loaded" ] && [ ! -e "$AGENT_PLIST" ] && [ ! -e "$SOM/agent" ] && grep -q "^Removed the launcher-update guard of an older version" "$SANDBOX/agent-unload.txt"'
 SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-none.txt" 2>&1 || bad "install with no old job"
-check "no old launchd job: nothing to unload or remove" eval '[ "$(grep -c bootout "$FL/calls")" = 2 ] && ! grep -q -e "launcher-update guard" "$SANDBOX/agent-none.txt"'
+# (bootouts so far: the stuck Install's, the stuck Uninstall's, the successful one's)
+check "no old launchd job: nothing to unload or remove" eval '[ "$(grep -c bootout "$FL/calls")" = 3 ] && ! grep -q -e "launcher-update guard" "$SANDBOX/agent-none.txt"'
 
 echo "== 7. a launcher update replaced the wrapper"
 launcher_update() {

@@ -1227,17 +1227,33 @@ restore_game_settings() {
 
 # --- 0.1.3's launcher-update guard, a launchd job: Install (an update over 0.1.3 or older) and
 # Uninstall remove it, idempotently (unloaded if it is loaded; in a sandbox it never was).
+# agent_state: the old launchd job as launchctl reports it: loaded (print succeeds), absent
+# (print's 113, "could not find service"), or unknown (any other answer: not to be taken for
+# absent). Without launchctl (a sandbox without a stand-in): absent.
+agent_state() {
+  local rc=0
+  [ -n "$LAUNCHCTL" ] || { echo absent; return; }
+  "$LAUNCHCTL" print "gui/$(id -u)/$AGENT_LABEL" >/dev/null 2>&1 || rc=$?
+  case "$rc" in 0) echo loaded ;; 113) echo absent ;; *) echo "unknown (launchctl print: status $rc)" ;; esac
+}
+
 # unload_agent: the job unloaded if it is loaded; dies (before anything has changed) if it stays
-# loaded. Install and Uninstall call it first, right after taking the lock.
+# loaded or its state can't be told. Install and Uninstall call it first, right after the lock.
 unload_agent() {
-  local svc
+  local svc st
   svc="gui/$(id -u)/$AGENT_LABEL"
-  [ -n "$LAUNCHCTL" ] && "$LAUNCHCTL" print "$svc" >/dev/null 2>&1 || return 0
+  st=$(agent_state)
+  case "$st" in
+    absent) return 0 ;;
+    unknown*) die "SWTOR on Mac could not check whether the launcher-update guard of an older version (the launchd job $AGENT_LABEL) still runs ($st), so nothing was changed. Try again; if it keeps failing, run this in Terminal: launchctl bootout $svc" ;;
+  esac
   run "$LAUNCHCTL" bootout "$svc" 2>/dev/null || true
-  if [ -z "$DRY" ] && "$LAUNCHCTL" print "$svc" >/dev/null 2>&1; then
-    die "The launcher-update guard of an older SWTOR on Mac (the launchd job $AGENT_LABEL) could not be stopped, so nothing was changed. Run this in Terminal, then try again: launchctl bootout $svc"
-  fi
-  log "unloaded the launchd job $AGENT_LABEL"
+  [ -z "$DRY" ] || return 0
+  st=$(agent_state)
+  case "$st" in
+    absent) log "unloaded the launchd job $AGENT_LABEL" ;;
+    *) die "The launcher-update guard of an older SWTOR on Mac (the launchd job $AGENT_LABEL) could not be stopped ($st), so nothing was changed. Run this in Terminal, then try again: launchctl bootout $svc" ;;
+  esac
 }
 
 # remove_agent_files: the job's plist and agent/ copy, once it is unloaded (unload_agent)
