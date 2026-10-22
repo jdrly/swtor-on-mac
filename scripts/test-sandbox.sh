@@ -1055,6 +1055,10 @@ echo "2026-10-20 19:07:02.000 E  kernel[0:2f] (AGX) IOGPUMetalError: timeout of 
 for i in \$(seq 10 39); do echo "2026-10-20 19:08:00.\$i E  wine[4242:1f] (Metal) error \$i"; done
 EOF
 chmod +x "$SANDBOX/bin/log"
+# Metal's caches of the engine's processes in the sandbox's user cache dir: two gpuarchiver
+# folders of 1 MB each, no com.apple.metal
+GA="$SANDBOX/usercache/com.codeweavers.CrossOver.wineloader/com.apple.gpuarchiver"
+mkdir -p "$GA/a" "$GA/b" && dd if=/dev/zero of="$GA/a/x" bs=1024 count=1024 2>/dev/null && cp "$GA/a/x" "$GA/b/x"
 zip=$("$APP/Contents/Resources/collect-logs.sh" 2>"$SANDBOX/collect.err" || true)
 check "logs: zip on the sandbox Desktop" test -f "$zip" -a "${zip#"$H/Desktop/"}" != "$zip"
 if [ -f "$zip" ]; then
@@ -1073,9 +1077,10 @@ if [ -f "$zip" ]; then
   # shellcheck disable=SC2034 # (used in check's eval strings)
   GE=$(echo "$SANDBOX"/zip/*/gpu-errors.txt)
   check "logs: GPU errors counted per game and Wine process, other apps only as a number" eval 'grep -q "^IOGPUMetalError .*: 3 in the game and Wine, 1 in other apps\$" "$GE" && grep -q "^  wine (pid 4242): 2, " "$GE" && grep -q "^  swtor.exe (pid 4300): 1, " "$GE" && ! grep -q "Secret Diary" "$GE"'
-  check "logs: GPU errors: the fault lines, the last 20 other Metal errors, the full shader cache only counted" eval '[ "$(grep -c "IOGPUMetalError: <private>" "$GE")" = 3 ] && [ "$(grep -c "(Metal) error " "$GE")" = 20 ] && grep -q "(Metal) error 39\$" "$GE" && ! grep -q "(Metal) error 19\$" "$GE" && ! grep -q "mdb_txn" "$GE" && grep -q "^Metal shader cache full (MDB_MAP_FULL) in the game and Wine: 1 lines\$" "$GE"'
+  check "logs: GPU errors: the fault lines, the last 20 other Metal errors, the full shader cache only counted" eval '[ "$(grep -c "IOGPUMetalError: <private>" "$GE")" = 3 ] && [ "$(grep -c "(Metal) error " "$GE")" = 20 ] && grep -q "(Metal) error 39\$" "$GE" && ! grep -q "(Metal) error 19\$" "$GE" && ! grep -q "mdb_txn" "$GE" && grep -q "^Metal.s archive usage index full (MDB_MAP_FULL) in the game and Wine: 1 lines; compiled shaders are still cached\$" "$GE"'
   check "logs: GPU errors: the GPU driver's lines only as time, sender and kind (no other app, no folder)" eval 'grep -qx "2026-10-20 19:07:00.000 Df kernel (AGXG14X): GPU restart" "$GE" && grep -qx "2026-10-20 19:07:01.000 E kernel (AGXG14X): GPU fault" "$GE" && grep -qx "2026-10-20 19:07:02.000 E kernel (AGX): GPU timeout, names the game or Wine" "$GE" && ! grep -q -e AnotherPerson -e private-project -e "~/x" "$GE"'
   check "logs: system info has the GPU error count" grep -q "^  IOGPUMetalError .*: 3 in the game and Wine, 1 in other apps\$" "$SI"
+  check "logs: system info has the sizes of Metal's caches for the engine (2 archives of 2 MB, no com.apple.metal)" eval 'grep -qx "  com.apple.gpuarchiver: 2.0 MB, 2 entries" "$SI" && grep -qx "  com.apple.metal: none" "$SI"'
 fi
 # a query that ignores TERM: ended with KILL after the limit and the grace time, and said so
 cat >"$SANDBOX/bin/log" <<'EOF'

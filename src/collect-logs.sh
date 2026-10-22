@@ -28,6 +28,10 @@ SOM="$H/Library/Application Support/SWTOR on Mac"
 LOGS="$H/Library/Logs/SWTOR on Mac"
 DIAG="$H/Library/Logs/DiagnosticReports"
 BS_WINE="$H/Library/Application Support/com.broadsword.swtor/Star Wars - The Old Republic/swtor-precompiled/Libraries/Wine"
+# the per-user cache dir (as som.sh's USER_CACHE), where macOS's Metal keeps its caches for the
+# engine's processes, under their bundle id
+if [ -n "$ROOT" ]; then USER_CACHE="$ROOT/usercache/"; else USER_CACHE="$(getconf DARWIN_USER_CACHE_DIR)"; fi
+METAL_CACHE="${USER_CACHE}com.codeweavers.CrossOver.wineloader"
 
 name="SWTOR-on-Mac-logs-$(date +%Y-%m-%d-%H%M)"
 dest="${1:-$H/Desktop}"
@@ -163,8 +167,9 @@ crash_reports() {
 # swtor.exe) and nothing in wine.log; the game then draws wrong or pink textures, or freezes.
 # Counted per process of the game and Wine (other apps' only as a number, never their names),
 # then the last GPU_LINES lines of them and of the GPU driver in the kernel (AGX), and the last
-# METAL_LINES of Metal's other errors in the game and Wine (the Metal shader cache's
-# "MDB_MAP_FULL" only counted). The GPU driver's own text can name any app or path, so of its
+# METAL_LINES of Metal's other errors in the game and Wine ("MDB_MAP_FULL" only counted: it is
+# Metal's archive usage index, com.apple.metal/archiveUsage.db, that is full; the compiled
+# shaders next to it are still cached). The GPU driver's own text can name any app or path, so of its
 # lines only the time, the sender, the kind of event and whether it names the game or Wine. The
 # query takes 10-30 s; it is ended after GPU_TIMEOUT s (KILL GPU_GRACE s after TERM). In a
 # sandbox the unified log is $ROOT/bin/log if there is one (a test's), else it is not read, and
@@ -237,7 +242,7 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
       if (other) s = s ", " other " in other apps"
       print s; print s >summary
       for (i = 1; i <= keys; i++) print "  " order[i] ": " n[order[i]] ", " first[order[i]] " to " last[order[i]]
-      if (cachefull) print "Metal shader cache full (MDB_MAP_FULL) in the game and Wine: " cachefull " lines"
+      if (cachefull) print "Metal'"'"'s archive usage index full (MDB_MAP_FULL) in the game and Wine: " cachefull " lines; compiled shaders are still cached"
       print ""
       print "The last " lines " lines of them and of the GPU driver (AGX):"
       if (!g) print "  none"
@@ -320,6 +325,18 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
   echo
   echo "GPU errors of the last $GPU_HOURS hours (in gpu-errors.txt):"
   echo "  $(cat "$work/gpu-summary" 2>/dev/null || echo "not read")"
+  echo
+  # Metal's caches of the engine's processes (macOS's, not the app's; nothing is changed here):
+  # gpuarchiver grows by a folder per process that uses Metal, com.apple.metal holds the
+  # compiled shaders and the archive usage index
+  echo "Metal's caches of the engine's processes (in the user cache dir, ${METAL_CACHE##*/}/):"
+  for c in com.apple.gpuarchiver com.apple.metal; do
+    if [ -d "$METAL_CACHE/$c" ]; then
+      echo "  $c: $(du -sk "$METAL_CACHE/$c" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }'), $(ls -A "$METAL_CACHE/$c" 2>/dev/null | wc -l | tr -d ' ') entries"
+    else
+      echo "  $c: none"
+    fi
+  done
   echo
   # names only, never the command line (it has the account)
   echo "Running SWTOR, Wine and SWTOR on Mac processes (name only):"

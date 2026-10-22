@@ -296,7 +296,7 @@ update* and a **Repair the Launcher Hook** button.
    Mac.
 
 The zip holds SWTOR on Mac's logs, `env`, `settings.conf`, `dxvk.conf`,
-`install-manifest.json`, the versions, system information (macOS, chip, memory, displays) and
+`install-manifest.json`, the versions, system information (macOS, chip, memory, displays, the size of macOS's Metal caches for the engine's processes) and
 macOS's crash, hang and spin reports of the last 7 days (from `~/Library/Logs/DiagnosticReports`)
 for the game, Wine, the official launcher and SWTOR on Mac, so you don't have to look for them:
 the newest 20, up to 10 MB together; `system-info.txt` lists which are in the zip and which were
