@@ -1097,19 +1097,34 @@ if [ -f "$zip" ]; then
   check "logs: GPU errors say the query ran out of time, with what came until then" eval 'grep -qx "(the query ran out of time: what came until then)" "$GE" && grep -q "^IOGPUMetalError .*: 1 in the game and Wine\$" "$GE"'
 fi
 check "logs: no query left running" eval '[ -s "$SANDBOX/bin/log.pid" ] && ! kill -0 "$(cat "$SANDBOX/bin/log.pid")" 2>/dev/null'
+# a query that ends with status 0 on TERM: still out of time (what it wrote may be cut short)
+cat >"$SANDBOX/bin/log" <<'EOF'
+#!/bin/bash
+trap 'kill "$s"; exit 0' TERM
+echo "2026-10-20 19:04:10.100 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+sleep 60 & s=$!
+wait "$s"
+EOF
+mkdir -p "$SANDBOX/zip-term0"
+zip=$(SWTOR_ON_MAC_GPU_TIMEOUT=2 "$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-term0" 2>>"$SANDBOX/collect.err" || true)
+if [ -f "$zip" ]; then
+  unzip -q -o "$zip" -d "$SANDBOX/zip-term0"
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  GE=$(echo "$SANDBOX"/zip-term0/*/gpu-errors.txt)
+fi
+check "logs: a query that ends with status 0 on TERM: GPU errors say it ran out of time" eval '[ -f "$zip" ] && grep -qx "(the query ran out of time: what came until then)" "$GE"'
 # a query that ends while the watchdog hasn't started its sleep yet (an exported sleep function
 # holds it for 3 s first): the watchdog is ended too, at once, and the file has no time-out note
 cat >"$SANDBOX/bin/log" <<'EOF'
 #!/bin/bash
 echo "2026-10-20 19:04:10.100 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
 EOF
-sleep() { local end=$((SECONDS + 3)); while [ "$SECONDS" -lt "$end" ]; do :; done; command sleep "$@"; }
-export -f sleep
 mkdir -p "$SANDBOX/zip-early"
 t0=$(date +%s)
-zip=$(SWTOR_ON_MAC_GPU_TIMEOUT=47 "$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-early" 2>>"$SANDBOX/collect.err" || true)
+# shellcheck disable=SC2016 # (the function is the inner bash's)
+zip=$(SWTOR_ON_MAC_GPU_TIMEOUT=47 bash -c 'sleep() { local end=$((SECONDS + 3)); while [ "$SECONDS" -lt "$end" ]; do :; done; command sleep "$@"; }
+  export -f sleep; exec "$@"' - "$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-early" 2>>"$SANDBOX/collect.err" || true)
 t1=$(date +%s)
-unset -f sleep
 check "logs: a query that ends before the watchdog's sleep starts ends the watchdog too ($((t1 - t0)) s, limit 47 s)" test -f "$zip" -a $((t1 - t0)) -lt 30
 if [ -f "$zip" ]; then
   unzip -q -o "$zip" -d "$SANDBOX/zip-early"

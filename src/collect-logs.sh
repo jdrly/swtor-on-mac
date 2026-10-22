@@ -191,9 +191,12 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
       AND (sender CONTAINS[c] "metal" OR sender CONTAINS[c] "IOGPU" OR sender CONTAINS[c] "AGX"))
     OR (process == "kernel" AND sender BEGINSWITH "AGX"))' </dev/null >"$work/gpu-log" 2>/dev/null &
   pid=$!
-  # (the time limit: TERM, and KILL for a query that ignores it; the mark says it ran out of time)
-  ( sleep "$GPU_TIMEOUT" && : >"$work/gpu-timeout" && kill "$pid" && sleep "$GPU_GRACE" &&
-    kill -KILL "$pid" ) </dev/null >/dev/null 2>&1 &
+  # (the time limit: TERM, and KILL for a query that ignores it. The mark says it ran out of
+  # time, also for a query that ends with status 0 on TERM; it goes again if the TERM finds no
+  # query to end.)
+  ( sleep "$GPU_TIMEOUT" && : >"$work/gpu-timeout" &&
+    { kill "$pid" || { rm -f "$work/gpu-timeout"; exit 0; }; } &&
+    sleep "$GPU_GRACE" && kill -KILL "$pid" ) </dev/null >/dev/null 2>&1 &
   killer=$!
   wait "$pid" 2>/dev/null; st=$?  # (2>: not bash's "Terminated" line for a query that ran out of time)
   # The query has ended: end the watchdog wherever it is, so it never signals that pid again.
@@ -202,8 +205,7 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
   pkill -KILL -P "$killer" 2>/dev/null
   kill -KILL "$killer" 2>/dev/null
   wait "$killer" 2>/dev/null
-  # (a query that finished on its own just as the time ran out is complete)
-  [ ! -e "$work/gpu-timeout" ] || [ "$st" = 0 ] || timedout=1
+  [ ! -e "$work/gpu-timeout" ] || timedout=1
   # (a line: date time type process[pid:tid] (sender) message; only other apps' names have spaces)
   LC_ALL=C awk -v lines="$GPU_LINES" -v mlines="$METAL_LINES" -v st="$st" -v timedout="$timedout" \
       -v summary="$work/gpu-summary" '
