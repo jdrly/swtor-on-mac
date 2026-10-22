@@ -1248,7 +1248,10 @@ fetch_mode alwaysdrop alwaysdrop fetch-stopped
 check "download: a connection that keeps dropping (both addresses): stopped at 192 of 224 MB, the part kept" eval 'grep -q "^@error The download of Wine engine stopped at 192 of 224 MB" "$SANDBOX/fetch-stopped.txt" && [ "$(stat -f %z "$DLC/$ENGINE_FILE.part")" = 201326592 ]'
 fetch_mode ok ok fetch-resumed
 check "download: the next try continues where it stopped" eval 'grep -q "^@done " "$SANDBOX/fetch-resumed.txt" && grep -q "resuming at 201326592 of" "$SANDBOX/fetch-resumed.log" && [ ! -e "$DLC/$ENGINE_FILE.part" ]'
-check "download: only the sandbox may name another server (the real one stays on the pinned URLs)" eval '(unset SWTOR_ON_MAC_ROOT; SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$SOMSH" fetch-engine 2>&1 | grep -q "verified download in the cache\|download $(val ENGINE_URL "$SOMSH")")'
+# (outside the sandbox: against the real home, as a dry run; what it said is kept in
+# fetch-real.txt with the time, for a look if it fails)
+(unset SWTOR_ON_MAC_ROOT; date '+%F %T'; SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$SOMSH" fetch-engine 2>&1 && echo "status 0" || echo "status $?") >"$SANDBOX/fetch-real.txt" 2>&1 || true
+check "download: only the sandbox may name another server (the real one stays on the pinned URLs)" grep -q "verified download in the cache\|download $(val ENGINE_URL "$SOMSH")" "$SANDBOX/fetch-real.txt"
 kill "$fserver" 2>/dev/null || true; wait "$fserver" 2>/dev/null || true
 rm -rf "$DLC"
 
