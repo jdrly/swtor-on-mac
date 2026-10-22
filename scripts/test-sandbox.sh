@@ -1428,8 +1428,11 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: the cold test caches removed, said so" eval '[ ! -e "$COLD" ] && grep -q "^Removed a development build.s d9mt test caches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: env as a release writes it (no A/B include, state cache on, update check on)" eval '! grep -q d9mt-ab "$SOM/env" && [ "$(envv D9MT_TEX_PFV)/$(envv SWTOR_D9MT_AB)" = "<unset>/<unset>" ] && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && grep -qx SWTOR_UPDATE_CHECK=1 "$SOM/env"'
   check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high)" cmp -s "$SANDBOX/dev-settings.conf" "$SOM/settings.conf"
-  check "over $DEVV: the same d3d9.dll as $DEVV" cmp -s "$DEV_APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
-  check "over $DEVV: the prefix as $DEVV left it" eval 'prefix_snap | diff "$SANDBOX/dev-prefix.txt" - >"$SANDBOX/dev-prefix.diff"'
+  { prefix_snap | diff "$SANDBOX/dev-prefix.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/dev-prefix.diff"
+  # (a development build with this version's d3d9.dll, 0.1.2-dev.3 for 0.1.2 and 0.1.3: nothing
+  # changes; with an older pin, d3d9.dll)
+  check "over $DEVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/dev-prefix.diff"))" eval '[ -z "$(grep -v -x ./drive_c/windows/system32/d3d9.dll "$SANDBOX/dev-prefix.diff")" ]'
+  check "over $DEVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/dev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/dev-engine.diff"
   check "over $DEVV: the engine unchanged, signatures aside, but ntdll.so ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev
   # ($DEVV's ntdll.so: the engine's own, or, from 0.1.2-dev.1 on, the app's build in its own
