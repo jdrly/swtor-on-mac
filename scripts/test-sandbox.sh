@@ -1333,13 +1333,20 @@ prefix_changes() {
 }
 # engine_same <name>: the engine's files that differ from $SANDBOX/<name>-engine (listed in
 # $SANDBOX/<name>-engine.diff) are the same code, but for ntdll.so and ntdll.so.stock (the
-# app's build and the engine's own, checked by ntdll_is_apps). A Developer ID build of either side signs its
-# Mach-O files, winemetal.so and winemac.so, with signatures of their own: those may differ,
-# their code not.
+# app's build and the engine's own, checked by ntdll_is_apps) and the app's Mac driver where
+# this version's build differs from the other's (winemac.so and its PE sides: then exactly this
+# app's files). A Developer ID build of either side signs its Mach-O files, winemetal.so and
+# winemac.so, with signatures of their own: those may differ, their code not.
 engine_same() {
   local f
   while IFS= read -r f; do
     case "$f" in ""|./lib/wine/x86_64-unix/ntdll.so|./lib/wine/x86_64-unix/ntdll.so.stock) continue ;; esac
+    case "$f" in
+      ./lib/wine/x86_64-unix/winemac.so)
+        ! cmp -s "$APP/Contents/Resources/wine/winemac.so" "$SOM/engine/$f" || continue ;;
+      ./lib/wine/x86_64-windows/winemac.drv|./lib/wine/i386-windows/winemac.drv)
+        ! cmp -s "$APP/Contents/Resources/wine/${f#./lib/wine/}" "$SOM/engine/$f" || continue ;;
+    esac
     macho_same "$SANDBOX/$1-engine/$f" "$SOM/engine/$f" || { echo "  differs: $f"; return 1; }
   done <"$SANDBOX/$1-engine.diff"
 }
@@ -1361,6 +1368,23 @@ check "prefix comparison: a file named like d3d9.dll is reported and not taken f
 echo new >"$FP/drive_c/new.txt"
 check "prefix comparison: a new file is reported" eval 'prefix_changes "$SANDBOX/fake-prefix.txt" "$FP" | grep -qx ./drive_c/new.txt'
 rm -rf "$FP"
+
+# engine_same itself (sections 15 and 16): on fake engines, this app's Mac driver over another
+# build passes; a Mac driver that isn't this app's, or another changed file, fails
+echo "== 14c. the engine comparison allows only this app's Mac driver"
+FE="$SANDBOX/fake-som"; rm -rf "$FE" "$SANDBOX/fake-engine"
+mkdir -p "$FE/engine/lib/wine/x86_64-unix" "$SANDBOX/fake-engine/lib/wine/x86_64-unix"
+cp "$APP/Contents/Resources/wine/winemac.so" "$FE/engine/lib/wine/x86_64-unix/winemac.so"
+echo older >"$SANDBOX/fake-engine/lib/wine/x86_64-unix/winemac.so"
+echo ./lib/wine/x86_64-unix/winemac.so >"$SANDBOX/fake-engine.diff"
+check "engine comparison: this app's Mac driver over another build passes" eval '( SOM="$FE"; engine_same fake )'
+echo other >"$FE/engine/lib/wine/x86_64-unix/winemac.so"
+check "engine comparison: a Mac driver that isn't this app's fails" eval '! ( SOM="$FE"; engine_same fake ) >/dev/null 2>&1'
+cp "$APP/Contents/Resources/wine/winemac.so" "$FE/engine/lib/wine/x86_64-unix/winemac.so"
+echo a >"$SANDBOX/fake-engine/lib/wine/x86_64-unix/other.so"; echo b >"$FE/engine/lib/wine/x86_64-unix/other.so"
+echo ./lib/wine/x86_64-unix/other.so >>"$SANDBOX/fake-engine.diff"
+check "engine comparison: another changed file fails" eval '! ( SOM="$FE"; engine_same fake ) >/dev/null 2>&1'
+rm -rf "$FE" "$SANDBOX/fake-engine" "$SANDBOX/fake-engine.diff"
 
 if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   PREVSOM="$PREV_APP/Contents/Resources/som.sh"
@@ -1398,7 +1422,7 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   check "over $PREVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" eval '[ -z "$(grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll "$SANDBOX/prev-prefix.diff")" ]'
   check "over $PREVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/prev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-engine.diff"
-  check "over $PREVV: the engine unchanged, signatures aside, but ntdll.so ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same prev
+  check "over $PREVV: the engine unchanged, signatures aside, but ntdll.so and this app's Mac driver ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same prev
   # ($PREVV's ntdll.so: the engine's own, or, from 0.1.2 on, the app's build in its own signature)
   check "over $PREVV: the app's ntdll.so, the engine's own kept as .stock" eval 'ntdll_is_apps && { cmp -s "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" || macho_same "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so"; }'
   check "over $PREVV: winemetal.so is $PREVV's code (LC_UUID $(dwarfdump -u "$WM/winemetal.so" | awk '{ print $2 }'))" eval 'macho_same "$PREV_APP/Contents/Resources/d9mt/winemetal.so" "$WM/winemetal.so" && [ "$(dwarfdump -u "$WM/winemetal.so" | awk "{ print \$2 }")" = "$(dwarfdump -u "$PREV_APP/Contents/Resources/d9mt/winemetal.so" | awk "{ print \$2 }")" ]'
@@ -1466,7 +1490,7 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/dev-prefix.diff"))" eval '[ -z "$(grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll "$SANDBOX/dev-prefix.diff")" ]'
   check "over $DEVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/dev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/dev-engine.diff"
-  check "over $DEVV: the engine unchanged, signatures aside, but ntdll.so ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev
+  check "over $DEVV: the engine unchanged, signatures aside, but ntdll.so and this app's Mac driver ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev
   # ($DEVV's ntdll.so: the engine's own, or, from 0.1.2-dev.1 on, the app's build in its own
   # signature, its code ours)
   check "over $DEVV: the app's ntdll.so, the engine's own kept as .stock ($DEVV had $(cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" && echo "the engine's" || echo "the app's build"))" eval 'ntdll_is_apps && { cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" || macho_same "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so"; }'
