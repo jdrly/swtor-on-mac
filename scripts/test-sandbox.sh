@@ -1318,11 +1318,12 @@ prefix_snap() {  # [prefix folder, default $SOM/prefix]
       shasum -a 256 | cut -d' ' -f1
   done
 }
-# prefix_changes <prefix_snap file> [prefix folder]: what differs in the prefix now, one a line:
-# a file's path (its metadata or its checksum), a registry file's name (system.reg ...), and any
-# other differing snapshot line as it is, so that nothing drops out unnoticed
+# prefix_changes <prefix_snap file> [prefix folder] [file for the snapshot now]: what differs in
+# the prefix now, one a line: a file's path (its metadata or its checksum), a registry file's
+# name (system.reg ...), and any other differing snapshot line as it is, so that nothing drops
+# out unnoticed. (Sections 15 and 16 keep both snapshots, so the comparison can be repeated.)
 prefix_changes() {
-  { prefix_snap "${2:-}" | diff "$1" - || true; } | awk '
+  { prefix_snap "${2:-}" | tee "${3:-/dev/null}" | diff "$1" - || true; } | awk '
     !/^[<>] / { next }
     { l = substr($0, 3) }
     l ~ /^\.\/[^|]*\|/ { sub(/\|.*/, "", l); print l; next }
@@ -1392,7 +1393,7 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   som install >"$SANDBOX/prev-upgrade.txt" 2>&1 || { tail -20 "$SANDBOX/prev-upgrade.txt"; bad "install over $PREVV exit"; }
   check "over $PREVV: @done, manifest $APPV" eval 'grep -q "^@done" "$SANDBOX/prev-upgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$APPV" ]'
   check "over $PREVV: the engine already in place, no download" eval 'grep -q "is already in place" "$SANDBOX/prev-upgrade.txt" && ! grep -q "Unpacking the Wine engine" "$SANDBOX/prev-upgrade.txt"'
-  prefix_changes "$SANDBOX/prev-prefix.txt" >"$SANDBOX/prev-prefix.diff"
+  prefix_changes "$SANDBOX/prev-prefix.txt" "" "$SANDBOX/prev-prefix-after.txt" >"$SANDBOX/prev-prefix.diff"
   # (a previous release with this version's d3d9.dll, 0.1.2 for 0.1.3: nothing changes)
   check "over $PREVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" eval '[ -z "$(grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll "$SANDBOX/prev-prefix.diff")" ]'
   check "over $PREVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
@@ -1459,7 +1460,7 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: the cold test caches removed, said so" eval '[ ! -e "$COLD" ] && grep -q "^Removed a development build.s d9mt test caches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: env as a release writes it (no A/B include, state cache on, update check on)" eval '! grep -q d9mt-ab "$SOM/env" && [ "$(envv D9MT_TEX_PFV)/$(envv SWTOR_D9MT_AB)" = "<unset>/<unset>" ] && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && grep -qx SWTOR_UPDATE_CHECK=1 "$SOM/env"'
   check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high)" cmp -s "$SANDBOX/dev-settings.conf" "$SOM/settings.conf"
-  prefix_changes "$SANDBOX/dev-prefix.txt" >"$SANDBOX/dev-prefix.diff"
+  prefix_changes "$SANDBOX/dev-prefix.txt" "" "$SANDBOX/dev-prefix-after.txt" >"$SANDBOX/dev-prefix.diff"
   # (a development build with this version's d3d9.dll, 0.1.2-dev.3 for 0.1.2 and 0.1.3: nothing
   # changes; with an older pin, d3d9.dll)
   check "over $DEVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/dev-prefix.diff"))" eval '[ -z "$(grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll "$SANDBOX/dev-prefix.diff")" ]'
