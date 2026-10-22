@@ -53,12 +53,12 @@ som() { "$SOMSH" "$@"; }
 st() { som status | sed -n "s/^$1=//p"; }
 # what the window's Play button would do (the app's own resolution; nothing is opened)
 play_target() { "$APP/Contents/MacOS/SWTORonMac" --play-target 2>/dev/null; }
-# has <grep options and patterns>: grep -q for a pipe's end. It reads all of its input: grep -q
+# piped <grep options and patterns>: grep -q for a pipe's end. It reads all of its input: grep -q
 # would stop at the first match, and the writer then dies of SIGPIPE, which under pipefail fails
 # the pipe (a check that should pass fails at random) or, after a !, passes it (one that should
 # fail passes)
-has() { grep "$@" >/dev/null; }
-is_macho() { file -b "$1" | has '^Mach-O'; }
+piped() { grep "$@" >/dev/null; }
+is_macho() { file -b "$1" | piped '^Mach-O'; }
 # reg_has <key as in user.reg, with \\> <value line>: the value is set under that key
 reg_has() {
   K="[$1]" V="$2" awk 'BEGIN { k = ENVIRON["K"]; v = ENVIRON["V"] }
@@ -364,7 +364,7 @@ sleep 0.5
 l3=$(cat "$SANDBOX/child.pid")
 check "leftovers: status busy=leftovers" test "$(st busy)" = leftovers
 check "leftovers: not counted as running" test "$(st running)" = no
-check "leftovers: names ($(st busy_detail))" eval 'st busy_detail | has winedevice.exe'
+check "leftovers: names ($(st busy_detail))" eval 'st busy_detail | piped winedevice.exe'
 check "leftovers: settings running=no" test "$(som settings | sed -n 's/^running=//p')" = no
 s1=$(orphan "$EB/wineserver"); sleep 0.3
 check "session: status busy=session" test "$(st busy)" = session
@@ -410,8 +410,8 @@ kill "$ws"; sleep 0.3
 # neither the launcher nor anything to end
 mw=$(orphan "$BS_APP/Contents/MacOS/mac_wine" 30); sleep 0.3
 check "Broadsword's Wine without its wineserver: busy=leftovers ($(st busy))" test "$(st busy)" = leftovers
-check "Broadsword's Wine leftover: named ($(st busy_detail))" eval 'st busy_detail | has winedevice.exe'
-check "mac_wine: not taken for the launcher" eval '! som status | has -x busy=launcher'
+check "Broadsword's Wine leftover: named ($(st busy_detail))" eval 'st busy_detail | piped winedevice.exe'
+check "mac_wine: not taken for the launcher" eval '! som status | piped -x busy=launcher'
 som end-leftovers >"$SANDBOX/end3.txt" 2>&1 || bad "end-leftovers (Broadsword's) exit"
 sleep 0.3
 check "end-leftovers: Broadsword's Wine leftover ended" all_gone "$w" "$l4"
@@ -479,7 +479,7 @@ check "install: no engine libraries folder (self-contained engine)" test ! -e "$
 check "install: manifest engine_id cx26" test "$(plutil -extract engine_id raw -o - "$SOM/install-manifest.json")" = cx26
 sys="$SOM/prefix/drive_c/windows/system32"
 check "install: d9mt d3d9.dll" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
-check "install: Wine's d3d9 kept ($(dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=20 2>/dev/null))" eval 'dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=20 2>/dev/null | has -e "Wine builtin" -e "Wine placeholder"'
+check "install: Wine's d3d9 kept ($(dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=20 2>/dev/null))" eval 'dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=20 2>/dev/null | piped -e "Wine builtin" -e "Wine placeholder"'
 check "install: RetinaMode=y" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
 WM="$SOM/engine/lib/wine/x86_64-unix"
 WL="$SOM/engine/lib/wine"
@@ -557,14 +557,14 @@ check "install: launchd job throttled" test "$(plutil -extract ThrottleInterval 
 check "install: launchd job runs the agent copy" test "$(plutil -extract ProgramArguments.1 raw -o - "$AGENT_PLIST")" = "$SOM/agent/som.sh"
 check "install: agent copy" test -f "$SOM/agent/som.sh" -a -f "$SOM/agent/wine-wrapper.sh" -a -x "$SOM/agent/helpers/hold-launcher"
 # (a real install's job may be loaded: it must not be the sandbox's)
-check "install: launchd job not loaded (sandbox)" eval '! launchctl print "gui/$(id -u)/cz.jandrly.swtoronmac.watch" 2>/dev/null | has -F "$SOM/"'
+check "install: launchd job not loaded (sandbox)" eval '! launchctl print "gui/$(id -u)/cz.jandrly.swtoronmac.watch" 2>/dev/null | piped -F "$SOM/"'
 check "install: status watch_agent" test "$(st watch_agent)" = yes
 check "install: manifest settings user" test -n "$(plutil -extract settings_user raw -o - "$SOM/install-manifest.json")"
 check "play: opens the sandbox's official app ($(play_target))" test "$(play_target)" = "launch $BS_APP"
 # without it the button is off: never the real app in /Applications (Launch Services' lookup
 # by bundle id is only for the real system)
 mv "$BS_APP" "$SANDBOX/official-app-away"
-check "play: sandbox app gone, not the real one ($(play_target))" eval 'play_target | has "^unavailable The official SWTOR app was not found"'
+check "play: sandbox app gone, not the real one ($(play_target))" eval 'play_target | piped "^unavailable The official SWTOR app was not found"'
 mv "$SANDBOX/official-app-away" "$BS_APP"
 
 echo "== 4b. settings"
@@ -807,7 +807,7 @@ check "wrapper: no start line for the game" eval '! grep -q "wine start: swtor.e
 check "wrapper: one line per other Wine start, the command's first word" eval 'test "$(grep -c "wine start: reg.exe (parent $$ " "$U/logs/hold.log")" = 1'
 check "wrapper: nothing else of the command logged" eval '! grep -rq SECRETTOKEN "$U/logs"'
 printf 'SWTOR_LOG_FILTER=.\nSWTOR_D9MT_AB="pfv cold=x"\n' >>"$U/env"; game
-check "wrapper: wine.log's second line names the A/B switches" eval 'sed -n 2p "$U/logs/wine.log" | has -x "SWTOR on Mac d9mt-ab: pfv cold=x"'
+check "wrapper: wine.log's second line names the A/B switches" eval 'sed -n 2p "$U/logs/wine.log" | piped -x "SWTOR on Mac d9mt-ab: pfv cold=x"'
 sed -i '' '/^SWTOR_D9MT_AB=/d' "$U/env"; game
 check "wrapper: no A/B line without switches" eval '! grep -q "d9mt-ab" "$U/logs/wine.log"'
 
@@ -894,7 +894,7 @@ check "session: then mac_wine's call" test "$(sed -n 2p "$T/wine-args")" = 'reg 
 check "session: wineserver -p10" test "$(cat "$TE/ws.args")" = -p10
 check "session: the wineserver inherited no fds" test -z "$(tr -d ' \n' <"$TE/ws.fds")"
 check "session: its system process has /dev/null as stdout and stderr" eval 'test "$(lsof -a -p "$sp" -d 1,2 -Fn 2>/dev/null | grep -c "^n/dev/null")" = 2'
-check "session: and nothing of the caller's" eval '! lsof -p "$sp" 2>/dev/null | has caller-fd'
+check "session: and nothing of the caller's" eval '! lsof -p "$sp" 2>/dev/null | piped caller-fd'
 macwine_call
 check "session: a second Wine call joins it (no second bootstrap)" test "$(grep -c SWTORonMacSession "$T/wine-args")" = 1
 check "session: one start logged" test "$(grep -c 'Wine session started' "$T/logs/hold.log")" = 1
@@ -930,7 +930,7 @@ check "reap: the other prefix's leftover, for its own prefix" all_gone "$o1"
 check "reap: and still not the running session's" alive "$l3"
 # 0.1.1's wrappers call hold-launcher with the game's pid: nothing happens
 check "hold-launcher <pid> (0.1.1's wrapper): nothing to do" eval '"$HL" $$ 2>"$T/logs/old.log" && grep -q "not holding the launcher" "$T/logs/old.log"'
-check "hold-launcher: no AppKit (never an app of the launcher's)" eval '! nm -u "$HL" | has -e NSApplication -e _objc_'
+check "hold-launcher: no AppKit (never an app of the launcher's)" eval '! nm -u "$HL" | piped -e NSApplication -e _objc_'
 kill "$(cat "$TE/ws.pid")" "$l3" "$dd" 2>/dev/null || true
 sleep 0.3
 check "session test: nothing of it left" test -z "$("$HL" --paths | grep -F "$T/")"
@@ -950,7 +950,7 @@ launcher_update() {
 }
 launcher_update
 check "update: status replaced" test "$(st wrapper)" = replaced
-check "play: off until the hook is repaired" eval 'play_target | has "^unavailable A launcher update removed the hook"'
+check "play: off until the hook is repaired" eval 'play_target | piped "^unavailable A launcher update removed the hook"'
 som install >"$SANDBOX/reinstall2.txt" 2>&1 || bad "reinstall after update"
 check "update: wrapper back" test "$(st wrapper)" = ours
 echo "== 7b. ...and the launchd job puts it back by itself"
@@ -982,9 +982,9 @@ raw_wrapper() { # [<env path>]: the template, or the template filled in for anot
 }
 raw_wrapper
 check "raw wrapper: status replaced, not ours" test "$(st wrapper)" = replaced
-check "raw wrapper: play off until the hook is repaired" eval 'play_target | has "^unavailable "'
+check "raw wrapper: play off until the hook is repaired" eval 'play_target | piped "^unavailable "'
 zip=$("$APP/Contents/Resources/collect-logs.sh" 2>/dev/null || true)
-check "raw wrapper: Collect Logs says it is not filled in" eval 'unzip -p "$zip" "*/system-info.txt" | has "wine64-preloader: .*NOT FILLED IN"'
+check "raw wrapper: Collect Logs says it is not filled in" eval 'unzip -p "$zip" "*/system-info.txt" | piped "wine64-preloader: .*NOT FILLED IN"'
 rm -f "$zip"
 som install >"$SANDBOX/reinstall-raw.txt" 2>&1 || bad "reinstall over a raw wrapper"
 check "raw wrapper: Reinstall repairs it" eval '[ "$(st wrapper)" = ours ] && grep -qxF "CONF=\"$SOM/env\"" "$BS_WINE/bin/wine64-preloader" && grep -qxF "CONF=\"$SOM/env\"" "$BS_WINE/bin/wine-preloader"'
@@ -1171,7 +1171,7 @@ fetch_mode alwaysdrop alwaysdrop fetch-stopped
 check "download: a connection that keeps dropping (both addresses): stopped at 192 of 224 MB, the part kept" eval 'grep -q "^@error The download of Wine engine stopped at 192 of 224 MB" "$SANDBOX/fetch-stopped.txt" && [ "$(stat -f %z "$DLC/$ENGINE_FILE.part")" = 201326592 ]'
 fetch_mode ok ok fetch-resumed
 check "download: the next try continues where it stopped" eval 'grep -q "^@done " "$SANDBOX/fetch-resumed.txt" && grep -q "resuming at 201326592 of" "$SANDBOX/fetch-resumed.log" && [ ! -e "$DLC/$ENGINE_FILE.part" ]'
-check "download: only the sandbox may name another server (the real one stays on the pinned URLs)" eval '(unset SWTOR_ON_MAC_ROOT; SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$SOMSH" fetch-engine 2>&1 | has "verified download in the cache\|download $(val ENGINE_URL "$SOMSH")")'
+check "download: only the sandbox may name another server (the real one stays on the pinned URLs)" eval '(unset SWTOR_ON_MAC_ROOT; SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$SOMSH" fetch-engine 2>&1 | piped "verified download in the cache\|download $(val ENGINE_URL "$SOMSH")")'
 kill "$fserver" 2>/dev/null || true; wait "$fserver" 2>/dev/null || true
 rm -rf "$DLC"
 
@@ -1258,7 +1258,7 @@ if [ -x "$OLD_APP/Contents/Resources/som.sh" ]; then
   check "downgrade: @done" grep -q '^@done' "$SANDBOX/downgrade.txt"
   check "downgrade: CrossOver 24.0.7 with its libraries again" eval 'test -f "$SOM/engine/bin/wine-preloader" -a -d "$SOM/frameworks" && [ "$(cat "$SOM/engine/.som-source")" = "$OLD_SHA" ]'
   check "downgrade: manifest $OLDV" test "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$OLDV"
-  check "downgrade: Wine $(sbx_wine --version 2>/dev/null)" eval 'sbx_wine --version 2>/dev/null | has "^wine-9.0"'
+  check "downgrade: Wine $(sbx_wine --version 2>/dev/null)" eval 'sbx_wine --version 2>/dev/null | piped "^wine-9.0"'
   check "downgrade: settings kept" eval 'grep -qx physkeys=on "$SOM/settings.conf" && grep -qx memory=high "$SOM/settings.conf" && grep -qx retina=off "$SOM/settings.conf"'
   check "downgrade: $OLDV's Mac driver (game keys by position)" cmp -s "$OLD_APP/Contents/Resources/wine/winemac.so" "$SOM/engine/lib/wine/x86_64-unix/winemac.so"
   check "downgrade: game settings kept" grep -qx "keybinds-from-$OLDV" "$GS/upgrade-marker.ini"
@@ -1359,13 +1359,16 @@ engine_same() {
 # prefix_changes itself (sections 15 and 16 allow only d3d9.dll to change): on a fake prefix,
 # a changed registry value, another file next to d3d9.dll and a new file are each reported,
 # a changed d3d9.dll alone gives just its path
-# has itself (every check that greps a pipe uses it): under pipefail, a match early in a long
+# piped itself (every check that greps a pipe uses it; a name of its own, as has is the session
+# report's): under pipefail, a match early in a long
 # output passes, and the same check negated fails (with grep -q both go wrong: the writer dies
 # of SIGPIPE once grep has stopped reading)
 echo "== 14a. a check on a pipe reads all of it"
-check "pipes: a match early in a long output passes" eval 'seq 1 200000 | has -x 1'
-check "pipes: the same check negated fails" eval '! ( ! seq 1 200000 | has -x 1 )'
-check "pipes: no check greps a pipe with grep -q" eval '! grep -n "| *grep -q" "$REPO/scripts/test-sandbox.sh" | grep -v "^[0-9]*: *#" | has .'
+check "pipes: a match early in a long output passes" eval 'seq 1 200000 | piped -x 1'
+check "pipes: the same check negated fails" eval '! ( ! seq 1 200000 | piped -x 1 )'
+check "pipes: no check greps a pipe with grep -q" eval '! grep -n "| *grep -q" "$REPO/scripts/test-sandbox.sh" | grep -v "^[0-9]*: *#" | piped .'
+check "pipes: no helper is defined twice (a later one would replace the earlier for every check after it)" \
+  eval '[ -z "$(grep -o -E "^ *[A-Za-z_][A-Za-z0-9_]*\\(\\) *\\{" "$REPO/scripts/test-sandbox.sh" | sed -E "s/^ *//; s/\\(\\).*//" | sort | uniq -d)" ]'
 
 echo "== 14b. the prefix comparison sees what changed"
 FP="$SANDBOX/fake-prefix"; rm -rf "$FP"; mkdir -p "$FP/drive_c/windows/system32"
@@ -1375,11 +1378,11 @@ prefix_snap "$FP" >"$SANDBOX/fake-prefix.txt"
 echo dll2 >"$FP/drive_c/windows/system32/d3d9.dll"
 check "prefix comparison: a changed d3d9.dll alone gives just its path" eval '[ "$(prefix_changes "$SANDBOX/fake-prefix.txt" "$FP")" = ./drive_c/windows/system32/d3d9.dll ]'
 sed -i '' 's/"A"="1"/"A"="2"/' "$FP/user.reg"
-check "prefix comparison: a changed registry value is reported (user.reg)" eval 'prefix_changes "$SANDBOX/fake-prefix.txt" "$FP" | has -x user.reg'
+check "prefix comparison: a changed registry value is reported (user.reg)" eval 'prefix_changes "$SANDBOX/fake-prefix.txt" "$FP" | piped -x user.reg'
 sed -i '' 's/"A"="2"/"A"="1"/' "$FP/user.reg"; echo y >"$FP/drive_c/windows/system32/d3d9Xdll"
 check "prefix comparison: a file named like d3d9.dll is reported and not taken for it" eval '[ -n "$(prefix_changes "$SANDBOX/fake-prefix.txt" "$FP" | grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll)" ]'
 echo new >"$FP/drive_c/new.txt"
-check "prefix comparison: a new file is reported" eval 'prefix_changes "$SANDBOX/fake-prefix.txt" "$FP" | has -x ./drive_c/new.txt'
+check "prefix comparison: a new file is reported" eval 'prefix_changes "$SANDBOX/fake-prefix.txt" "$FP" | piped -x ./drive_c/new.txt'
 rm -rf "$FP"
 
 # engine_same itself (sections 15 and 16): on fake engines, this app's Mac driver over another
