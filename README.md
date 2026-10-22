@@ -520,7 +520,7 @@ in d9mt's `dxvk.conf`, and `GrabPointer=n` for `swtor.exe` (no hitch when mouse-
 Vsync is on by default because SWTOR asks for none in borderless mode, which tears. The rest is
 in the Settings window (above).
 
-The installer is `src/som.sh` (`status`, `install`, `uninstall`, `settings`, `set`, `watch`,
+The installer is `src/som.sh` (`status`, `install`, `uninstall`, `settings`, `set`, `rehook`,
 `end-leftovers`); the window (`src/native`, SwiftUI) runs it and shows its progress as a
 timeline. Install is idempotent and all-or-nothing: it refuses while the launcher or game runs,
 checks every download against a pinned sha256, prepares everything in SWTOR on Mac's folders
@@ -534,7 +534,7 @@ it says so and leaves it alone unless you confirm; it then keeps a copy in `back
 directory) and `SWTOR_ON_MAC_DRY_RUN=1` (print the changes, make none). The app passes both on,
 so `SWTOR_ON_MAC_ROOT=/tmp/x "SWTOR on Mac.app/Contents/MacOS/SWTORonMac"` shows the window for
 a sandbox. In a sandbox notifications go to `notifications.log`, and Play SWTOR opens only the sandbox's official app
-(`SWTORonMac --play-target` prints what the button would do, without opening anything). `scripts/test-sandbox.sh` builds a sandbox from an APFS clone of this Mac's
+(`SWTORonMac --play-target` prints what the button would do, without opening anything, and `--play-check` what a press does after the hook check). `scripts/test-sandbox.sh` builds a sandbox from an APFS clone of this Mac's
 Broadsword Wine folder and a stand-in for the official app (its `Info.plist`, ad-hoc signed,
 with the test's stand-ins for the launcher built in, so Gatekeeper never sees a changed copy
 of Broadsword's signed app) and runs install, the settings, reinstall, the wrapper's update check (with a

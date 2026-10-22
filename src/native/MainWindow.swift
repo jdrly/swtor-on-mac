@@ -756,7 +756,7 @@ struct PlayButton: View {
   let prominent: Bool
 
   var body: some View {
-    let play = installer.playAction
+    let play = installer.playButtonAction
     let button = Button(action: action) {
       Group {
         if installer.launching {

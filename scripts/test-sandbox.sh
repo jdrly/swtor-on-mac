@@ -53,6 +53,8 @@ som() { "$SOMSH" "$@"; }
 st() { som status | sed -n "s/^$1=//p"; }
 # what the window's Play button would do (the app's own resolution; nothing is opened)
 play_target() { "$APP/Contents/MacOS/SWTORonMac" --play-target 2>/dev/null; }
+# what a press would do: the hook check first (som.sh rehook), then the fresh status
+play_check() { "$APP/Contents/MacOS/SWTORonMac" --play-check 2>/dev/null; }
 # piped <grep options and patterns>: grep -q for a pipe's end. It reads all of its input: grep -q
 # would stop at the first match, and the writer then dies of SIGPIPE, which under pipefail fails
 # the pipe (a check that should pass fails at random) or, after a !, passes it (one that should
@@ -943,6 +945,35 @@ rehook; check "rehook: wrapper in place, nothing to do, said so" eval '[ "$(st w
 check "rehook: logged" grep -q 'the wrapper is in place' "$LOGS/rehook.log"
 rm -f "$BS_WINE/bin-real/setsid-exec"; rehook
 check "rehook: missing helper restored" test -x "$BS_WINE/bin-real/setsid-exec"
+# a helper repair is a change too: only with the lock, and not while the launcher writes
+rm -f "$BS_WINE/bin-real/setsid-exec"; mkdir "$SOM/.lock"; rehook; rmdir "$SOM/.lock"
+check "rehook: a missing helper left alone while an install runs, said so" eval 'said "@notice busy" && [ ! -e "$BS_WINE/bin-real/setsid-exec" ]'
+touch "$BS_WINE/bin/wine64"; SETTLE=60 rehook
+check "rehook: a missing helper left alone right after a change in Wine/bin, said so" eval 'said "@notice changing" && [ ! -e "$BS_WINE/bin-real/setsid-exec" ]'
+rehook
+check "rehook: then restored" eval 'said "@done in place" && [ -x "$BS_WINE/bin-real/setsid-exec" ]'
+# an older version's launchd job, with a stand-in for launchctl (in a sandbox none is called
+# otherwise): it stays, files and all, if it can't be unloaded, and goes once it can
+FL="$SANDBOX/fake-launchctl"; mkdir -p "$FL"
+cat >"$FL/launchctl" <<'FAKE'
+#!/bin/bash
+d="${0%/*}"; echo "$*" >>"$d/calls"
+case "$1" in
+  print) [ -e "$d/loaded" ] ;;
+  bootout) [ -e "$d/stuck" ] && exit 5; rm -f "$d/loaded" ;;
+  *) exit 2 ;;
+esac
+FAKE
+chmod +x "$FL/launchctl"
+old_job() { mkdir -p "${AGENT_PLIST%/*}" "$SOM/agent" && echo plist >"$AGENT_PLIST" && echo old >"$SOM/agent/som.sh" && : >"$FL/loaded"; }
+old_job; : >"$FL/stuck"
+SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-stuck.txt" 2>&1 || bad "install with a stuck old job"
+check "old launchd job that won't unload: Install finishes, warns, keeps the job's files for the next try" eval 'grep -q "^@done" "$SANDBOX/agent-stuck.txt" && grep -q "Could not unload the launcher-update guard of an older version" "$SANDBOX/agent-stuck.txt" && [ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ] && ! grep -q "^Removed the launcher-update guard" "$SANDBOX/agent-stuck.txt"'
+rm -f "$FL/stuck"
+SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-unload.txt" 2>&1 || bad "install with a loaded old job"
+check "old launchd job loaded: unloaded, then its files removed, said so" eval 'grep -qx "bootout gui/$(id -u)/cz.jandrly.swtoronmac.watch" "$FL/calls" && [ ! -e "$FL/loaded" ] && [ ! -e "$AGENT_PLIST" ] && [ ! -e "$SOM/agent" ] && grep -q "^Removed the launcher-update guard of an older version" "$SANDBOX/agent-unload.txt"'
+SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-none.txt" 2>&1 || bad "install with no old job"
+check "no old launchd job: nothing to unload or remove" eval '[ "$(grep -c bootout "$FL/calls")" = 2 ] && ! grep -q -e "launcher-update guard" "$SANDBOX/agent-none.txt"'
 
 echo "== 7. a launcher update replaced the wrapper"
 launcher_update() {
@@ -952,6 +983,11 @@ launcher_update() {
 launcher_update
 check "update: status replaced" test "$(st wrapper)" = replaced
 check "play: off until the hook is repaired" eval 'play_target | piped "^unavailable A launcher update removed the hook"'
+# a press checks the hook first, whatever the window last saw: while the launcher still writes
+# it waits, after that it hooks back in and opens the official app
+check "press while the launcher still writes: wait, the hook left alone" eval '[ "$(SWTOR_ON_MAC_SETTLE=60 play_check)" = "unavailable SWTOR'"'"'s launcher is changing its Wine right now. Wait until it has finished, then press Play SWTOR again." ] && [ "$(st wrapper)" = replaced ]'
+check "press after the update: hooked back in, then the official app" eval '[ "$(SWTOR_ON_MAC_SETTLE=0 play_check)" = "launch $BS_APP" ] && [ "$(st wrapper)" = ours ]'
+launcher_update
 som install >"$SANDBOX/reinstall2.txt" 2>&1 || bad "reinstall after update"
 check "update: wrapper back" test "$(st wrapper)" = ours
 echo "== 7b. ...and the app's check when it opens puts it back (no background helper)"

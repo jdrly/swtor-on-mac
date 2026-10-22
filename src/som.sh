@@ -128,6 +128,9 @@ HELPERS="setsid-exec hold-launcher"
 AGENT_LABEL=cz.jandrly.swtoronmac.watch
 AGENT_PLIST="$H/Library/LaunchAgents/$AGENT_LABEL.plist"
 AGENT_DIR="$SOM/agent"
+# launchctl for removing it; in a sandbox none (the job was never loaded there), or a test's
+# stand-in (SWTOR_ON_MAC_LAUNCHCTL)
+if [ -n "$ROOT" ]; then LAUNCHCTL="${SWTOR_ON_MAC_LAUNCHCTL:-}"; else LAUNCHCTL=/bin/launchctl; fi
 # What SWTOR on Mac keeps in $SOM (removed by uninstall; backup/ stays). frameworks: the old
 # engine's libraries (0.0.x installs, until an install upgrades them); upgrade-backup: what an
 # upgrade from 0.0.x keeps until it has gone through (begin_upgrade); d9mt-ab.env: development
@@ -1224,9 +1227,16 @@ restore_game_settings() {
 
 # --- 0.1.3's launcher-update guard, a launchd job: Install (an update over 0.1.3 or older) and
 # Uninstall remove it, idempotently (unloaded if it is loaded; in a sandbox it never was).
-remove_agent() {
-  if [ -z "$ROOT" ] && launchctl print "gui/$(id -u)/$AGENT_LABEL" >/dev/null 2>&1; then
-    run launchctl bootout "gui/$(id -u)/$AGENT_LABEL" || warn "Could not unload the launchd job $AGENT_LABEL"
+remove_agent() { # → 1 (and a warning) if the job stays loaded: its files then stay too, for the next try
+  local svc
+  svc="gui/$(id -u)/$AGENT_LABEL"
+  if [ -n "$LAUNCHCTL" ] && "$LAUNCHCTL" print "$svc" >/dev/null 2>&1; then
+    run "$LAUNCHCTL" bootout "$svc" 2>/dev/null || true
+    if [ -z "$DRY" ] && "$LAUNCHCTL" print "$svc" >/dev/null 2>&1; then
+      warn "Could not unload the launcher-update guard of an older version (the launchd job $AGENT_LABEL); it stays until it can be removed. Click Reinstall again, or run in Terminal: launchctl bootout $svc"
+      return 1
+    fi
+    log "unloaded the launchd job $AGENT_LABEL"
   fi
   if [ -f "$AGENT_PLIST" ]; then
     run rm -f "$AGENT_PLIST"
@@ -1260,47 +1270,64 @@ on_rehook_exit() {
 # runs, if another wrapper is there, or if the launcher is changing its Wine right now (a
 # preloader missing, or Wine/bin changed in the last $SETTLE seconds): the window then shows
 # the hook as removed and offers Repair. One "@done" or "@notice" line for the app.
+# rehook_inspect: the hook as it is (read only): REDO (a preloader is Broadsword's again),
+# ODD (a preloader missing, or wine64 not a program: a launcher update half way), OTHER (another
+# tool's wrapper), NEED (missing helpers next to the real preloaders), STATES (for the log)
+rehook_inspect() {
+  local b st h
+  REDO="" ODD="" OTHER="" NEED="" STATES=""
+  for b in $PRELOADERS; do
+    st=$(wrapper_state_of "$b")
+    STATES="$STATES $b=$st"
+    case "$st" in
+      ours) ;;
+      stock|replaced) REDO=1 ;;
+      personal|foreign) OTHER=1 ;;
+      missing) ODD=1 ;;
+    esac
+  done
+  if [ -n "$REDO" ] && ! is_macho "$BS_WINE/bin/wine64"; then ODD=1; fi
+  for h in $HELPERS; do [ -x "$BS_WINE/bin-real/$h" ] || NEED="$NEED $h"; done
+}
+
+# rehook_leave <when>: the answer if rehook must leave it alone ("@notice ..."), else nothing
+rehook_leave() {
+  if [ -n "$OTHER" ]; then log "state:$STATES ($1); another Wine wrapper is installed: not ours to change"; echo "@notice other"
+  elif [ -n "$ODD" ] || recently_changed; then log "state:$STATES ($1); the launcher is changing its Wine; leaving it alone"; echo "@notice changing"
+  fi
+}
+
 cmd_rehook() {
-  local b st states="" real="$BS_WINE/bin-real" h redo="" odd=""
+  local b h leave
   SETTLE="${SWTOR_ON_MAC_SETTLE:-20}"
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/rehook.log"; fi
   log "---- rehook $VERSION"
   [ -f "$MANIFEST" ] || { log "SWTOR on Mac is not installed; nothing to do"; echo "@done not installed"; return 0; }
   [ ! -d "$SOM/.lock" ] || { log "an install, uninstall or settings change is running; leaving it alone"; echo "@notice busy"; return 0; }
-  for b in $PRELOADERS; do
-    st=$(wrapper_state_of "$b")
-    states="$states $b=$st"
-    case "$st" in
-      ours) ;;
-      stock|replaced) redo=1 ;;
-      personal|foreign) log "state:$states; another Wine wrapper is installed: not ours to change"; echo "@notice other"; return 0 ;;
-      missing) odd=1 ;;
-    esac
-  done
-  log "state:$states"
-  if [ -n "$redo" ] && ! is_macho "$BS_WINE/bin/wine64"; then odd=1; fi
-  if [ -n "$redo" ] && recently_changed; then odd=1; fi
-  if [ -n "$odd" ]; then
-    log "the launcher is changing its Wine; leaving it alone"
-    echo "@notice changing"
-    return 0
-  fi
-  if [ -z "$redo" ]; then
+  rehook_inspect
+  if [ -z "$REDO$NEED$OTHER$ODD" ]; then log "state:$STATES; the wrapper is in place"; echo "@done in place"; return 0; fi
+  leave=$(rehook_leave "before the lock")
+  [ -z "$leave" ] || { echo "$leave"; return 0; }
+  # Every change only with the lock held (an install, uninstall or settings change may have
+  # started since the check above), and after looking again under it
+  mkdir "$SOM/.lock" 2>/dev/null || { log "an install or uninstall just started; leaving it alone"; echo "@notice busy"; return 0; }
+  REHOOK_LOCKED=1 MOVED="" WRAPPER_PHASE="" WRAPPER_STATE=replaced
+  trap on_rehook_exit EXIT
+  rehook_inspect
+  log "state:$STATES (with the lock)"
+  leave=$(rehook_leave "with the lock")
+  [ -z "$leave" ] || { echo "$leave"; return 0; }
+  if [ -z "$REDO" ]; then
     # still hooked in; a launcher update may have removed the helpers next to the real preloaders
-    for h in $HELPERS; do
-      if [ ! -x "$real/$h" ]; then
-        log "restoring the missing helper $h"
-        run mkdir -p "$real"
-        copy_atomic "$RES/helpers/$h" "$real/$h" 755
-      fi
+    for h in $NEED; do
+      log "restoring the missing helper $h"
+      run mkdir -p "$BS_WINE/bin-real"
+      copy_atomic "$RES/helpers/$h" "$BS_WINE/bin-real/$h" 755
     done
     log "the wrapper is in place"
     echo "@done in place"
     return 0
   fi
-  mkdir "$SOM/.lock" 2>/dev/null || { log "an install or uninstall just started; leaving it alone"; echo "@notice busy"; return 0; }
-  REHOOK_LOCKED=1 MOVED="" WRAPPER_PHASE="" WRAPPER_STATE=replaced
-  trap on_rehook_exit EXIT
   install_wrapper
   if [ -z "$DRY" ]; then
     for b in $PRELOADERS; do
@@ -1475,8 +1502,9 @@ cmd_install() {
   write_manifest
   finish_upgrade
   # an older version's launcher-update guard (a launchd job): nothing of SWTOR on Mac runs while
-  # the app is closed any more (the app checks the hook when it opens)
-  remove_agent
+  # the app is closed any more (the app checks the hook when it opens). Not part of the
+  # all-or-nothing install: if it can't be unloaded, it stays and the next Install tries again.
+  remove_agent || true
   [ -n "$DRY" ] || rm -rf "$CACHE/downloads"
   remove_dev_leftovers
   log "install complete"
@@ -1506,7 +1534,7 @@ cmd_uninstall() {
   trap 'rmdir "$SOM/.lock" "$SOM" 2>/dev/null || true' EXIT
 
   step "Restoring the official launcher's Wine"
-  remove_agent
+  remove_agent || true
   if [ -d "$real" ]; then
     for b in $PRELOADERS; do
       [ -e "$real/$b" ] || continue

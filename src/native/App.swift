@@ -90,7 +90,12 @@ final class Installer {
 
   // MARK: Derived state
 
-  var isBusy: Bool { if case .working = phase { true } else { false } }
+  // An install or uninstall runs, or the hook check (rehook), which can change Broadsword's
+  // Wine folder too: quitting and app updates wait for either, and nothing else starts meanwhile.
+  var isBusy: Bool { rehooking || isOperating }
+  var isOperating: Bool { if case .working = phase { true } else { false } }
+  // Quit was chosen while the hook check ran: it goes ahead once the check has finished.
+  var terminateWhenIdle = false
   var officialPresent: Bool { status["official_app"] == "yes" && status["official_wine"] == "yes" }
   var rosetta: Bool { status["rosetta"] == "yes" }
   var installed: Bool { status["installed"] == "yes" }
@@ -185,17 +190,28 @@ final class Installer {
   // now; the window then shows the hook as it is. then: som.sh's answer ("@done rehooked",
   // "@done in place", "@notice changing", ...), once the new status is in.
   func rehook(then: ((String) -> Void)? = nil) {
-    guard !isBusy, !rehooking else { then?(""); return }
+    guard !isBusy else { then?(""); return }
     rehooking = true
     let script = script
     Task {
-      let output = await Installer.capture(script: script, arguments: ["rehook"])
+      let answer = Installer.rehookAnswer(await Installer.capture(script: script, arguments: ["rehook"]))
       rehooking = false
-      let answer = output.split(separator: "\n").last {
-        $0.hasPrefix("@done ") || $0.hasPrefix("@notice ") || $0.hasPrefix("@error ")
-      }.map(String.init) ?? ""
+      // a quit or an app update that waited for the check goes ahead now
+      if terminateWhenIdle {
+        terminateWhenIdle = false
+        NSApp.reply(toApplicationShouldTerminate: true)
+        return
+      }
+      onIdle?()
       refresh { then?(answer) }
     }
+  }
+
+  // som.sh rehook's last "@done", "@notice" or "@error" line
+  nonisolated static func rehookAnswer(_ output: String) -> String {
+    output.split(separator: "\n").last {
+      $0.hasPrefix("@done ") || $0.hasPrefix("@notice ") || $0.hasPrefix("@error ")
+    }.map(String.init) ?? ""
   }
 
   // End Leftover Wine Processes: som.sh ends them if nothing else of SWTOR runs. Returns its
@@ -644,9 +660,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-  // Not while installing or uninstalling: the script finishes or rolls back first.
+  // Not while installing or uninstalling: the script finishes or rolls back first. The hook
+  // check takes a moment: the quit waits for it (Installer.rehook replies).
   @MainActor func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     guard let installer, installer.isBusy else { return .terminateNow }
+    if installer.rehooking, !installer.isOperating {
+      installer.terminateWhenIdle = true
+      return .terminateLater
+    }
     let alert = NSAlert()
     alert.messageText = "SWTOR on Mac is still working"
     alert.informativeText = "Wait until it has finished, or press Cancel in the window first."
@@ -667,6 +688,10 @@ struct SWTORonMacApp: App {
     // what the Play button would do, for tests (Play.swift)
     if CommandLine.arguments.contains("--play-target") {
       Installer.printPlayTarget()
+      exit(0)
+    }
+    if CommandLine.arguments.contains("--play-check") {
+      Installer.printPlayTarget(check: true)
       exit(0)
     }
     // whether an app counts as the game, for tests (Play.swift)
