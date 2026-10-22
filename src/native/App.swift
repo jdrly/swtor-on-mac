@@ -45,7 +45,7 @@ final class Installer {
     Step(id: 3, title: "Install the d9mt graphics driver",
          detail: "The game's Direct3D 9, straight to Metal", symbol: "cpu.fill"),
     Step(id: 4, title: "Hook into the SWTOR launcher",
-         detail: "Plus Game Mode, and a repair after launcher updates", symbol: "link"),
+         detail: "Plus Game Mode; the app checks the hook each time it opens", symbol: "link"),
   ]
   static let uninstallSteps = [
     Step(id: 1, title: "Restore the launcher's own Wine",
@@ -104,6 +104,8 @@ final class Installer {
   var leftovers: Bool { busy == "leftovers" }
   // ending them (End Leftover Wine Processes)
   var endingLeftovers = false
+  // som.sh rehook runs (the launcher hook check when the app opens, and before Play)
+  var rehooking = false
   // the launcher or the game runs (NSWorkspace; the Play button brings it to the front), and
   // the Play button is opening the official app (Play.swift)
   var runningLauncher = false
@@ -173,6 +175,26 @@ final class Installer {
         if Installer.isNewer(version, than: appVersion) { onUpdateAvailable?(version) }
       }
       then?()
+    }
+  }
+
+  // The launcher hook check, with no background helper (nothing of SWTOR on Mac runs while the
+  // app is closed): when the app opens, and before Play SWTOR if the hook is gone. som.sh
+  // rehook hooks the wrapper back in if a launcher update replaced it, and leaves it alone
+  // while an install runs, another wrapper is there or the launcher is changing its Wine right
+  // now; the window then shows the hook as it is. then: som.sh's answer ("@done rehooked",
+  // "@done in place", "@notice changing", ...), once the new status is in.
+  func rehook(then: ((String) -> Void)? = nil) {
+    guard !isBusy, !rehooking else { then?(""); return }
+    rehooking = true
+    let script = script
+    Task {
+      let output = await Installer.capture(script: script, arguments: ["rehook"])
+      rehooking = false
+      let answer = output.split(separator: "\n").last {
+        $0.hasPrefix("@done ") || $0.hasPrefix("@notice ") || $0.hasPrefix("@error ")
+      }.map(String.init) ?? ""
+      refresh { then?(answer) }
     }
   }
 
@@ -672,7 +694,9 @@ struct SWTORonMacApp: App {
           }
           installer.onSWTORQuit = { [settings] in settings.reload() }
           installer.observe()
-          installer.refresh()
+          // the launcher hook check (a launcher update may have replaced it while the app was
+          // closed); it refreshes the status afterwards
+          installer.rehook()
           settings.reload()
           // (not for the UI test script, which drives the window in the background)
           switch ProcessInfo.processInfo.environment["SWTOR_ON_MAC_UI_TEST"] {

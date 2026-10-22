@@ -75,8 +75,11 @@ snap() {
     find . -path '*/AppData/Local/SWTOR/swtor/settings*' -prune -o -type f -print0 | sort -z | xargs -0 shasum -a 256 )
 }
 AGENT_PLIST="$H/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist"
-# the watch job as launchd would start it (the sandbox never loads it into launchd)
-watch() { SWTOR_ON_MAC_SETTLE="${SETTLE:-1}" /bin/bash "$SOM/agent/som.sh" watch; }
+# the app's launcher hook check (som.sh rehook, when the app opens and before Play); its answer
+# in $SANDBOX/rehook.txt. SETTLE: how recent a change in Wine/bin counts as an update still
+# writing (0: none does)
+rehook() { SWTOR_ON_MAC_SETTLE="${SETTLE:-0}" som rehook >"$SANDBOX/rehook.txt" 2>&1; }
+said() { grep -qx "$1" "$SANDBOX/rehook.txt"; }
 notes() { if [ -f "$LOGS/notifications.log" ]; then wc -l <"$LOGS/notifications.log" | tr -d ' '; else echo 0; fi; }
 # the engine's loader: lib/wine/x86_64-unix/wine (CrossOver 26), or bin/wine-preloader (0.0.x)
 loader_of() { if [ -f "$1/bin/wine-preloader" ]; then echo "$1/bin/wine-preloader"; else echo "$1/lib/wine/x86_64-unix/wine"; fi; }
@@ -550,15 +553,13 @@ check "install: env feed" grep -q '^SWTOR_UPDATE_FEED="https://github.com/jdrly/
 check "install: env notifications to a file (sandbox)" grep -q '^SWTOR_NOTIFY_LOG=' "$SOM/env"
 check "install: env HUD off" grep -q '^#MTL_HUD_ENABLED=1' "$SOM/env"
 check "install: env Game Mode on" grep -q '^SWTOR_GAMEMODE_APP=' "$SOM/env"
-check "install: launchd job written" plutil -lint -s "$AGENT_PLIST"
-check "install: launchd job watches Wine/bin" test "$(plutil -extract WatchPaths.0 raw -o - "$AGENT_PLIST")" = "$BS_WINE/bin"
-check "install: launchd job not at load" test "$(plutil -extract RunAtLoad raw -o - "$AGENT_PLIST")" = false
-check "install: launchd job throttled" test "$(plutil -extract ThrottleInterval raw -o - "$AGENT_PLIST")" = 30
-check "install: launchd job runs the agent copy" test "$(plutil -extract ProgramArguments.1 raw -o - "$AGENT_PLIST")" = "$SOM/agent/som.sh"
-check "install: agent copy" test -f "$SOM/agent/som.sh" -a -f "$SOM/agent/wine-wrapper.sh" -a -x "$SOM/agent/helpers/hold-launcher"
-# (a real install's job may be loaded: it must not be the sandbox's)
-check "install: launchd job not loaded (sandbox)" eval '! launchctl print "gui/$(id -u)/cz.jandrly.swtoronmac.watch" 2>/dev/null | piped -F "$SOM/"'
-check "install: status watch_agent" test "$(st watch_agent)" = yes
+# no background helper: nothing of SWTOR on Mac runs while the app is closed (the app checks the
+# hook when it opens: som.sh rehook)
+check "install: no launchd job, no agent copy" test ! -e "$AGENT_PLIST" -a ! -e "$SOM/agent"
+# (a real install of 0.1.3 or older may have its job loaded: it must not be the sandbox's)
+check "install: no launchd job of the sandbox loaded" eval '! launchctl print "gui/$(id -u)/cz.jandrly.swtoronmac.watch" 2>/dev/null | piped -F "$SOM/"'
+check "install: status says nothing of a launchd job" eval '! som status | piped -e "^watch_agent=" -e "^launch_agent="'
+check "install: manifest names no launchd job" eval '! grep -q launch_agent "$SOM/install-manifest.json"'
 check "install: manifest settings user" test -n "$(plutil -extract settings_user raw -o - "$SOM/install-manifest.json")"
 check "play: opens the sandbox's official app ($(play_target))" test "$(play_target)" = "launch $BS_APP"
 # without it the button is off: never the real app in /Applications (Launch Services' lookup
@@ -937,11 +938,11 @@ check "session test: nothing of it left" test -z "$("$HL" --paths | grep -F "$T/
 rm -rf "$(sd "$P1")" "$(sd "$P2")"
 rm -f "/tmp/.wine-$(id -u)/swtor-on-mac-$(printf '%x-%x' "$(stat -f %d "$P1")" "$(stat -f %i "$P1")").lock"
 
-echo "== 6c. the launchd job (simulated: run as launchd would)"
-watch; check "watch: wrapper in place, nothing to do" test "$(st wrapper)" = ours
-check "watch: logged" grep -q 'the wrapper is in place' "$LOGS/watch.log"
-rm -f "$BS_WINE/bin-real/setsid-exec"; watch
-check "watch: missing helper restored" test -x "$BS_WINE/bin-real/setsid-exec"
+echo "== 6c. the launcher hook check when the app opens (som.sh rehook)"
+rehook; check "rehook: wrapper in place, nothing to do, said so" eval '[ "$(st wrapper)" = ours ] && said "@done in place"'
+check "rehook: logged" grep -q 'the wrapper is in place' "$LOGS/rehook.log"
+rm -f "$BS_WINE/bin-real/setsid-exec"; rehook
+check "rehook: missing helper restored" test -x "$BS_WINE/bin-real/setsid-exec"
 
 echo "== 7. a launcher update replaced the wrapper"
 launcher_update() {
@@ -953,24 +954,25 @@ check "update: status replaced" test "$(st wrapper)" = replaced
 check "play: off until the hook is repaired" eval 'play_target | piped "^unavailable A launcher update removed the hook"'
 som install >"$SANDBOX/reinstall2.txt" 2>&1 || bad "reinstall after update"
 check "update: wrapper back" test "$(st wrapper)" = ours
-echo "== 7b. ...and the launchd job puts it back by itself"
+echo "== 7b. ...and the app's check when it opens puts it back (no background helper)"
 launcher_update; n=$(notes)
-mkdir "$SOM/.lock"; watch; rmdir "$SOM/.lock"
-check "watch: leaves a running install alone" test "$(st wrapper)" = replaced
-t0=$SECONDS; SETTLE=3 watch
-check "watch: waited for Wine/bin to settle ($((SECONDS - t0)) s)" test $((SECONDS - t0)) -ge 2
-check "watch: wrapper back" test "$(st wrapper)" = ours
-check "watch: notified" test "$(notes)" -gt "$n"
-check "watch: manifest has the new preloader" test "$(plutil -extract original_preloaders_sha256.wine64-preloader raw -o - "$SOM/install-manifest.json")" = "$(shasum -a 256 "$BS_WINE/bin-real/wine64-preloader" | cut -d" " -f1)"
-check "watch: manifest still JSON" plutil -convert json -o /dev/null "$SOM/install-manifest.json"
-n=$(notes); watch
-check "watch: idempotent (no second notification)" test "$(notes)" = "$n"
+mkdir "$SOM/.lock"; rehook; rmdir "$SOM/.lock"
+check "rehook: leaves a running install alone, said so" eval '[ "$(st wrapper)" = replaced ] && said "@notice busy"'
+SETTLE=60 rehook
+check "rehook: Wine/bin changed just now (an update still writing): left alone, said so, no waiting" eval '[ "$(st wrapper)" = replaced ] && said "@notice changing"'
+rehook
+check "rehook: wrapper back, said so" eval '[ "$(st wrapper)" = ours ] && said "@done rehooked"'
+check "rehook: manifest has the new preloader" test "$(plutil -extract original_preloaders_sha256.wine64-preloader raw -o - "$SOM/install-manifest.json")" = "$(shasum -a 256 "$BS_WINE/bin-real/wine64-preloader" | cut -d" " -f1)"
+check "rehook: manifest still JSON" plutil -convert json -o /dev/null "$SOM/install-manifest.json"
+rehook
+check "rehook: idempotent" eval '[ "$(st wrapper)" = ours ] && said "@done in place"'
 # a launcher half way through its update: a preloader missing
-launcher_update; mv "$BS_WINE/bin/wine-preloader" "$SANDBOX/wp.tmp"; n=$(notes); watch
-check "watch: half-updated folder only notified" test "$(notes)" -gt "$n" -a ! -e "$BS_WINE/bin/wine-preloader"
-check "watch: half-updated folder untouched" is_macho "$BS_WINE/bin/wine64-preloader"
-mv "$SANDBOX/wp.tmp" "$BS_WINE/bin/wine-preloader"; watch
-check "watch: complete again, wrapper back" test "$(st wrapper)" = ours
+launcher_update; mv "$BS_WINE/bin/wine-preloader" "$SANDBOX/wp.tmp"; rehook
+check "rehook: half-updated folder left alone, said so" eval 'said "@notice changing" && [ ! -e "$BS_WINE/bin/wine-preloader" ]'
+check "rehook: half-updated folder untouched" is_macho "$BS_WINE/bin/wine64-preloader"
+mv "$SANDBOX/wp.tmp" "$BS_WINE/bin/wine-preloader"; rehook
+check "rehook: complete again, wrapper back" eval '[ "$(st wrapper)" = ours ] && said "@done rehooked"'
+check "rehook: no system notification (the app is open and shows the hook)" test "$(notes)" = "$n"
 
 echo "== 7c. the wrapper template copied by hand (@CONF@ not filled in: it would run Broadsword's Wine)"
 raw_wrapper() { # [<env path>]: the template, or the template filled in for another env
@@ -988,12 +990,12 @@ check "raw wrapper: Collect Logs says it is not filled in" eval 'unzip -p "$zip"
 rm -f "$zip"
 som install >"$SANDBOX/reinstall-raw.txt" 2>&1 || bad "reinstall over a raw wrapper"
 check "raw wrapper: Reinstall repairs it" eval '[ "$(st wrapper)" = ours ] && grep -qxF "CONF=\"$SOM/env\"" "$BS_WINE/bin/wine64-preloader" && grep -qxF "CONF=\"$SOM/env\"" "$BS_WINE/bin/wine-preloader"'
-raw_wrapper; SETTLE=1 watch
-check "raw wrapper: the launchd job repairs it by itself" eval '[ "$(st wrapper)" = ours ] && ! grep -q "@CONF@" "$BS_WINE/bin/wine64-preloader"'
+raw_wrapper; rehook
+check "raw wrapper: the app's check repairs it" eval '[ "$(st wrapper)" = ours ] && ! grep -q "@CONF@" "$BS_WINE/bin/wine64-preloader"'
 raw_wrapper "$SANDBOX/elsewhere/env"
 check "wrapper of another install (another env): status replaced" test "$(st wrapper)" = replaced
-SETTLE=1 watch
-check "wrapper of another install: the launchd job repairs it" test "$(st wrapper)" = ours
+rehook
+check "wrapper of another install: the app's check repairs it" test "$(st wrapper)" = ours
 
 echo "== 8. uninstall restores the official install byte for byte, and copies the game settings back"
 GS_REL="AppData/Local/SWTOR/swtor/settings"
@@ -1219,10 +1221,12 @@ if [ -x "$OLD_APP/Contents/Resources/som.sh" ]; then
 
   echo "== 11c. upgrade"
   seed "$NEW_ENGINE"
+  old_agent=$([ -f "$AGENT_PLIST" ] && echo yes || echo no)
   t0=$SECONDS
   som install >"$SANDBOX/upgrade.txt" 2>&1 || { tail -20 "$SANDBOX/upgrade.txt"; bad "upgrade exit"; }
   echo "  (upgrade took $((SECONDS - t0)) s)"
   check "upgrade: @done" grep -q '^@done' "$SANDBOX/upgrade.txt"
+  check "upgrade: $OLDV's launchd job and agent copy removed ($OLDV had one: $old_agent)" test ! -e "$AGENT_PLIST" -a ! -e "$SOM/agent"
   check "upgrade: said so" grep -q "^Upgrading SWTOR on Mac $OLDV" "$SANDBOX/upgrade.txt"
   check "upgrade: the new engine (engine_current=$(st engine_current), installed_engine=$(st installed_engine))" test "$(st engine_current)" = yes -a "$(st installed_engine)" = "$(val ENGINE_NAME "$SOMSH")"
   check "upgrade: Wine $(sbx_wine --version 2>/dev/null)" test "$(sbx_wine --version 2>/dev/null)" = wine-11.0
@@ -1430,7 +1434,10 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   check "$PREVV: env has the D9MT_STATE_CACHE line exactly if $PREVV writes it" eval '[ "$(grep -c "^D9MT_STATE_CACHE=" "$SOM/env")" = "$(grep -q "^D9MT_STATE_CACHE=" "$PREVSOM" && echo 1 || echo 0)" ]'
   check "$PREVV: no Wine left running" test -z "$(sandbox_wine)"
 
+  # (0.1.3 and older set up a launchd job for launcher updates; in a sandbox it is written, never loaded)
+  prev_agent=$([ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ] && echo yes || echo no)
   som install >"$SANDBOX/prev-upgrade.txt" 2>&1 || { tail -20 "$SANDBOX/prev-upgrade.txt"; bad "install over $PREVV exit"; }
+  check "over $PREVV: its launchd job and agent copy removed, said so ($PREVV had one: $prev_agent)" eval '[ ! -e "$AGENT_PLIST" ] && [ ! -e "$SOM/agent" ] && { grep -q "^Removed the launcher-update guard of an older version" "$SANDBOX/prev-upgrade.txt" || [ "$prev_agent" = no ]; }'
   check "over $PREVV: @done, manifest $APPV" eval 'grep -q "^@done" "$SANDBOX/prev-upgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$APPV" ]'
   check "over $PREVV: the engine already in place, no download" eval 'grep -q "is already in place" "$SANDBOX/prev-upgrade.txt" && ! grep -q "Unpacking the Wine engine" "$SANDBOX/prev-upgrade.txt"'
   prefix_changes "$SANDBOX/prev-prefix.txt" "" "$SANDBOX/prev-prefix-after.txt" >"$SANDBOX/prev-prefix.diff"
@@ -1494,7 +1501,9 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   rm -rf "$SANDBOX/dev-engine" && cp -c -R -p "$SOM/engine" "$SANDBOX/dev-engine"
   cp "$SOM/settings.conf" "$SANDBOX/dev-settings.conf"
 
+  dev_agent=$([ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ] && echo yes || echo no)
   som install >"$SANDBOX/dev-upgrade.txt" 2>&1 || { tail -20 "$SANDBOX/dev-upgrade.txt"; bad "install over $DEVV exit"; }
+  check "over $DEVV: its launchd job and agent copy removed ($DEVV had one: $dev_agent)" test ! -e "$AGENT_PLIST" -a ! -e "$SOM/agent"
   check "over $DEVV: @done, manifest $APPV" eval 'grep -q "^@done" "$SANDBOX/dev-upgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$APPV" ]'
   check "over $DEVV: the A/B switches removed, said so" eval '[ ! -e "$SOM/d9mt-ab.env" ] && grep -q "^Removed a development build.s d9mt A/B switches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: the cold test caches removed, said so" eval '[ ! -e "$COLD" ] && grep -q "^Removed a development build.s d9mt test caches" "$SANDBOX/dev-upgrade.txt"'
@@ -1512,7 +1521,7 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: the app's ntdll.so, the engine's own kept as .stock ($DEVV had $(cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" && echo "the engine's" || echo "the app's build"))" eval 'ntdll_is_apps && { cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" || macho_same "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so"; }'
   check "over $DEVV: no Wine left running" test -z "$(sandbox_wine)"
   som install >"$SANDBOX/dev-reinstall.txt" 2>&1 || bad "reinstall after $DEVV exit"
-  check "over $DEVV: a Reinstall after it has nothing more to remove" eval 'grep -q "^@done" "$SANDBOX/dev-reinstall.txt" && ! grep -q "^Removed a development build" "$SANDBOX/dev-reinstall.txt"'
+  check "over $DEVV: a Reinstall after it has nothing more to remove" eval 'grep -q "^@done" "$SANDBOX/dev-reinstall.txt" && ! grep -q -e "^Removed a development build" -e "^Removed the launcher-update guard" "$SANDBOX/dev-reinstall.txt"'
   som uninstall >"$SANDBOX/uninstall5.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall5.txt"; bad "uninstall after $DEVV"; }
   check "uninstall after $DEVV: official install identical to stock" like_stock uninstall5
   check "uninstall after $DEVV: app files and caches gone" eval 'for c in engine prefix gamemode env settings.conf install-manifest.json d9mt-ab.env dev-defaults; do [ ! -e "$SOM/$c" ] || exit 1; done; [ ! -e "$H/Library/Caches/SWTOR on Mac" ]'

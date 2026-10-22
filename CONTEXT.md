@@ -46,16 +46,23 @@ The folder next to `bin/` that holds Broadsword's preloaders (moved, not changed
 `hold-launcher` and `setsid-exec` (README, *What it changes*).
 
 **Launcher hook**
-The wrapper in the preloaders' place. A launcher update can remove it; the launchd job puts it
-back, else the window shows *Repair the Launcher Hook* (README, *Launcher updates*). `som.sh`
+The wrapper in the preloaders' place. A launcher update can remove it; the *hook check* puts
+it back when the app opens, else the window shows *Repair the Launcher Hook* (README, *Launcher
+updates*). `som.sh`
 tells it apart from Broadsword's own preloaders and from another tool's wrapper (`src/som.sh`).
 _Avoid_: “patch”, “mod” (it changes no game file).
 
+**Hook check**
+`som.sh rehook`, run by the app each time it opens and before *Play SWTOR* when the hook is
+gone: puts the wrapper back if a launcher update replaced it, and leaves it alone while an
+install runs, another wrapper is there or the launcher is still changing its Wine (README,
+*Launcher updates*; [ADR 0005](docs/adr/0005-no-background-helper.md)). Nothing of SWTOR on Mac
+runs while the app is closed.
+_Avoid_: “watcher”, “daemon”, “background service”.
+
 **launchd job**
-`cz.jandrly.swtoronmac.watch`: launchd starts it only when Broadsword's `Wine/bin` folder
-changes; it checks the wrapper, puts it back if a launcher update replaced it, and exits.
-Nothing runs in between (README, *Launcher updates*).
-_Avoid_: “daemon”, “background service”.
+`cz.jandrly.swtoronmac.watch`, which versions up to 0.1.3 set up (launchd started it when
+Broadsword's `Wine/bin` changed). Install and Uninstall remove it since 0.1.4.
 
 ## SWTOR on Mac's side
 
@@ -79,7 +86,7 @@ button after an app update; it brings the installed setup up to the app's versio
 
 **Uninstall**
 Copies the game settings back to Broadsword's prefix, puts Broadsword's preloaders back and
-deletes the engine, prefix, settings and launchd job; logs and d9mt's caches stay (README,
+deletes the engine, prefix, settings and an older version's launchd job; logs and d9mt's caches stay (README,
 *Uninstall*).
 
 **Install manifest**

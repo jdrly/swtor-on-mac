@@ -188,8 +188,24 @@ extension Installer {
     pid > 0 && (kill(pid, 0) == 0 || errno == EPERM)
   }
 
-  // The button. then: an error to show, if any.
+  // The button. then: an error to show, if any. If a launcher update has replaced the hook since
+  // the app opened, the hook check (rehook) runs first.
   func play(then: @escaping (String?) -> Void) {
+    if installed, !isBusy, wrapper == "replaced" || wrapper == "stock" {
+      rehook { [weak self] answer in
+        guard let self else { return }
+        if answer == "@notice changing", case .unavailable = self.playAction {
+          then("SWTOR's launcher is changing its Wine right now. Wait until it has finished, then press Play SWTOR again.")
+        } else {
+          self.playNow(then: then)
+        }
+      }
+      return
+    }
+    playNow(then: then)
+  }
+
+  private func playNow(then: @escaping (String?) -> Void) {
     switch playAction {
     case .unavailable(let reason): then(reason)
     case .show: showSWTOR(then: then)
