@@ -409,15 +409,18 @@ setting_default() {
     hudpos) echo topcenter ;;
   esac
 }
+# in_list <value> <list>: the value is exactly one of the list's words (not two of them with a
+# space between, which env would then run as a command)
+in_list() { local w; for w in $2; do [ "$w" = "$1" ] && return 0; done; return 1; }
 setting_valid() { # <key> <value>
   case "$1:$2" in
     retina:on|retina:off|hud:on|hud:off|gamemode:on|gamemode:off|vsync:on|vsync:off) return 0 ;;
     debug:on|debug:off|updates:on|updates:off|physkeys:on|physkeys:off) return 0 ;;
     rawmouse:on|rawmouse:off|fpsbattery:on|fpsbattery:off) return 0 ;;
     memory:auto|memory:low|memory:medium|memory:high|memory:ultra|memory:unlimited) return 0 ;;
-    mousespeed:*) case " $MOUSE_SPEEDS " in *" $2 "*) [ -n "$2" ] && return 0 ;; esac ;;
-    hudpos:*) case " $HUD_POSITIONS " in *" $2 "*) [ -n "$2" ] && return 0 ;; esac ;;
-    fpslimit:*) case " $FPS_LIMITS " in *" $2 "*) [ -n "$2" ] && return 0 ;; esac ;;
+    mousespeed:*) in_list "$2" "$MOUSE_SPEEDS" && return 0 ;;
+    hudpos:*) in_list "$2" "$HUD_POSITIONS" && return 0 ;;
+    fpslimit:*) in_list "$2" "$FPS_LIMITS" && return 0 ;;
   esac
   return 1
 }

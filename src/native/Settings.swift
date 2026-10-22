@@ -267,7 +267,7 @@ struct SettingsView: View {
           Text("Frame Rate Limit")
           Text("A steady, lower frame rate for less heat and a longer battery life: the Mac stays "
                + "cooler, so a long session keeps its frame rate instead of throttling. 30 is even "
-               + "on any display (at 60 Hz every frame stays on screen for two refreshes). 40 and "
+               + "on a 60 or 120 Hz display (every frame stays on screen for two or four refreshes). 40 and "
                + "45 keep the load even but show frames unevenly on a 60 Hz display; 40 is even on "
                + "a 120 Hz ProMotion display. 60 limits only with Vsync off or on a faster display.")
         }

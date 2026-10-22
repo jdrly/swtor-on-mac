@@ -61,12 +61,11 @@ fps_limit() {
   fps_note=""
   case "${SWTOR_FPS_LIMIT:-0}" in 0|off|"") return 0 ;; esac
   if [ "$SWTOR_FPS_LIMIT_BATTERY" = 1 ]; then
-    if "${SWTOR_PMSET:-/usr/bin/pmset}" -g ps 2>/dev/null | head -1 | grep -q "'Battery Power'"; then
-      fps_note="$SWTOR_FPS_LIMIT fps (only on battery: on battery)"
-    else
-      fps_note="off (only on battery: on AC power)"
-      return 0
-    fi
+    case "$("${SWTOR_PMSET:-/usr/bin/pmset}" -g ps 2>/dev/null | sed -n 1p)" in
+      *"'Battery Power'"*) fps_note="$SWTOR_FPS_LIMIT fps (only on battery: on battery)" ;;
+      *"'AC Power'"*) fps_note="off (only on battery: on AC power)"; return 0 ;;
+      *) fps_note="off (only on battery: battery power not confirmed)"; return 0 ;;
+    esac
   else
     fps_note="$SWTOR_FPS_LIMIT fps"
   fi

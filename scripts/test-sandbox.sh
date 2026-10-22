@@ -592,6 +592,9 @@ for v in 40 45 60; do som set fpslimit $v >/dev/null; done
 check "set fpslimit 40, 45, 60" grep -qx SWTOR_FPS_LIMIT=60 "$SOM/env"
 check "set fpslimit: 25 refused" eval '! som set fpslimit 25 >/dev/null 2>&1 && grep -qx SWTOR_FPS_LIMIT=60 "$SOM/env"'
 check "set fpslimit: empty refused" eval '! som set fpslimit "" >/dev/null 2>&1'
+# (two allowed values with a space between would become a command in env)
+check "set: two values in one refused (fpslimit '30 40', 'off 30'; hudpos, mousespeed), env unchanged" \
+  eval '! som set fpslimit "30 40" >/dev/null 2>&1 && ! som set fpslimit "off 30" >/dev/null 2>&1 && ! som set hudpos "topleft topcenter" >/dev/null 2>&1 && ! som set mousespeed "0.5 0.75" >/dev/null 2>&1 && grep -qx SWTOR_FPS_LIMIT=60 "$SOM/env"'
 som set fpslimit 45 >/dev/null
 check "set: bad value refused" eval '! som set memory huge >/dev/null 2>&1'
 check "set: bad key refused" eval '! som set foo on >/dev/null 2>&1'
@@ -841,8 +844,10 @@ sed -i '' 's/^SWTOR_FPS_LIMIT_BATTERY=0$/SWTOR_FPS_LIMIT_BATTERY=1/' "$U/env"; g
 check "wrapper: only on battery, on AC power: no cap" eval '[ -z "$(fx)" ] && grep -qx "SWTOR on Mac frame rate limit: off (only on battery: on AC power)" "$U/logs/wine.log"'
 echo "Battery Power" >"$U/power"; game
 check "wrapper: only on battery, on battery: D9MT_FPS_CAP=30" eval '[ "$(fx)" = 30 ] && grep -qx "SWTOR on Mac frame rate limit: 30 fps (only on battery: on battery)" "$U/logs/wine.log"'
+echo "UPS Power" >"$U/power"; game
+check "wrapper: only on battery, on UPS power: no cap, not taken for AC" eval '[ -z "$(fx)" ] && grep -qx "SWTOR on Mac frame rate limit: off (only on battery: battery power not confirmed)" "$U/logs/wine.log"'
 rm -f "$U/pmset"; game
-check "wrapper: only on battery, no answer from pmset: no cap" test -z "$(fx)"
+check "wrapper: only on battery, no answer from pmset: no cap, said so" eval '[ -z "$(fx)" ] && grep -qx "SWTOR on Mac frame rate limit: off (only on battery: battery power not confirmed)" "$U/logs/wine.log"'
 sed -i '' 's/^SWTOR_FPS_LIMIT=30$/SWTOR_FPS_LIMIT=0/' "$U/env"; game
 check "wrapper: limit off: no D9MT_FPS_CAP, no line" eval '[ -z "$(fx)" ] && ! grep -q "frame rate limit" "$U/logs/wine.log"'
 check "wrapper: other Wine starts get no cap" eval '! grep -q D9MT_FPS_CAP "$U/logs/hold.log"'
