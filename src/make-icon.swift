@@ -1,5 +1,6 @@
 // Renders the app icon: a blue and a red blade crossed over a starfield on a deep-space squircle,
-// with an "SWTOR" wordmark set in the system font (original artwork: no Star Wars or SWTOR logo).
+// with an "SWTOR" wordmark set in the system font (original artwork: no Star Wars or SWTOR logo),
+// "SWTOR" and "ON MAC" centred on the crossing of the blades.
 // Like SWGL on Mac it is a plain .icns (CFBundleIconFile), drawn on Apple's macOS icon grid.
 //
 //   swift src/make-icon.swift <out.iconset>                          the iconset for iconutil
@@ -154,7 +155,7 @@ func render(_ px: Int) -> CGImage {
     }
   }
 
-  // The sabers: blue (hilt lower left) and red (hilt lower right), crossing above the wordmark.
+  // The sabers: blue (hilt lower left) and red (hilt lower right), crossing behind the wordmark.
   let blue = (bloom: rgb(0.10, 0.50, 1.0), edge: rgb(0.247, 0.663, 1.0))
   let red = (bloom: rgb(1.0, 0.10, 0.06), edge: rgb(1.0, 0.231, 0.188))
   var sabers: [Saber]
@@ -203,9 +204,15 @@ func render(_ px: Int) -> CGImage {
 
   if wordmark {
     let markWidth: CGFloat = subline ? 664 : 740
-    let cy: CGFloat = subline ? 404 : 330
-    let mark = fitted(textPath("SWTOR", size: 200, weight: .black, width: .expanded, kern: -2),
-                      width: markWidth, cx: 512, cy: cy)
+    // "SWTOR" (and "ON MAC" below it) as one block, centred on the crossing of the blades
+    var mark = fitted(textPath("SWTOR", size: 200, weight: .black, width: .expanded, kern: -2),
+                      width: markWidth, cx: 512, cy: 0)
+    var sub = subline ? fitted(textPath("ON MAC", size: 100, weight: .bold, width: .expanded, kern: 34),
+                               width: 250, cx: 512, cy: mark.boundingBoxOfPath.minY - 66) : nil
+    let blockMid = (mark.boundingBoxOfPath.maxY + (sub ?? mark).boundingBoxOfPath.minY) / 2
+    var centre = CGAffineTransform(translationX: 0, y: (crossing(sabers[0], sabers[1])?.y ?? 512) - blockMid)
+    mark = mark.copy(using: &centre)!
+    sub = sub?.copy(using: &centre)
     let bb = mark.boundingBoxOfPath
     // separation from the blades, then a cool glow, then brushed silver
     ctx.saveGState()
@@ -238,9 +245,7 @@ func render(_ px: Int) -> CGImage {
     ctx.fillPath()
     ctx.restoreGState()
 
-    if subline {
-      let sub = fitted(textPath("ON MAC", size: 100, weight: .bold, width: .expanded, kern: 34),
-                       width: 250, cx: 512, cy: bb.minY - 66)
+    if let sub {
       ctx.saveGState()
       ctx.setShadow(offset: CGSize(width: 0, height: -3 * k), blur: 12 * k, color: rgb(0, 0, 0, 0.9))
       ctx.addPath(sub)

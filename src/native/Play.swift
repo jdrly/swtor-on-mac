@@ -32,6 +32,12 @@ extension Installer {
   // Settings: "Quit SWTOR on Mac after launching" (off by default)
   static let quitAfterLaunchKey = "quitAfterLaunch"
 
+  // The SWTOR launcher or the game runs: the window's warp stops (Warp.swift), so the app takes
+  // no CPU or GPU time from the game.
+  var swtorRunning: Bool {
+    runningLauncher || runningGame || busy == "launcher" || busy == "game"
+  }
+
   // What the button does right now.
   var playAction: PlayAction {
     Installer.playAction(status: status, working: isBusy, launcher: runningLauncher, game: runningGame)

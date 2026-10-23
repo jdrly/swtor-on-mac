@@ -525,7 +525,7 @@ enum AppActions {
     let text = NSMutableAttributedString(string:
       "Runs the official SWTOR Mac app on d9mt (Direct3D 9 on Metal)\n"
       + "Developed by \(credits["author"] ?? "Jan Drlý")\n\n"
-      + "Unofficial: not made, endorsed or supported by Broadsword Games, EA, Lucasfilm or Disney.\n"
+      + disclaimer + "\n"
       + "For help: Pharaphobia on Discord or a GitHub issue.\n", attributes: body)
     for key in ["repo", "github"] {
       guard let url = credits[key], !url.isEmpty, let link = URL(string: url) else { continue }
@@ -695,7 +695,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 }
 
+// (scripts/ui-snapshot.swift brings its own entry point)
+#if !SWTOR_SNAPSHOT
 @main
+#endif
 struct SWTORonMacApp: App {
   @NSApplicationDelegateAdaptor private var delegate: AppDelegate
   private let installer = Installer()

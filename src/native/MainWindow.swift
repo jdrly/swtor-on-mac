@@ -1,8 +1,9 @@
-// The main window (SwiftUI, macOS 27 design): a hero with an animated deep-space background,
-// status tiles in glass, and the install panel with one big action (Install; once installed,
-// Play SWTOR) and a timeline of the steps (src/som.sh announces them with "@phase <n>"). The
-// notice must be accepted, in a sheet, before anything can be installed; afterwards a badge in
-// the hero shows it again.
+// The main window (SwiftUI, macOS 27 design) in the look of swonmac.com (Brand.swift): the
+// site's jump point and warp behind the whole window (Warp.swift), the SWTOR wordmark, the state
+// of this Mac as the site's spec list, and the launch panel with one big action (Install; once
+// installed, Play SWTOR) and the steps (src/som.sh announces them with "@phase <n>"). The notice
+// must be accepted, in a sheet, before anything can be installed; afterwards a badge in the hero
+// shows it again.
 //
 // Resizable both ways: two columns when wide (nothing scrolls), one column when narrow (that
 // column is the only scroll area). The install log is a sheet (Show Log).
@@ -10,15 +11,14 @@
 import AppKit
 import SwiftUI
 
-// Lightsaber blue for actions; the hero's gold is only decoration.
-let accent = Color(red: 0.20, green: 0.50, blue: 0.98)
-let heroGold = Color(red: 0.86, green: 0.66, blue: 0.26)
-
 // Shown once the install is done: d9mt compiles shaders and pipelines the first time it sees
 // them and caches them.
-let firstRunNote = "The first minutes of play (and each new area or effect seen for the first time) may "
-  + "stutter while shaders are compiled and cached; it gets smooth after that. After an update of "
-  + "SWTOR on Mac the cache is rebuilt once."
+let firstRunNote = "The first minutes of play may stutter while shaders are compiled and cached, and so may "
+  + "each new area or effect the first time. After an update of SWTOR on Mac the cache is rebuilt once."
+
+// The site's disclaimer, for this app.
+let disclaimer = "SWTOR on Mac is an unofficial fan project and is not affiliated with or endorsed by "
+  + "Lucasfilm, Disney, Electronic Arts or Broadsword Online Games."
 
 struct MainView: View {
   @Bindable var installer: Installer
@@ -45,11 +45,11 @@ struct MainView: View {
       let wide = geometry.size.width >= MainView.wideWidth
       VStack(spacing: 0) {
         if wide {
-          Hero(installer: installer, showNotice: $showNotice)
+          Hero(installer: installer, showNotice: $showNotice, wide: true)
           HStack(alignment: .top, spacing: 24) {
             // the highlights only if there is room for them
             ViewThatFits(in: .vertical) {
-              VStack(alignment: .leading, spacing: 18) {
+              VStack(alignment: .leading, spacing: 22) {
                 StatusTiles(installer: installer)
                 Highlights()
               }
@@ -57,16 +57,17 @@ struct MainView: View {
             }
             .frame(minWidth: 340, maxWidth: .infinity, alignment: .top)
             ActionPanel(installer: installer, actions: actions)
-              .frame(minWidth: 380, maxWidth: 460)
+              .frame(minWidth: 380, maxWidth: 420)
           }
           .padding(.horizontal, 24)
-          .padding(.vertical, 20)
+          .padding(.top, 18)
+          .padding(.bottom, 20)
           .frame(maxHeight: .infinity, alignment: .top)
         } else {
           ScrollView {
             VStack(spacing: 0) {
-              Hero(installer: installer, showNotice: $showNotice)
-              VStack(alignment: .leading, spacing: 18) {
+              Hero(installer: installer, showNotice: $showNotice, wide: false)
+              VStack(alignment: .leading, spacing: 22) {
                 ActionPanel(installer: installer, actions: actions)
                 StatusTiles(installer: installer)
                 Highlights()
@@ -81,8 +82,9 @@ struct MainView: View {
       }
       .ignoresSafeArea(edges: .top)
     }
+    // one background for the whole window, no edge between the hero and the rest
+    .background { WindowBackground(quiet: installer.swtorRunning) }
     .frame(minWidth: 520, minHeight: 640)
-    .tint(accent)
     .animation(.smooth, value: installer.phase)
     .animation(.smooth, value: installer.status)
     // The notice comes first: nothing can be installed before it is accepted.
@@ -212,160 +214,122 @@ struct PanelActions {
 struct Hero: View {
   let installer: Installer
   @Binding var showNotice: Bool
+  let wide: Bool
   @State private var showBadge = false
-  // the window's own appearance (the hero itself is always dark; its popover is not)
-  @Environment(\.colorScheme) private var windowScheme
+
+  private let tagline = "Faster graphics for the official SWTOR Mac app. Direct3D 9 goes straight to Metal, on a newer Wine."
 
   var body: some View {
     ZStack(alignment: .topTrailing) {
-      HStack(spacing: 20) {
-        Image(nsImage: NSApp.applicationIconImage)
-          .resizable()
-          .frame(width: 84, height: 84)
-          .shadow(color: accent.opacity(0.55), radius: 18)
-          .accessibilityHidden(true)
-        VStack(alignment: .leading, spacing: 6) {
-          HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("SWTOR on Mac")
-              .font(.system(size: 32, weight: .bold, design: .rounded))
-            #if SWTOR_DEV
-            DevBuildBadge()
-            #endif
+      Group {
+        if wide {
+          HStack(alignment: .bottom, spacing: 32) {
+            title
+            Spacer(minLength: 0)
+            taglineText.frame(maxWidth: 340, alignment: .leading).padding(.bottom, 4)
           }
-          Text("Faster graphics for the official SWTOR Mac app: Direct3D 9 straight to Metal, on a newer Wine.")
-            .font(.title3)
-            .foregroundStyle(.white.opacity(0.78))
-            .fixedSize(horizontal: false, vertical: true)
+        } else {
+          VStack(alignment: .leading, spacing: 16) {
+            title
+            taglineText
+          }
         }
-        Spacer(minLength: 0)
       }
-      .foregroundStyle(.white)
-      .environment(\.colorScheme, .dark)
       .padding(.horizontal, 28)
-      .padding(.top, 46)
-      .padding(.bottom, 22)
+      .padding(.top, 50)
+      .padding(.bottom, 6)
       .frame(maxWidth: .infinity, alignment: .leading)
 
-      Button { showBadge.toggle() } label: {
-        Label("Unofficial community project", systemImage: "exclamationmark.shield.fill")
-          .font(.callout.weight(.semibold))
-          .foregroundStyle(.white)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 7)
+      HStack(spacing: 8) {
+        #if SWTOR_DEV
+        DevBuildBadge()
+        #endif
+        Button { showBadge.toggle() } label: {
+          Chip(text: "Unofficial fan project", symbol: "exclamationmark.shield", fill: Brand.bg.opacity(0.8))
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .help(disclaimer)
+        .accessibilityLabel("Unofficial fan project")
+        .accessibilityHint("Shows the notice")
+        .popover(isPresented: $showBadge, arrowEdge: .bottom) {
+          NoticeText()
+            .foregroundStyle(.primary)
+            .padding(20)
+            .frame(width: 380)
+        }
       }
-      .buttonStyle(.plain)
-      .glassEffect(.regular.tint(.orange.opacity(0.35)).interactive(), in: .capsule)
-      .pointerStyle(.link)
       .padding(.top, 14)
-      .padding(.trailing, 18)
-      .help("Not made, endorsed or supported by Broadsword Games, EA, Lucasfilm or Disney")
-      .environment(\.colorScheme, .dark)
-      .popover(isPresented: $showBadge, arrowEdge: .bottom) {
-        NoticeText()
-          .foregroundStyle(.primary)
-          .padding(20)
-          .frame(width: 380)
-          .background(.regularMaterial)
-          .environment(\.colorScheme, windowScheme)
-      }
+      .padding(.trailing, 16)
     }
-    .background { HeroBackground() }
-    .clipped()
+  }
+
+  private var title: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("// Official SWTOR Mac app, accelerated")
+        .font(.mono(11))
+        .tracking(2)
+        .textCase(.uppercase)
+        .foregroundStyle(Brand.accent)
+        .accessibilityLabel("Official SWTOR Mac app, accelerated")
+      Wordmark(size: wide ? 60 : 52)
+    }
+  }
+
+  private var taglineText: some View {
+    Text(tagline)
+      .font(.system(size: 15))
+      .lineSpacing(3)
+      .foregroundStyle(Brand.fg2)
+      .fixedSize(horizontal: false, vertical: true)
   }
 }
 
 #if SWTOR_DEV
-// "Development build 0.0.6-dev.1" next to the title in development builds (build.sh).
+// "Dev build · 0.1.3-dev.1" next to the Unofficial badge in development builds (build.sh): the
+// site's warning colour, a test build being a caution.
 struct DevBuildBadge: View {
   private var version: String {
     Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
   }
 
   var body: some View {
-    Label("Development build \(version)", systemImage: "hammer.fill")
-      .font(.callout.weight(.semibold))
-      .foregroundStyle(.white)
-      .padding(.horizontal, 10)
-      .padding(.vertical, 5)
-      .glassEffect(.regular.tint(.purple.opacity(0.45)), in: .capsule)
+    Chip(text: "Dev build · \(version)", symbol: "hammer", tint: Brand.warning, fill: Brand.warningSoft,
+         stroke: Brand.warning)
       .help("A test build, published only as a GitHub pre-release: Debug Logging on by default, "
             + "no automatic update checks")
-      .fixedSize()
+      .accessibilityLabel("Development build \(version)")
   }
 }
 #endif
 
-// Deep space: a slowly drifting mesh gradient (navy, teal, a touch of gold) under a
-// twinkling starfield. Still with Reduce Motion, and paused while the window is not key.
-struct HeroBackground: View {
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @Environment(\.controlActiveState) private var activeState
+// MARK: - Status
 
-  var body: some View {
-    TimelineView(.animation(minimumInterval: 1.0 / 24, paused: reduceMotion || activeState != .key)) { context in
-      let t = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
-      ZStack {
-        MeshGradient(width: 3, height: 3, points: points(t), colors: [
-          Color(red: 0.01, green: 0.02, blue: 0.07), Color(red: 0.03, green: 0.07, blue: 0.20), Color(red: 0.02, green: 0.04, blue: 0.12),
-          Color(red: 0.04, green: 0.16, blue: 0.30), Color(red: 0.05, green: 0.24, blue: 0.32), Color(red: 0.06, green: 0.08, blue: 0.26),
-          Color(red: 0.02, green: 0.04, blue: 0.10), Color(red: 0.05, green: 0.12, blue: 0.22), heroGold.opacity(0.55),
-        ])
-        Starfield(time: t)
-      }
-    }
-    .accessibilityHidden(true)
-  }
-
-  private func points(_ t: Double) -> [SIMD2<Float>] {
-    let a = Float(sin(t * 0.13)), b = Float(cos(t * 0.11)), c = Float(sin(t * 0.07 + 1))
-    return [
-      [0, 0], [0.5 + 0.08 * a, 0], [1, 0],
-      [0, 0.5 + 0.12 * b], [0.5 + 0.14 * c, 0.5 + 0.12 * a], [1, 0.5 + 0.1 * c],
-      [0, 1], [0.5 + 0.1 * b, 1], [1, 1],
-    ]
-  }
-}
-
-struct Starfield: View {
-  let time: Double
-  private static let stars: [(x: Double, y: Double, r: Double, speed: Double, phase: Double)] = {
-    var seed: UInt64 = 0x5717_0E0F_2026
-    func next() -> Double {
-      seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-      return Double(seed >> 11) / Double(1 << 53)
-    }
-    return (0..<140).map { _ in (next(), next(), 0.4 + 1.3 * next() * next(), 0.4 + 1.6 * next(), next() * 6.28) }
-  }()
-
-  var body: some View {
-    Canvas { context, size in
-      for s in Starfield.stars {
-        let twinkle = 0.35 + 0.65 * abs(sin(time * s.speed + s.phase))
-        let rect = CGRect(x: s.x * size.width, y: s.y * size.height, width: s.r * 2, height: s.r * 2)
-        context.opacity = twinkle * (s.r > 1.2 ? 1 : 0.7)
-        context.fill(Path(ellipseIn: rect), with: .color(.white))
-      }
-    }
-  }
-}
-
-// MARK: - Status tiles
-
+// The state of this Mac as the site's spec list: a pip in the state's colour, a mono label, the
+// value; two columns of cells in one panel.
 struct StatusTiles: View {
   let installer: Installer
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text("This Mac").font(.headline).padding(.leading, 4)
+      SectionLabel(title: "This Mac") {
+        if installer.loaded { HUDNote(text: summary) }
+      }
       if !installer.loaded {
-        HStack { ProgressView().controlSize(.small); Text("Checking…").foregroundStyle(.secondary) }
+        HStack { ProgressView().controlSize(.small); Text("Checking…").foregroundStyle(Brand.fg2) }
           .padding(.vertical, 8)
       } else {
-        GlassEffectContainer(spacing: 10) {
-          LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 10)], spacing: 10) {
-            ForEach(tiles) { StatusTile(tile: $0) }
+        let cells = tiles
+        // (an empty cell evens out the last row, so no gap shows the grid's lines)
+        let padded = cells.count % 2 == 1 ? cells + [nil] : cells.map { Optional($0) }
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 1), GridItem(.flexible(), spacing: 1)], spacing: 1) {
+          ForEach(Array(padded.enumerated()), id: \.offset) { _, tile in
+            if let tile { StatusTile(tile: tile) } else { Brand.bgRaised.frame(maxWidth: .infinity, maxHeight: .infinity) }
           }
         }
+        .background(Brand.border)
+        .clipShape(.rect(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Brand.border, lineWidth: 1))
         if !installer.officialPresent {
           Link(destination: URL(string: "https://www.swtor.com")!) {
             Label("Install SWTOR from swtor.com first and start it once. SWTOR on Mac never downloads "
@@ -376,6 +340,12 @@ struct StatusTiles: View {
         }
       }
     }
+  }
+
+  // "6 checks · all good", or how many need a look
+  private var summary: String {
+    let attention = tiles.filter { $0.tone == .warning || $0.tone == .bad }.count
+    return "\(tiles.count) checks · " + (attention == 0 ? "all good" : attention == 1 ? "1 needs a look" : "\(attention) need a look")
   }
 
   struct Tile: Identifiable {
@@ -448,36 +418,46 @@ struct StatusTile: View {
   let tile: StatusTiles.Tile
 
   var body: some View {
-    HStack(spacing: 12) {
-      Image(systemName: tile.symbol)
-        .font(.system(size: 15, weight: .semibold))
-        .foregroundStyle(.white)
-        .contentTransition(.symbolEffect(.replace))
-        .symbolEffect(.bounce, value: tile.tone == .good)
-        .frame(width: 34, height: 34)
-        .background(color.gradient, in: .circle)
-      VStack(alignment: .leading, spacing: 2) {
-        Text(tile.id).font(.subheadline.weight(.semibold))
-        Text(tile.detail).font(.caption).foregroundStyle(tile.tone == .warning || tile.tone == .bad ? color : .secondary)
-          .fixedSize(horizontal: false, vertical: true)
-          .contentTransition(.opacity)
+    VStack(alignment: .leading, spacing: 5) {
+      HStack(spacing: 8) {
+        StatusPip(color: color)
+        Text(tile.id)
+          .font(.mono(9.5))
+          .tracking(1.6)
+          .textCase(.uppercase)
+          .foregroundStyle(Brand.fg3)
+          .lineLimit(1)
       }
-      Spacer(minLength: 0)
+      Text(tile.detail)
+        .font(.system(size: 14, weight: .medium))
+        .foregroundStyle(valueColor)
+        .fixedSize(horizontal: false, vertical: true)
+        .contentTransition(.opacity)
     }
-    .padding(12)
-    .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
-    .glassEffect(.regular, in: .rect(cornerRadius: 16))
+    .padding(.horizontal, 14)
+    .padding(.vertical, 11)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .background(Brand.bgRaised)
     .accessibilityElement(children: .combine)
     .accessibilityLabel("\(tile.id): \(tile.detail)")
   }
 
   private var color: Color {
     switch tile.tone {
-    case .good: .green
-    case .warning: .orange
-    case .bad: .red
-    case .info: accent
-    case .off: .gray
+    case .good: Brand.good
+    case .warning: Brand.warning
+    case .bad: Brand.bad
+    case .info: Brand.fg3
+    case .off: Brand.borderStrong
+    }
+  }
+
+  private var valueColor: Color {
+    switch tile.tone {
+    case .warning: Brand.warning
+    case .bad: Brand.bad
+    case .off: Brand.fg2
+    default: Brand.fg
     }
   }
 }
@@ -486,33 +466,37 @@ struct StatusTile: View {
 struct Highlights: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text("What it does").font(.headline).padding(.leading, 4)
-      Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 12) {
+      SectionLabel(title: "What it does") { HUDNote(text: "04 modules") }
+      Grid(alignment: .topLeading, horizontalSpacing: 20, verticalSpacing: 10) {
         GridRow {
-        item("bolt.fill", "Direct3D 9 straight to Metal", "d9mt replaces the official app's graphics layer.")
-        item("gamecontroller.fill", "Game Mode", "macOS gives the game priority while it is in full screen.")
+          item("bolt", "Direct3D 9 straight to Metal", "d9mt replaces the official app's graphics layer.")
+          item("gamecontroller", "Game Mode", "macOS gives the game priority while it is in full screen.")
         }
         GridRow {
-        item("arrow.triangle.2.circlepath", "After launcher updates", "Hooks itself back in the next time you open SWTOR on Mac after a launcher update.")
-        item("arrow.uturn.backward.circle.fill", "Fully reversible", "Uninstall puts the official app back exactly as Broadsword ships it.")
+          item("arrow.triangle.2.circlepath", "After launcher updates", "Hooks itself back in the next time you open SWTOR on Mac after a launcher update.")
+          item("arrow.uturn.backward", "Fully reversible", "Uninstall puts the official app back exactly as Broadsword ships it.")
         }
       }
-      .padding(16)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(.quinary, in: .rect(cornerRadius: 16))
     }
   }
 
   private func item(_ symbol: String, _ title: String, _ text: String) -> some View {
-    HStack(alignment: .firstTextBaseline, spacing: 10) {
-      Image(systemName: symbol).foregroundStyle(accent).frame(width: 18)
-      VStack(alignment: .leading, spacing: 1) {
-        Text(title).font(.subheadline.weight(.semibold))
-        Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    VStack(alignment: .leading, spacing: 5) {
+      HStack(spacing: 8) {
+        Image(systemName: symbol)
+          .font(.system(size: 12, weight: .semibold))
+          .foregroundStyle(Brand.accent)
+          .frame(width: 16)
+        Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Brand.fg)
       }
-      Spacer(minLength: 0)
+      Text(text)
+        .font(.system(size: 12))
+        .foregroundStyle(Brand.fg2)
+        .fixedSize(horizontal: false, vertical: true)
     }
+    .padding(.top, 10)
     .frame(maxWidth: .infinity, alignment: .leading)
+    .overlay(alignment: .top) { Rectangle().fill(Brand.borderStrong).frame(height: 1) }
     .accessibilityElement(children: .combine)
   }
 }
@@ -524,14 +508,17 @@ struct ActionPanel: View {
   let actions: PanelActions
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
+    VStack(alignment: .leading, spacing: 14) {
+      SectionLabel(title: installer.installed && !installer.isBusy ? "Launch" : installer.operation == .uninstall && installer.isBusy ? "Uninstall" : "Install") {
+        stateChip
+      }
       PrimaryAction(installer: installer, actions: actions)
       if installer.loaded, !installer.isBusy, installer.leftovers {
         LeftoversNote(installer: installer, end: actions.endLeftovers)
       } else if let note = blockingNote {
         Label(note, systemImage: "pause.circle.fill")
           .font(.callout)
-          .foregroundStyle(.orange)
+          .foregroundStyle(Brand.warning)
           .fixedSize(horizontal: false, vertical: true)
       }
       if case .succeeded = installer.phase {
@@ -539,24 +526,41 @@ struct ActionPanel: View {
         CompactTimeline(count: installer.steps.count)
           .transition(.opacity)
       } else if showTimeline {
+        Rectangle().fill(Brand.border).frame(height: 1)
         Timeline(installer: installer)
           .transition(.opacity.combined(with: .move(edge: .top)))
       }
       Outcome(installer: installer)
       if installer.installed && installer.phase == .idle {
+        Rectangle().fill(Brand.border).frame(height: 1)
         ReadyNote()
       }
       if !installer.log.isEmpty {
         Button(action: actions.showLog) {
           Label("Show Log", systemImage: "text.alignleft")
+            .font(.mono(10))
+            .tracking(1.6)
+            .textCase(.uppercase)
+            .foregroundStyle(Brand.fg2)
         }
-        .buttonStyle(.link)
+        .buttonStyle(.plain)
         .pointerStyle(.link)
       }
     }
     .padding(20)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.quinary, in: .rect(cornerRadius: 22))
+    .brandPanel()
+  }
+
+  // Top right of the panel: installed and its version, working, or not installed
+  @ViewBuilder private var stateChip: some View {
+    if installer.isBusy {
+      Chip(text: "Working", pip: Brand.accent)
+    } else if installer.installed {
+      Chip(text: "Installed · \(installer.status["installed_version"] ?? "?")", pip: installer.installedOtherVersion ? Brand.warning : Brand.good)
+    } else if installer.loaded {
+      Chip(text: "Not installed", pip: Brand.fg3)
+    }
   }
 
   // the steps: while working and after, and before a first install as a preview
@@ -597,7 +601,7 @@ struct LeftoversNote: View {
             + "They are not needed; Install and Uninstall end them first.",
             systemImage: "exclamationmark.triangle.fill")
         .font(.callout)
-        .foregroundStyle(.orange)
+        .foregroundStyle(Brand.warning)
         .fixedSize(horizontal: false, vertical: true)
       Button(action: end) {
         if installer.endingLeftovers {
@@ -649,12 +653,8 @@ struct PrimaryAction: View {
   private func big(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
     Button(action: action) {
       Label(title, systemImage: symbol)
-        .font(.title3.weight(.semibold))
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
     }
-    .buttonStyle(.glassProminent)
-    .controlSize(.extraLarge)
+    .buttonStyle(.brandPrimary)
     .keyboardShortcut(.defaultAction)
     .pointerStyle(.link)
   }
@@ -662,27 +662,40 @@ struct PrimaryAction: View {
   // "Installing… 42%" with the overall progress, and Cancel (an install rolls back; an
   // uninstall is quick and runs to the end)
   private var working: some View {
-    HStack(spacing: 10) {
-      HStack(spacing: 12) {
-        ProgressView(value: installer.fraction)
-          .progressViewStyle(.circular)
-          .controlSize(.small)
-        Text(installer.operation == .install ? "Installing…" : "Uninstalling…")
-          .font(.title3.weight(.semibold))
-        Spacer(minLength: 0)
-        Text("\(Int((installer.fraction * 100).rounded()))%")
-          .font(.title3.weight(.semibold).monospacedDigit())
-          .contentTransition(.numericText(value: installer.fraction))
-          .animation(.snappy, value: installer.fraction)
+    HStack(spacing: 8) {
+      VStack(spacing: 0) {
+        HStack {
+          Text(installer.operation == .install ? "Installing…" : "Uninstalling…")
+            .font(.mono(13, .bold, relativeTo: .title3))
+            .tracking(1.6)
+            .textCase(.uppercase)
+            .foregroundStyle(Brand.fg)
+          Spacer(minLength: 0)
+          Text("\(Int((installer.fraction * 100).rounded()))%")
+            .font(.mono(13, .bold, relativeTo: .title3).monospacedDigit())
+            .foregroundStyle(Brand.accent)
+            .contentTransition(.numericText(value: installer.fraction))
+            .animation(.snappy, value: installer.fraction)
+        }
+        .padding(.horizontal, 16)
+        .frame(maxHeight: .infinity)
+        GeometryReader { bar in
+          ZStack(alignment: .leading) {
+            Rectangle().fill(Brand.border)
+            Rectangle().fill(Brand.accent).frame(width: bar.size.width * installer.fraction)
+              .animation(.smooth, value: installer.fraction)
+          }
+        }
+        .frame(height: 3)
       }
-      .padding(.horizontal, 18)
-      .padding(.vertical, 12)
-      .frame(maxWidth: .infinity)
-      .glassEffect(.regular.tint(accent.opacity(0.25)), in: .capsule)
+      .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52)
+      .background(Brand.surface, in: .rect(cornerRadius: 6))
+      .clipShape(.rect(cornerRadius: 6))
+      .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Brand.borderStrong, lineWidth: 1))
       .accessibilityElement(children: .combine)
       .accessibilityLabel("\(installer.operation == .install ? "Installing" : "Uninstalling"), \(Int(installer.fraction * 100)) percent")
       if installer.phase == .working(.install) {
-        Button("Cancel") { installer.cancel() }
+        Button { installer.cancel() } label: { Text("Cancel").foregroundStyle(Brand.fg) }
           .buttonStyle(.glass)
           .controlSize(.extraLarge)
           .keyboardShortcut(.cancelAction)
@@ -709,41 +722,30 @@ struct PrimaryAction: View {
         if fixFirst {
           PlayButton(installer: installer, action: actions.play, prominent: false)
         } else {
-          Button(action: actions.install) { Label("Reinstall", systemImage: "arrow.clockwise") }
+          Button(action: actions.install) { Label("Reinstall", systemImage: "arrow.clockwise").foregroundStyle(Brand.fg) }
             .disabled(!installer.canInstall)
         }
-        Button(action: actions.settings) { Label("Settings", systemImage: "slider.horizontal.3") }
+        Button(action: actions.settings) { Label("Settings", systemImage: "slider.horizontal.3").foregroundStyle(Brand.fg) }
         Spacer(minLength: 0)
+        // (neutral: red is the brand's action colour here; the alert that follows is destructive)
         Button(role: .destructive, action: actions.uninstall) {
-          Label("Uninstall…", systemImage: "trash").foregroundStyle(installer.canUninstall ? .red : .secondary)
+          Label("Uninstall…", systemImage: "trash").foregroundStyle(Brand.fg2)
         }
         .disabled(!installer.canUninstall)
       }
       .buttonStyle(.glass)
-      .tint(nil)
       .controlSize(.large)
       .pointerStyle(.link)
     }
   }
 
-  // "Installed · Version 0.0.3", or why Play can't go ahead
+  // Why Play can't go ahead, if it can't (the panel's chip shows the version)
   @ViewBuilder private var installedLine: some View {
     if case .unavailable(let reason) = installer.playAction, installer.loaded {
       Label(reason, systemImage: "exclamationmark.circle.fill")
         .font(.callout)
-        .foregroundStyle(.orange)
+        .foregroundStyle(Brand.warning)
         .fixedSize(horizontal: false, vertical: true)
-    } else {
-      Label {
-        Text("Installed · Version \(installer.status["installed_version"] ?? "?")")
-      } icon: {
-        Image(systemName: "checkmark.seal.fill")
-          .foregroundStyle(.green)
-          .symbolEffect(.bounce, value: installer.installed)
-      }
-      .font(.callout)
-      .foregroundStyle(.secondary)
-      .accessibilityElement(children: .combine)
     }
   }
 }
@@ -758,16 +760,11 @@ struct PlayButton: View {
   var body: some View {
     let play = installer.playButtonAction
     let button = Button(action: action) {
-      Group {
-        if installer.launching {
-          HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Opening SWTOR…") }
-        } else {
-          Label(title(play), systemImage: symbol(play))
-        }
+      if installer.launching {
+        HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Opening SWTOR…") }
+      } else {
+        Label(title(play), systemImage: symbol(play))
       }
-      .font(prominent ? .title3.weight(.semibold) : nil)
-      .frame(maxWidth: prominent ? .infinity : nil)
-      .padding(.vertical, prominent ? 4 : 0)
     }
     .disabled(!enabled(play) || installer.launching)
     .accessibilityLabel(installer.launching ? "Opening SWTOR" : title(play))
@@ -776,8 +773,7 @@ struct PlayButton: View {
     .pointerStyle(.link)
     if prominent {
       button
-        .buttonStyle(.glassProminent)
-        .controlSize(.extraLarge)
+        .buttonStyle(.brandPrimary)
         .keyboardShortcut(.defaultAction)
     } else {
       button
@@ -858,11 +854,11 @@ struct Timeline: View {
         TimelineNode(number: step.id, symbol: step.symbol, state: state)
         if !last {
           ZStack(alignment: .top) {
-            Capsule().fill(.quaternary)
-            Capsule().fill(accent.gradient)
+            Rectangle().fill(Brand.border)
+            Rectangle().fill(state == .done ? Brand.good : Brand.accent)
               .scaleEffect(x: 1, y: fill, anchor: .top)
           }
-          .frame(width: 3)
+          .frame(width: 2)
           .frame(minHeight: 18, maxHeight: .infinity)
           .padding(.vertical, 4)
         }
@@ -870,8 +866,8 @@ struct Timeline: View {
       .frame(width: 30)
       VStack(alignment: .leading, spacing: 4) {
         Text(step.title)
-          .font(.body.weight(state == .active ? .semibold : .regular))
-          .foregroundStyle(state == .pending ? .secondary : .primary)
+          .font(.system(size: 13, weight: state == .active ? .semibold : .regular))
+          .foregroundStyle(state == .pending ? Brand.fg2 : Brand.fg)
         detail(step, state: state)
       }
       .padding(.top, 4)
@@ -888,23 +884,23 @@ struct Timeline: View {
     case .active:
       if let p = installer.progress, p.total > 0 {
         VStack(alignment: .leading, spacing: 4) {
-          ProgressView(value: Double(min(p.done, p.total)), total: Double(p.total))
-            .controlSize(.small)
-          Text("\(p.label): \(mb(p.done)) of \(mb(p.total))")
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
+          Text("\(p.label) · \(mb(p.done)) of \(mb(p.total))")
+            .font(.mono(9.5, .medium).monospacedDigit())
+            .tracking(1)
+            .textCase(.uppercase)
+            .foregroundStyle(Brand.accent)
             .contentTransition(.numericText(value: Double(p.done)))
         }
       } else {
-        Text(step.detail).font(.caption).foregroundStyle(.secondary)
+        Text(step.detail).font(.system(size: 11.5)).foregroundStyle(Brand.fg2)
           .fixedSize(horizontal: false, vertical: true)
       }
     case .failed:
       if case .failed(_, let message) = installer.phase {
-        Text(message).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+        Text(message).font(.system(size: 11.5)).foregroundStyle(Brand.bad).fixedSize(horizontal: false, vertical: true)
       }
     default:
-      Text(step.detail).font(.caption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+      Text(step.detail).font(.system(size: 11.5)).foregroundStyle(Brand.fg3).fixedSize(horizontal: false, vertical: true)
     }
   }
 
@@ -915,53 +911,53 @@ struct Timeline: View {
   private func mb(_ bytes: Int64) -> String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
 }
 
+// A step's node: a square with the step's number in mono, as the site's numbered lists. Pending:
+// a hairline frame; active: the accent, its frame breathing; done: green with a check; failed:
+// red with a cross.
 struct TimelineNode: View {
   let number: Int
   let symbol: String
   let state: Timeline.State
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var spin = false
+  @State private var breathe = false
 
   var body: some View {
     ZStack {
       switch state {
       case .pending:
-        Circle().strokeBorder(.quaternary, lineWidth: 2)
-        Text("\(number)").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+        RoundedRectangle(cornerRadius: 4).strokeBorder(Brand.borderStrong, lineWidth: 1.5)
+        numberText.foregroundStyle(Brand.fg3)
       case .active:
-        Circle().fill(accent.opacity(0.16))
-        if !reduceMotion {
-          Circle()
-            .trim(from: 0, to: 0.28)
-            .stroke(accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-            .rotationEffect(.degrees(spin ? 360 : 0))
-            .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: spin)
-            .onAppear { spin = true }
-        } else {
-          Circle().strokeBorder(accent, lineWidth: 2)
-        }
-        Image(systemName: symbol)
-          .font(.system(size: 12, weight: .bold))
-          .foregroundStyle(accent)
-          .symbolEffect(.pulse, isActive: !reduceMotion)
+        RoundedRectangle(cornerRadius: 4).fill(Brand.accentSoft)
+        RoundedRectangle(cornerRadius: 4).strokeBorder(Brand.accent, lineWidth: 1.5)
+          .opacity(breathe ? 0.45 : 1)
+          .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: breathe)
+          .onAppear { breathe = !reduceMotion }
+        numberText.foregroundStyle(Brand.accent)
       case .done:
-        Image(systemName: "checkmark.circle.fill")
-          .font(.system(size: 26))
-          .foregroundStyle(.white, .green)
+        RoundedRectangle(cornerRadius: 4).fill(Brand.good)
+        Image(systemName: "checkmark")
+          .font(.system(size: 13, weight: .bold))
+          .foregroundStyle(.white)
           .transition(.scale.combined(with: .opacity))
           .symbolEffect(.bounce, options: .nonRepeating, value: state)
       case .failed:
-        Image(systemName: "xmark.circle.fill")
-          .font(.system(size: 26))
-          .foregroundStyle(.white, .red)
+        RoundedRectangle(cornerRadius: 4).fill(Brand.bad)
+        Image(systemName: "xmark")
+          .font(.system(size: 13, weight: .bold))
+          .foregroundStyle(.white)
           .transition(.scale.combined(with: .opacity))
       }
     }
     .frame(width: 28, height: 28)
   }
+
+  private var numberText: some View {
+    Text(String(format: "%02d", number)).font(.mono(10.5)).tracking(0.5)
+  }
 }
 
-// A finished operation: its steps as a row of checkmarks.
+// A finished operation: its steps as a row of green squares.
 struct CompactTimeline: View {
   let count: Int
   @State private var shown = false
@@ -969,15 +965,23 @@ struct CompactTimeline: View {
   var body: some View {
     HStack(spacing: 6) {
       ForEach(0..<count, id: \.self) { i in
-        Image(systemName: "checkmark.circle.fill")
-          .font(.system(size: 20))
-          .foregroundStyle(.white, .green)
+        Image(systemName: "checkmark")
+          .font(.system(size: 11, weight: .bold))
+          .foregroundStyle(.white)
+          .frame(width: 20, height: 20)
+          .background(Brand.good, in: .rect(cornerRadius: 3))
           .symbolEffect(.bounce, options: .nonRepeating, value: shown)
         if i < count - 1 {
-          Capsule().fill(Color.green.gradient).frame(height: 3).frame(maxWidth: 40)
+          Rectangle().fill(Brand.good).frame(height: 2).frame(maxWidth: 28)
         }
       }
-      Text("All steps done").font(.callout).foregroundStyle(.secondary).padding(.leading, 6)
+      Text("All \(count) steps done")
+        .font(.mono(9.5))
+        .tracking(1.6)
+        .textCase(.uppercase)
+        .foregroundStyle(Brand.fg2)
+        .padding(.leading, 6)
+        .fixedSize()
       Spacer(minLength: 0)
     }
     .onAppear { shown = true }
@@ -995,16 +999,16 @@ struct Outcome: View {
     case .succeeded(let op, let message):
       VStack(alignment: .leading, spacing: 10) {
         Label(message, systemImage: "checkmark.circle.fill")
-          .foregroundStyle(.green)
+          .foregroundStyle(Brand.good)
           .fixedSize(horizontal: false, vertical: true)
         if op == .install {
           Label(firstRunNote, systemImage: "info.circle")
             .font(.callout)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Brand.fg2)
             .fixedSize(horizontal: false, vertical: true)
         }
         ForEach(installer.warnings, id: \.self) { w in
-          Label(w, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+          Label(w, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Brand.warning)
             .font(.callout)
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -1012,7 +1016,7 @@ struct Outcome: View {
     case .failed(_, let message) where installer.stepIndex == nil:
       // failed before the first step
       Label(message, systemImage: "exclamationmark.triangle.fill")
-        .foregroundStyle(.red)
+        .foregroundStyle(Brand.bad)
         .fixedSize(horizontal: false, vertical: true)
     default:
       EmptyView()
@@ -1024,14 +1028,14 @@ struct Outcome: View {
 struct ReadyNote: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Label("Press Play SWTOR, or start the official SWTOR app as usual: the game runs on SWTOR on "
+      Label("Press Play SWTOR, or start the official SWTOR app as usual. The game runs on SWTOR on "
             + "Mac's engine.",
-            systemImage: "play.circle.fill")
-        .font(.callout)
+            systemImage: "play.circle")
       Label(firstRunNote, systemImage: "info.circle")
-        .font(.callout)
-        .foregroundStyle(.secondary)
     }
+    .font(.system(size: 12.5))
+    .foregroundStyle(Brand.fg2)
+    .lineSpacing(2)
     .fixedSize(horizontal: false, vertical: true)
   }
 }
@@ -1041,18 +1045,19 @@ struct ReadyNote: View {
 struct NoticeText: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text("SWTOR on Mac is an unofficial community project.")
+      Text("SWTOR on Mac is an unofficial fan project.")
         .font(.headline)
         .foregroundStyle(.primary)
-      Text("It is not made, endorsed or supported by Broadsword Games, Electronic Arts, Lucasfilm or "
-           + "Disney. Broadsword doesn't support third-party tools or compatibility layers, so you use "
-           + "it at your own risk.")
+      Text("It is not affiliated with or endorsed by Lucasfilm, Disney, Electronic Arts or Broadsword "
+           + "Online Games. Broadsword doesn't support third-party tools or compatibility layers, so you "
+           + "use it at your own risk.")
       Text("It's not a game mod: it doesn't change the game's files, memory or network traffic. It only "
            + "replaces the compatibility layer the official Mac app already runs on (Wine, plus d9mt for "
            + "Direct3D 9 on Metal), and Uninstall puts that back the way Broadsword ships it.")
       Text("For help, contact Pharaphobia on Discord or open a GitHub issue. Please don't send logs or "
            + "bug reports about SWTOR on Mac to Broadsword or SWTOR customer support.")
-      Text("Star Wars: The Old Republic and SWTOR are trademarks of their respective owners.")
+      Text("STAR WARS is a registered trademark of Lucasfilm Ltd. Star Wars: The Old Republic and SWTOR "
+           + "are trademarks of their respective owners. Mac is a trademark of Apple Inc.")
         .font(.footnote)
         .foregroundStyle(.secondary)
     }
@@ -1105,7 +1110,6 @@ struct NoticeSheet: View {
     }
     .padding(28)
     .frame(width: 520)
-    .tint(accent)
   }
 }
 
@@ -1149,7 +1153,6 @@ struct LogSheet: View {
     }
     .padding(24)
     .frame(minWidth: 640, idealWidth: 720, minHeight: 420, idealHeight: 520)
-    .tint(accent)
   }
 }
 
@@ -1159,26 +1162,30 @@ struct Footer: View {
   let credits: [String: String]
 
   var body: some View {
-    HStack(spacing: 6) {
-      Text("Unofficial. Not made, endorsed or supported by Broadsword Games, EA, Lucasfilm or Disney.")
-      Text("·")
-      Text("Developed by \(credits["author"] ?? "Jan Drlý")")
+    HStack(spacing: 8) {
+      Text(disclaimer)
+        .help(disclaimer)
       if let link {
-        Text("·")
-        Link(link.absoluteString.replacingOccurrences(of: "https://", with: ""), destination: link)
-          .foregroundStyle(.link)
-          .pointerStyle(.link)
+        Text("·").accessibilityHidden(true)
+        Link(destination: link) {
+          HStack(spacing: 3) {
+            Text(link.absoluteString.replacingOccurrences(of: "https://", with: ""))
+            Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
+          }
+          .foregroundStyle(Brand.fg2)
+        }
+        .pointerStyle(.link)
+        .fixedSize()
       }
     }
-    .font(.caption)
-    .foregroundStyle(.tertiary)
+    .font(.system(size: 10.5))
+    .foregroundStyle(Brand.fg3)
     .lineLimit(1)
-    .minimumScaleFactor(0.8)
+    .truncationMode(.tail)
     .frame(maxWidth: .infinity)
     .padding(.horizontal, 16)
     .padding(.vertical, 10)
-    .background(.bar)
-    .overlay(alignment: .top) { Divider() }
+    .overlay(alignment: .top) { Rectangle().fill(Brand.border).frame(height: 1) }
   }
 
   private var link: URL? {

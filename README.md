@@ -6,8 +6,8 @@ official install: the game's Direct3D 9 goes straight to Metal with
 [d9mt](https://github.com/jdrly/d9mt), on a newer Wine (CrossOver 26.3 with Wine 11, the
 engine SWGL on Mac uses), with macOS Game Mode. You start the game with **Play SWTOR** in its window, or from the official app as usual.
 
-> **SWTOR on Mac is an unofficial community project.** It is not made, endorsed or supported
-> by Broadsword Games, Electronic Arts, Lucasfilm or Disney. Broadsword doesn't support
+> **SWTOR on Mac is an unofficial fan project.** It is not affiliated with or endorsed by
+> Lucasfilm, Disney, Electronic Arts or Broadsword Online Games. Broadsword doesn't support
 > third-party tools or compatibility layers, so you use it at your own risk.
 >
 > **It's not a game mod.** It doesn't change the game's files, memory or network traffic and
@@ -20,7 +20,8 @@ engine SWGL on Mac uses), with macOS Game Mode. You start the game with **Play S
 > [GitHub issue](https://github.com/jdrly/swtor-on-mac/issues). Please don't send logs or bug
 > reports about SWTOR on Mac to Broadsword or SWTOR customer support.
 >
-> Star Wars: The Old Republic and SWTOR are trademarks of their respective owners.
+> STAR WARS is a registered trademark of Lucasfilm Ltd. Star Wars: The Old Republic and SWTOR
+> are trademarks of their respective owners. Mac is a trademark of Apple Inc.
 
 <img src="docs/screenshots/installed.png" width="720" alt="The SWTOR on Mac window after an install">
 
@@ -93,7 +94,11 @@ settings and SWTOR on Mac's settings.
   once the official app is open.
 - **The window** shows the state of this Mac (the official app, Rosetta, SWTOR on Mac, the
   launcher hook, d9mt and the engine) and offers Reinstall, Settings and Uninstall. It looks
-  again whenever it becomes active and when the launcher or the game starts or quits.
+  again whenever it becomes active and when the launcher or the game starts or quits. It has
+  the look of [swonmac.com](https://swonmac.com), in light and dark: the site's colours and
+  typefaces, and behind the whole window a still image of the site's jump point and warp. The
+  image is drawn once, so the window costs nothing while it stays open (the warp's animation
+  is built but off: [docs/warp-video-loop.md](docs/warp-video-loop.md)).
 - SWTOR on Mac does not need to be open to play: the official app starts the game on SWTOR on
   Mac's engine by itself.
 
@@ -600,6 +605,11 @@ local feed, as in SWGL on Mac.
   the last 5 versions in `release/updates/`, checked by `scripts/check-appcast.swift`), then
   drafts the GitHub release (`--sign-only`, `--no-notarize`, `--no-release` for local runs;
   `--ci`, `--feed <version>` for the two halves of a CI release, as in SWGL on Mac).
+- `scripts/ui-snapshot.sh` builds the app's windows into a small test bundle and runs it on a
+  temporary virtual display (swtor-mac-proper's `tools/vd/with-vd.sh`), never on the main one:
+  screenshots of the main window in its states and of Settings (`shots`), and what the warp
+  costs (`measure`, `sweep`, `findcost`, `idlecheck`, `stillcheck`: CPU, instructions, the
+  GPU time the GPU driver counts for the process, frames drawn).
 - `.github/workflows/checks.yml` lints the scripts and builds the app;
   `.github/workflows/release.yml` signs and notarizes on a `v*` tag. Both build on GitHub's
   `xcode-27` image (macOS 27 with Xcode 27, a public preview; there is no `macos-27` label).
@@ -700,6 +710,11 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
   the patch under `Resources/Licenses/ntdll`.
 - [Sparkle](https://sparkle-project.org) for app updates (MIT, with bsdiff and other notices;
   in the app under `Resources/Licenses/sparkle`).
+- The typefaces of [swonmac.com](https://swonmac.com),
+  [Unbounded](https://github.com/googlefonts/unbounded) and
+  [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) (SIL Open Font License 1.1),
+  unmodified in `src/fonts`; in the app under `Resources/Fonts`, their licenses under
+  `Resources/Licenses/fonts`.
 - Built after the example of [SWGL on Mac](https://github.com/jdrly/swgl-on-mac).
 
 What the app bundles and what it downloads at install time, with their licenses:
