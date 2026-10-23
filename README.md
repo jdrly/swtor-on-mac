@@ -33,8 +33,9 @@ engine SWGL on Mac uses), with macOS Game Mode. You start the game with **Play S
   raw mouse-look and its speed, debug logging, automatic update checks.
 - **Updates**: the app updates itself with [Sparkle](https://sparkle-project.org) (SWTOR on
   Mac > Check for Updates…), and the game's start looks for a new version once a day.
-- **Survives launcher updates**: when the official launcher updates its Wine and drops SWTOR on
-  Mac's hook, a small launchd job hooks it back in by itself.
+- **After launcher updates**: when the official launcher updates its Wine and drops SWTOR on
+  Mac's hook, the app hooks itself back in the next time you open it (or press Play SWTOR). No
+  background helper: nothing of SWTOR on Mac runs while the app is closed.
 - **Collect Logs…** makes a zip for bug reports, without account names or passwords.
 - **Fully reversible**: Uninstall puts the official app back exactly as Broadsword ships it and
   copies your game settings back to it.
@@ -273,21 +274,24 @@ echo no_attach_opt >>"$F"                      # optimization off (A/B)
 sed -i '' '/^no_attach_opt$/d' "$F"            # back on
 ```
 
-### Launcher updates (the launchd job)
+### Launcher updates (the hook check when the app opens)
 
 The official launcher sometimes updates its own Wine and puts Broadsword's preloaders back in
-place of SWTOR on Mac's wrapper. Install sets up a launchd job for that,
-`~/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist`: launchd starts it only when
-Broadsword's `Wine/bin` folder changes (`WatchPaths`, not at login, at most every 30 s); it
-checks the wrapper and exits. Nothing runs in between. If a launcher update replaced the
-wrapper, it waits until the folder has been quiet for 20 s, puts the wrapper back exactly like
-Install does, records the new preloaders in `install-manifest.json` and posts a notification.
-It does nothing while an install or uninstall runs or when another Wine wrapper is installed,
-and if the folder looks half updated it only notifies (*open SWTOR on Mac and click
-Reinstall*). It runs a copy of `som.sh` in `~/Library/Application Support/SWTOR on Mac/agent`,
-so updating or moving the app does not affect it; its log is `~/Library/Logs/SWTOR on
-Mac/watch.log`. If that did not work, the window shows *Launcher hook: Removed by a launcher
-update* and a **Repair the Launcher Hook** button.
+place of SWTOR on Mac's wrapper. SWTOR on Mac checks its hook each time the app opens, and
+right before **Play SWTOR** if the hook is gone (`som.sh rehook`). If a launcher update replaced
+the wrapper, it puts it back exactly like Install does and records the new preloaders in
+`install-manifest.json`; its log is `~/Library/Logs/SWTOR on Mac/rehook.log`. It leaves
+everything alone while an install, uninstall or settings change runs, when another Wine wrapper
+is installed, and while the launcher is still changing its Wine (a preloader missing, or
+`Wine/bin` changed in the last 20 seconds). The window then shows *Launcher hook: Removed by a
+launcher update* and a **Repair the Launcher Hook** button.
+
+Nothing of SWTOR on Mac runs while the app is closed: no launchd job, no login item. So if you
+start SWTOR from the official app right after a launcher update has replaced its Wine, the game
+runs without SWTOR on Mac until you open SWTOR on Mac once. Versions up to 0.1.3 set up a
+launchd job for this, `~/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist`, with a copy of
+`som.sh` in `~/Library/Application Support/SWTOR on Mac/agent`. Installing 0.1.4 or later removes
+both, and Uninstall does too.
 
 ## Reporting problems
 
@@ -347,8 +351,9 @@ game start, at some cost in performance, so turn it off again afterwards.
   official setup behaves too; the icon goes by itself shortly after you quit the game. Don't
   **Quit** it from the Dock while the game runs: macOS then ends those processes, and the game
   with its Wine.
-- **Official launcher updates** replace SWTOR on Mac's hook. The launchd job puts it back by
-  itself, but if the update looks unfinished it only notifies, and you click **Reinstall**.
+- **Official launcher updates** replace SWTOR on Mac's hook. Open SWTOR on Mac (or press Play
+  SWTOR in it) and it hooks itself back in. If the update looks unfinished, it waits for you: open
+  it again a little later, or click **Repair the Launcher Hook**.
 - **Blurry or missing textures in busy places** on 8 or 16 GB Macs: the game gets 2 or 3 GB of
   video memory there (official app: about 4 GB). Raise **Video Memory Profile** in Settings if
   macOS has memory to spare; lower it if macOS runs short of memory.
@@ -385,8 +390,8 @@ Quit the launcher and the game, open SWTOR on Mac and click **Uninstall…**. Yo
 Mac's prefix, without `ContextError.ini`) are copied back to Broadsword's prefix first, with a
 copy of its previous ones next to them (`settings-backup-<time>`). Then the official app goes
 back to exactly how Broadsword ships it, and SWTOR on Mac's engine, prefix, settings, downloads
-and launchd job are deleted (characters live on the server and are not affected). Logs stay in
-`~/Library/Logs/SWTOR on Mac`. Then move the app to the Bin.
+and, from versions up to 0.1.3, the launchd job are deleted (characters live on the server and
+are not affected). Logs stay in `~/Library/Logs/SWTOR on Mac`. Then move the app to the Bin.
 
 ### What it changes
 
@@ -418,11 +423,8 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
   - `settings.conf` – the Settings window's settings; `env` – what the wrapper applies,
     `dxvk.conf` – d9mt's options (both made from `settings.conf`)
   - `install-manifest.json` – what was changed, for Uninstall
-  - `agent/` – the copy of `som.sh` the launchd job runs; `last-update-check`,
-    `update-available` – the wrapper's daily update check
+  - `last-update-check`, `update-available` – the wrapper's daily update check
   - `backup/` – only if you replaced another Wine wrapper: a copy of it
-- `~/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist` – the launchd job (see
-  [Launcher updates](#launcher-updates-the-launchd-job))
 - `~/Library/Caches/SWTOR on Mac/downloads` – the engine downloads, only during an install
 - `winetemp-…/wine` (or `winetemp-…/swtor.exe`) in your per-user temporary folder
   (`$TMPDIR`) – the Game Mode link, made at each game start
@@ -433,15 +435,16 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
   when it needs the space, and deleting it only costs the stutter of a first start
 - `~/Library/Caches/SWTOR on Mac/d9mt-ab/` – only in development builds, the caches of
   `d9mt-ab.sh cold=<name>` runs (a release's Reinstall removes them and `d9mt-ab.env`)
-- `~/Library/Logs/SWTOR on Mac/` – `install.log`, `watch.log`, and per game start `wine.log`
+- `~/Library/Logs/SWTOR on Mac/` – `install.log`, `rehook.log` (the hook check when the app
+  opens), and per game start `wine.log`
   (d9mt warnings), `hold.log` (also a line per Wine start that is not the game: its time,
   the command's first word and who started it), `launch-env.txt`, `effective-env.txt`
 
 ### Removing it by hand
 
 If the app is gone or Uninstall can't run, quit the launcher and the game and run this in
-Terminal. It puts Broadsword's preloaders back from `bin-real`, then removes the launchd job
-and SWTOR on Mac's folders:
+Terminal. It puts Broadsword's preloaders back from `bin-real`, then removes the launchd job of a
+version up to 0.1.3, if there is one, and SWTOR on Mac's folders:
 
 ```sh
 W="$HOME/Library/Application Support/com.broadsword.swtor/Star Wars - The Old Republic/swtor-precompiled/Libraries/Wine"
@@ -450,7 +453,7 @@ for p in wine-preloader wine64-preloader; do
   if [ "$(head -c 2 "$W/bin/$p")" = '#!' ]; then mv -f "$W/bin-real/$p" "$W/bin/$p"; fi
 done
 rm -rf "$W/bin-real"
-launchctl bootout "gui/$(id -u)/cz.jandrly.swtoronmac.watch"
+launchctl bootout "gui/$(id -u)/cz.jandrly.swtoronmac.watch" 2>/dev/null   # (0.1.3 and older)
 rm -f ~/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist
 rm -rf ~/Library/Application\ Support/SWTOR\ on\ Mac ~/Library/Caches/SWTOR\ on\ Mac
 ```
@@ -524,7 +527,7 @@ in d9mt's `dxvk.conf`, and `GrabPointer=n` for `swtor.exe` (no hitch when mouse-
 Vsync is on by default because SWTOR asks for none in borderless mode, which tears. The rest is
 in the Settings window (above).
 
-The installer is `src/som.sh` (`status`, `install`, `uninstall`, `settings`, `set`, `watch`,
+The installer is `src/som.sh` (`status`, `install`, `uninstall`, `settings`, `set`, `rehook`,
 `end-leftovers`); the window (`src/native`, SwiftUI) runs it and shows its progress as a
 timeline. Install is idempotent and all-or-nothing: it refuses while the launcher or game runs,
 checks every download against a pinned sha256, prepares everything in SWTOR on Mac's folders
@@ -537,14 +540,14 @@ it says so and leaves it alone unless you confirm; it then keeps a copy in `back
 `som.sh` takes `SWTOR_ON_MAC_ROOT=/abs/dir` (every path, official install included, under that
 directory) and `SWTOR_ON_MAC_DRY_RUN=1` (print the changes, make none). The app passes both on,
 so `SWTOR_ON_MAC_ROOT=/tmp/x "SWTOR on Mac.app/Contents/MacOS/SWTORonMac"` shows the window for
-a sandbox. In a sandbox the launchd job is written but not loaded, notifications go to
-`notifications.log`, and Play SWTOR opens only the sandbox's official app
-(`SWTORonMac --play-target` prints what the button would do, without opening anything). `scripts/test-sandbox.sh` builds a sandbox from an APFS clone of this Mac's
+a sandbox. In a sandbox notifications go to `notifications.log`, and Play SWTOR opens only the sandbox's official app
+(`SWTORonMac --play-target` prints what the button would do, without opening anything, and `--play-check` what a press does after the hook check). `scripts/test-sandbox.sh` builds a sandbox from an APFS clone of this Mac's
 Broadsword Wine folder and a stand-in for the official app (its `Info.plist`, ad-hoc signed,
 with the test's stand-ins for the launcher built in, so Gatekeeper never sees a changed copy
 of Broadsword's signed app) and runs install, the settings, reinstall, the wrapper's update check (with a
-stub engine and a local feed), a simulated launcher update and the launchd job's repair (run as
-launchd would), leftover Wine processes (dummy programs under the sandbox engine and in
+stub engine and a local feed), a simulated launcher update and the app's hook check when it opens (`som.sh rehook`: it hooks
+back in, leaves a running install and a launcher still writing alone; an update over 0.0.6,
+0.1.3 and a development build removes their launchd job), leftover Wine processes (dummy programs under the sandbox engine and in
 Broadsword's Wine folder: what `status` reports, that only they end, from `end-leftovers`,
 install, uninstall and the wrapper, never while a wineserver of theirs runs, never another
 prefix's, never Broadsword's `mac_wine`), the Wine session (a `mac_wine`-like call that starts
@@ -573,7 +576,7 @@ development builds' `d9mt-ab.sh`, the session report on a sample of d9mt's log l
 app's `ntdll.so` in the engine (the engine's own kept as `.stock`, also after an upgrade and
 a downgrade), and a wrapper copied by hand from the template (`@CONF@` not filled in, or
 another install's `env`), which the window and Play treat as unhooked and Reinstall and the
-launchd job repair. `scripts/test-update.sh` tests app updates with two Developer ID builds and a
+app's hook check repair. `scripts/test-update.sh` tests app updates with two Developer ID builds and a
 local feed, as in SWGL on Mac.
 
 ## Building

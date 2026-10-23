@@ -318,7 +318,9 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
       echo "  $d/${f##*/}: $(file -b "$f" | cut -c1-40), $(stat -f '%Sm %z bytes' "$f")$(grep -q SWTOR_ON_MAC_WRAPPER "$f" 2>/dev/null && echo ", SWTOR on Mac's wrapper")$(grep -qx 'CONF="@CONF@"' "$f" 2>/dev/null && echo " NOT FILLED IN (@CONF@: it runs Broadsword's Wine)")"
     done
   done
-  echo "Launcher-update guard: $([ -f "$H/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist" ] && echo "installed" || echo "not installed")"
+  # (0.1.3 and older set up a launchd job for launcher updates; since 0.1.4 the app checks the
+  # hook when it opens, and Install removes the job)
+  echo "Launcher-update launchd job of an older version: $([ -f "$H/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist" ] && echo "still there (Reinstall removes it)" || echo "none")"
   echo
   echo "Crash reports of the last 7 days (newest first; in crash-reports/):"
   if [ -s "$work/crash-index" ]; then cat "$work/crash-index"; else echo "  none"; fi
