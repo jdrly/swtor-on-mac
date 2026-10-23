@@ -330,8 +330,10 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
   echo
   # Metal's caches of the engine's processes (macOS's, not the app's; nothing is changed here):
   # gpuarchiver grows by a folder per process that uses Metal, com.apple.metal holds the
-  # compiled shaders and the archive usage index
-  echo "Metal's caches of the engine's processes (in the user cache dir, ${METAL_CACHE##*/}/):"
+  # compiled shaders and the archive usage index (an LMDB of 1 MiB: full at that size, then its
+  # "MDB_MAP_FULL" lines in gpu-errors.txt). Other CrossOver-based apps (CrossOver, SWGL on Mac,
+  # GameToMac) share the bundle id, so their processes count in here too.
+  echo "Metal's caches of the engine's processes (in the user cache dir, ${METAL_CACHE##*/}/; shared with other CrossOver-based apps, whose processes count too):"
   for c in com.apple.gpuarchiver com.apple.metal; do
     if [ -d "$METAL_CACHE/$c" ]; then
       echo "  $c: $(du -sk "$METAL_CACHE/$c" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }'), $(ls -A "$METAL_CACHE/$c" 2>/dev/null | wc -l | tr -d ' ') entries"
@@ -339,6 +341,13 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
       echo "  $c: none"
     fi
   done
+  idx="$METAL_CACHE/com.apple.metal/archiveUsage.db/data.mdb"
+  if [ -f "$idx" ]; then
+    n=$(stat -f %z "$idx" 2>/dev/null || echo 0)
+    echo "  archive usage index (com.apple.metal/archiveUsage.db): $n bytes$([ "$n" -ge 1048576 ] && echo ', full (its MDB_MAP_FULL lines: compiled shaders are still cached)')"
+  else
+    echo "  archive usage index (com.apple.metal/archiveUsage.db): none"
+  fi
   echo
   # names only, never the command line (it has the account)
   echo "Running SWTOR, Wine and SWTOR on Mac processes (name only):"
