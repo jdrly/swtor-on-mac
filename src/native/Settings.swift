@@ -87,6 +87,15 @@ final class GameSettings {
     Binding(get: { self.values["memory"] ?? "auto" }, set: { self.set("memory", $0) })
   }
 
+  // Frame Rate Limit: d9mt's cap for the game (som.sh FPS_LIMITS)
+  static let fpsLimits: [(String, String)] = [
+    ("off", "Off"), ("30", "30 fps"), ("40", "40 fps"), ("45", "45 fps"), ("60", "60 fps"),
+  ]
+
+  var fpsLimit: Binding<String> {
+    Binding(get: { self.values["fpslimit"] ?? "off" }, set: { self.set("fpslimit", $0) })
+  }
+
   // Mouse-Look Speed: a factor on the macOS pointer's speed (som.sh MOUSE_SPEEDS)
   static let mouseSpeeds = ["0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.5", "3"]
 
@@ -250,6 +259,23 @@ struct SettingsView: View {
           Text("Waits for the display between frames: no tearing in borderless windowed mode, frame "
                + "rate capped at the display's refresh rate.")
         }
+      }
+      Section {
+        Picker(selection: settings.fpsLimit) {
+          ForEach(GameSettings.fpsLimits, id: \.0) { value, title in Text(title).tag(value) }
+        } label: {
+          Text("Frame Rate Limit")
+          Text("A steady, lower frame rate for less heat and a longer battery life: the Mac stays "
+               + "cooler, so a long session keeps its frame rate instead of throttling. 30 is even "
+               + "on a 60 or 120 Hz display (every frame stays on screen for two or four refreshes). 40 and "
+               + "45 keep the load even but show frames unevenly on a 60 Hz display; 40 is even on "
+               + "a 120 Hz ProMotion display. 60 limits only with Vsync off or on a faster display.")
+        }
+        Toggle(isOn: settings.toggle("fpsbattery")) {
+          Text("Only on battery")
+          Text("Limits the frame rate only if your Mac runs on battery when the game starts.")
+        }
+        .disabled((settings.values["fpslimit"] ?? "off") == "off")
       }
       Section {
         Picker(selection: settings.memory) {

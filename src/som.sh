@@ -6,9 +6,9 @@
 #   som.sh uninstall   revert everything (the official install goes back to stock)
 #   som.sh settings    KEY=VALUE lines: the settings (Settings window) and whether they can change
 #   som.sh set K V     change one setting (retina, hud, gamemode, vsync, debug, physkeys,
-#                      rawmouse: on/off; memory: auto/low/medium/high/ultra/unlimited;
+#                      rawmouse, fpsbattery: on/off; memory: auto/low/medium/high/ultra/unlimited;
 #                      updates: on/off; mousespeed: one of MOUSE_SPEEDS; hudpos: one of
-#                      HUD_POSITIONS)
+#                      HUD_POSITIONS; fpslimit: one of FPS_LIMITS)
 #   som.sh rehook      the app's check when it opens (and before Play SWTOR): hook the wrapper
 #                      back in if a launcher update replaced it; nothing runs while the app
 #                      is closed (no launchd job, no login item)
@@ -381,29 +381,38 @@ status() {
 #               settings panel, also while Shift+F9 hides the HUD: top center by default, where
 #               SWTOR has no buttons that get clicked quickly (top right, libMTLHud's own
 #               default, has character creation's Randomize and sliders)
+#   fpslimit    "Frame Rate Limit": off or a rate; the wrapper sets d9mt's D9MT_FPS_CAP for the
+#               game from SWTOR_FPS_LIMIT in the env file
+#   fpsbattery  "Only on battery": the limit only if the Mac runs on battery when the game
+#               starts (SWTOR_FPS_LIMIT_BATTERY=1; the wrapper asks pmset once)
 # With physkeys or rawmouse on, the engine's Mac driver is the app's patched build
 # (Resources/wine/), else the engine's own (install_winemac).
-SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos"
+SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery"
 MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
 HUD_POSITIONS="topleft topcenter topright centerleft centered centerright bottomleft bottomcenter bottomright"
+FPS_LIMITS="off 30 40 45 60"
 setting_default() {
   case "$1" in
     retina|gamemode|vsync|updates|rawmouse) echo on ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
-    hud|physkeys) echo off ;;
+    hud|physkeys|fpslimit|fpsbattery) echo off ;;
     memory) echo auto ;;
     mousespeed) echo 1 ;;
     hudpos) echo topcenter ;;
   esac
 }
+# in_list <value> <list>: the value is exactly one of the list's words (not two of them with a
+# space between, which env would then run as a command)
+in_list() { local w; for w in $2; do [ "$w" = "$1" ] && return 0; done; return 1; }
 setting_valid() { # <key> <value>
   case "$1:$2" in
     retina:on|retina:off|hud:on|hud:off|gamemode:on|gamemode:off|vsync:on|vsync:off) return 0 ;;
     debug:on|debug:off|updates:on|updates:off|physkeys:on|physkeys:off) return 0 ;;
-    rawmouse:on|rawmouse:off) return 0 ;;
+    rawmouse:on|rawmouse:off|fpsbattery:on|fpsbattery:off) return 0 ;;
     memory:auto|memory:low|memory:medium|memory:high|memory:ultra|memory:unlimited) return 0 ;;
-    mousespeed:*) case " $MOUSE_SPEEDS " in *" $2 "*) [ -n "$2" ] && return 0 ;; esac ;;
-    hudpos:*) case " $HUD_POSITIONS " in *" $2 "*) [ -n "$2" ] && return 0 ;; esac ;;
+    mousespeed:*) in_list "$2" "$MOUSE_SPEEDS" && return 0 ;;
+    hudpos:*) in_list "$2" "$HUD_POSITIONS" && return 0 ;;
+    fpslimit:*) in_list "$2" "$FPS_LIMITS" && return 0 ;;
   esac
   return 1
 }
@@ -964,7 +973,7 @@ EOF
 }
 
 write_env() {
-  local gm hud dbg upd notify_log="" ab=""
+  local gm hud dbg upd fps notify_log="" ab=""
   say "Writing the settings file $SOM/env"
   gm="SWTOR_GAMEMODE_APP=\"$SOM/gamemode/SWTOR.app\""
   [ "$(setting gamemode)" = on ] || gm="#$gm   (Game Mode is off in Settings)"
@@ -976,6 +985,8 @@ MTL_HUD_ALIGNMENT=$(setting hudpos)"
   else
     hud="#MTL_HUD_ENABLED=1   (off in Settings)"
   fi
+  fps=$(setting fpslimit)
+  [ "$fps" != off ] || fps=0
   if [ "$(setting debug)" = on ]; then
     dbg="# Debug logging is on in Settings: d9mt's info messages, per-frame timing (HITCH, PSOBUILD,
 # STATS and RESTORE once a second) and memory statistics (DIAG MEM) in wine.log. Costs some
@@ -1046,6 +1057,13 @@ $dbg
 
 # Apple's Metal HUD (FPS, frame times)
 $hud
+
+# Frame Rate Limit (0: off): the wrapper gives the game d9mt's cap, D9MT_FPS_CAP (even frame
+# times; at 30 on a 60 Hz display every frame stays on screen for two refreshes). Only on
+# battery (1): only if the Mac runs on battery when the game starts (one look, nothing watches
+# it later).
+SWTOR_FPS_LIMIT=$fps
+SWTOR_FPS_LIMIT_BATTERY=$([ "$(setting fpsbattery)" = on ] && echo 1 || echo 0)
 
 # At most once a day, when the game starts: look for a newer SWTOR on Mac (a notification
 # if there is one; the app updates itself)

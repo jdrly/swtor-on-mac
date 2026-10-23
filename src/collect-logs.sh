@@ -7,7 +7,9 @@
 # In the zip: SWTOR on Mac's logs (the end of large ones), its env, settings.conf, dxvk.conf,
 # install-manifest.json and d9mt-ab.env (a development build's A/B switches, if set), the app's VERSIONS, session-report.txt (the last game session in
 # short, scripts/session-report.sh), a fresh system-info.txt (macOS, chip,
-# memory, displays, versions, the state of the install, which crash reports are in the zip), and
+# memory, displays, versions, the state of the install, which crash reports are in the zip, the
+# GPU error count), gpu-errors.txt (the GPU errors of the game and Wine in macOS's unified log of
+# the last 2 hours, see gpu_errors) and
 # crash-reports/: macOS's crash, hang and spin reports of the last 7 days for the game, Wine, the
 # official launcher and SWTOR on Mac (see crash_reports), so nobody has to look for them. Never
 # the game's command line (the launcher passes the account name and session on it), nor
@@ -26,6 +28,10 @@ SOM="$H/Library/Application Support/SWTOR on Mac"
 LOGS="$H/Library/Logs/SWTOR on Mac"
 DIAG="$H/Library/Logs/DiagnosticReports"
 BS_WINE="$H/Library/Application Support/com.broadsword.swtor/Star Wars - The Old Republic/swtor-precompiled/Libraries/Wine"
+# the per-user cache dir (as som.sh's USER_CACHE), where macOS's Metal keeps its caches for the
+# engine's processes, under their bundle id
+if [ -n "$ROOT" ]; then USER_CACHE="$ROOT/usercache/"; else USER_CACHE="$(getconf DARWIN_USER_CACHE_DIR)"; fi
+METAL_CACHE="${USER_CACHE}com.codeweavers.CrossOver.wineloader"
 
 name="SWTOR-on-Mac-logs-$(date +%Y-%m-%d-%H%M)"
 dest="${1:-$H/Desktop}"
@@ -155,6 +161,99 @@ crash_reports() {
     done
 }
 
+# GPU errors: macOS's unified log of the last GPU_HOURS hours (the game's wine.log is written
+# anew at every start, the unified log keeps them for days). A GPU page fault in the game's
+# command buffers shows there as two "IOGPUMetalError" lines of the game's process (wine, or
+# swtor.exe) and nothing in wine.log; the game then draws wrong or pink textures, or freezes.
+# Counted per process of the game and Wine (other apps' only as a number, never their names),
+# then the last GPU_LINES lines of them and of the GPU driver in the kernel (AGX), and the last
+# METAL_LINES of Metal's other errors in the game and Wine ("MDB_MAP_FULL" only counted: it is
+# Metal's archive usage index, com.apple.metal/archiveUsage.db, that is full; the compiled
+# shaders next to it are still cached). The GPU driver's own text can name any app or path, so of its
+# lines only the time, the sender, the kind of event and whether it names the game or Wine. The
+# query takes 10-30 s; it is ended after GPU_TIMEOUT s (KILL GPU_GRACE s after TERM). In a
+# sandbox the unified log is $ROOT/bin/log if there is one (a test's), else it is not read, and
+# SWTOR_ON_MAC_GPU_TIMEOUT can shorten the limit.
+GPU_HOURS=2
+GPU_LINES=50
+METAL_LINES=20
+GPU_TIMEOUT=90
+GPU_GRACE=5
+UNIFIED_LOG=/usr/bin/log
+if [ -n "$ROOT" ]; then
+  UNIFIED_LOG="$ROOT/bin/log"
+  GPU_TIMEOUT="${SWTOR_ON_MAC_GPU_TIMEOUT:-$GPU_TIMEOUT}"
+fi
+gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
+  local pid killer st timedout=0
+  echo "GPU errors in macOS's unified log, the last $GPU_HOURS hours (until $(date '+%F %T %z'))"
+  if [ ! -x "$UNIFIED_LOG" ]; then
+    echo "not read (no $UNIFIED_LOG)" | tee "$work/gpu-summary"
+    return 0
+  fi
+  "$UNIFIED_LOG" show --last "${GPU_HOURS}h" --style compact --predicate 'process != "log" AND (eventMessage CONTAINS "IOGPUMetalError"
+    OR ((process BEGINSWITH "wine" OR process == "swtor.exe") AND (messageType == error OR messageType == fault)
+      AND (sender CONTAINS[c] "metal" OR sender CONTAINS[c] "IOGPU" OR sender CONTAINS[c] "AGX"))
+    OR (process == "kernel" AND sender BEGINSWITH "AGX"))' </dev/null >"$work/gpu-log" 2>/dev/null &
+  pid=$!
+  # (the time limit: TERM, and KILL for a query that ignores it. The mark says it ran out of
+  # time, also for a query that ends with status 0 on TERM; it goes again if the TERM finds no
+  # query to end.)
+  ( sleep "$GPU_TIMEOUT" && : >"$work/gpu-timeout" &&
+    { kill "$pid" || { rm -f "$work/gpu-timeout"; exit 0; }; } &&
+    sleep "$GPU_GRACE" && kill -KILL "$pid" ) </dev/null >/dev/null 2>&1 &
+  killer=$!
+  wait "$pid" 2>/dev/null; st=$?  # (2>: not bash's "Terminated" line for a query that ran out of time)
+  # The query has ended: end the watchdog wherever it is, so it never signals that pid again.
+  # Stopped first, it can't start a sleep in between; then its sleep, if any, and itself.
+  kill -STOP "$killer" 2>/dev/null
+  pkill -KILL -P "$killer" 2>/dev/null
+  kill -KILL "$killer" 2>/dev/null
+  wait "$killer" 2>/dev/null
+  [ ! -e "$work/gpu-timeout" ] || timedout=1
+  # (a line: date time type process[pid:tid] (sender) message; only other apps' names have spaces)
+  LC_ALL=C awk -v lines="$GPU_LINES" -v mlines="$METAL_LINES" -v st="$st" -v timedout="$timedout" \
+      -v summary="$work/gpu-summary" '
+    !/^[0-9][0-9][0-9][0-9]-/ { next }
+    { name = $4; sub(/\[.*/, "", name); ours = name ~ /^wine/ || name == "swtor.exe" }
+    name == "kernel" {
+      sender = $5; if (sender !~ /^\([A-Za-z0-9_.-]+\)$/) sender = "(AGX)"
+      body = $0; for (i = 1; i <= 5; i++) sub(/^[^ ]+ +/, "", body); body = tolower(body)
+      kind = body ~ /restart|reset|recover/ ? "GPU restart" : body ~ /fault/ ? "GPU fault" : \
+        body ~ /timeout|timed out|hang|stall/ ? "GPU timeout" : body ~ /error|fail/ ? "GPU error" : "other"
+      gpu[++g] = $1 " " $2 " " $3 " kernel " sender ": " kind (body ~ /wine|swtor/ ? ", names the game or Wine" : "")
+      next
+    }
+    /IOGPUMetalError/ {
+      if (!ours) { other++; next }
+      pid = $4; sub(/^[^[]*\[/, "", pid); sub(/:.*/, "", pid)
+      key = name " (pid " pid ")"
+      if (!(key in n)) { order[++keys] = key; first[key] = $1 " " $2 }
+      n[key]++; last[key] = $1 " " $2; total++
+    }
+    /MDB_MAP_FULL/ { if (ours) cachefull++; next }
+    !ours { next }
+    /IOGPUMetalError/ || name == "kernel" { gpu[++g] = $0; next }
+    { metal[++m] = $0 }
+    END {
+      if (timedout) print "(the query ran out of time: what came until then)"
+      else if (st) print "(the query failed, status " st ")"
+      s = "IOGPUMetalError (GPU command buffer errors, 2 lines each): " total + 0 " in the game and Wine"
+      if (other) s = s ", " other " in other apps"
+      print s; print s >summary
+      for (i = 1; i <= keys; i++) print "  " order[i] ": " n[order[i]] ", " first[order[i]] " to " last[order[i]]
+      if (cachefull) print "Metal'"'"'s archive usage index full (MDB_MAP_FULL) in the game and Wine: " cachefull " lines; compiled shaders are still cached"
+      print ""
+      print "The last " lines " lines of them and of the GPU driver (AGX):"
+      if (!g) print "  none"
+      for (i = (g > lines ? g - lines + 1 : 1); i <= g; i++) print gpu[i]
+      print ""
+      print "The last " mlines " of Metal'"'"'s other errors in the game and Wine (" m + 0 " in all):"
+      if (!m) print "  none"
+      for (i = (m > mlines ? m - mlines + 1 : 1); i <= m; i++) print metal[i]
+    }' "$work/gpu-log"
+}
+
 for f in "$LOGS"/*; do
   case "$f" in *.zip) continue ;; esac
   [ -f "$f" ] && add_log "$f" 20000000
@@ -175,6 +274,7 @@ while IFS= read -r line; do
     "skip "*) echo "  left out: ${line#skip }" ;;
   esac
 done <"$work/crash-list" >"$work/crash-index"
+gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
 
 {
   echo "SWTOR on Mac logs, collected $(date '+%F %T %z')"
@@ -224,6 +324,21 @@ done <"$work/crash-list" >"$work/crash-index"
   echo
   echo "Crash reports of the last 7 days (newest first; in crash-reports/):"
   if [ -s "$work/crash-index" ]; then cat "$work/crash-index"; else echo "  none"; fi
+  echo
+  echo "GPU errors of the last $GPU_HOURS hours (in gpu-errors.txt):"
+  echo "  $(cat "$work/gpu-summary" 2>/dev/null || echo "not read")"
+  echo
+  # Metal's caches of the engine's processes (macOS's, not the app's; nothing is changed here):
+  # gpuarchiver grows by a folder per process that uses Metal, com.apple.metal holds the
+  # compiled shaders and the archive usage index
+  echo "Metal's caches of the engine's processes (in the user cache dir, ${METAL_CACHE##*/}/):"
+  for c in com.apple.gpuarchiver com.apple.metal; do
+    if [ -d "$METAL_CACHE/$c" ]; then
+      echo "  $c: $(du -sk "$METAL_CACHE/$c" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }'), $(ls -A "$METAL_CACHE/$c" 2>/dev/null | wc -l | tr -d ' ') entries"
+    else
+      echo "  $c: none"
+    fi
+  done
   echo
   # names only, never the command line (it has the account)
   echo "Running SWTOR, Wine and SWTOR on Mac processes (name only):"

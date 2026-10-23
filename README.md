@@ -28,8 +28,8 @@ engine SWGL on Mac uses), with macOS Game Mode. You start the game with **Play S
 
 - **d9mt**: the game's Direct3D 9 goes straight to Metal, on CrossOver 26.3 (Wine 11), with
   macOS **Game Mode** and Retina rendering.
-- **Settings** (SWTOR on Mac > Settings…, ⌘,): Retina mode, vsync, d9mt's video memory
-  profile, Game Mode, the Metal HUD, game keys by keyboard position (for non-US layouts),
+- **Settings** (SWTOR on Mac > Settings…, ⌘,): Retina mode, vsync, a frame rate limit (for
+  heat and battery, optionally only on battery), d9mt's video memory profile, Game Mode, the Metal HUD, game keys by keyboard position (for non-US layouts),
   raw mouse-look and its speed, debug logging, automatic update checks.
 - **Updates**: the app updates itself with [Sparkle](https://sparkle-project.org) (SWTOR on
   Mac > Check for Updates…), and the game's start looks for a new version once a day.
@@ -107,6 +107,8 @@ the one used last) and the selected pane's settings. Changes take effect the nex
 |---|---|---|---|
 | Graphics | Retina Mode | on | Wine's Mac driver `RetinaMode` in the prefix's registry (only while the launcher and the game are closed) |
 | Graphics | Vsync | on | `d3d9.presentInterval = 1` in `dxvk.conf` (off: unset) |
+| Graphics | Frame Rate Limit | Off | `SWTOR_FPS_LIMIT` in `env` (0, 30, 40, 45, 60): the wrapper gives the game d9mt's `D9MT_FPS_CAP`. Even frame times, for less heat and a longer battery life: with vsync, a cap that divides the refresh rate keeps every frame on screen for the same number of refreshes (30 at 60 Hz: two; 40 at 120 Hz: three); 40 and 45 at 60 Hz keep the load even but show frames for one or two refreshes; at or above the refresh rate with vsync on it does nothing. `wine.log` names it (`frame rate limit:`, then d9mt's `frame cap` line) |
+| Graphics | Only on battery | off | `SWTOR_FPS_LIMIT_BATTERY=1` in `env`: the limit only if the Mac draws from its battery when the game starts (the wrapper asks `pmset -g ps` once; nothing watches it while the game runs) |
 | Graphics | Video Memory Profile | Automatic | `D9MT_MEMORY_PROFILE` (auto, low, medium, high, ultra, unlimited). The video memory the game is told it has: Low 2 GB, Medium 3 GB, High and above 4 GB. Automatic picks by the Mac's memory: 8 GB Low, 16 GB Medium, 24 GB High, more Ultra |
 | Game | Game Mode | on | `SWTOR_GAMEMODE_APP` in `env` |
 | Game | Show Metal HUD | off | `MTL_HUD_ENABLED=1` in `env`, from the next game start. In the game Shift+F9 hides and shows it; Shift+F12, or a triple-click inside the HUD's area (also while it is hidden), opens macOS's own HUD settings panel (Apple's `libMTLHud`, which has no option to turn that off) |
@@ -211,7 +213,9 @@ they differ from releases in four ways:
   d9mt's test switches for the next game starts, without editing `env`: `state-off` (no
   pipeline state cache), `pfv`, `barrier-all`, `clear-keep` (each undoes one of 0.1.1's GPU
   savings; `gpu-old` all three), `vsync-off`, `repro` (`DXVK_CONFIG`
-  `d3d9.reproducibleCommandStream=True`) and `cold=<name>` (an empty shader cache and pipeline
+  `d3d9.reproducibleCommandStream=True`), `cap=<fps>`, `cap-noalign` and `dxvkcap=<fps>` (d9mt's
+  frame cap, its timer without vsync alignment, and DXVK's limiter as before 0.1.3, for
+  comparison; Settings' Frame Rate Limit wins over `cap=` while it is on) and `cold=<name>` (an empty shader cache and pipeline
   archives of their own in `~/Library/Caches/SWTOR on Mac/d9mt-ab/<name>`, d9mt's own caches
   untouched). Each call sets exactly the switches it names; `d9mt-ab.sh` alone shows them,
   `reset` clears them (`--clean` also deletes the cold caches). They are kept in
@@ -291,20 +295,23 @@ both, and Uninstall does too.
 
 ## Reporting problems
 
-1. Choose **SWTOR on Mac > Collect Logs…**. It saves `SWTOR-on-Mac-logs-<date>.zip` to your
-   Desktop (or, without access to the Desktop, to `~/Library/Logs/SWTOR on Mac`) and shows it
-   in Finder.
+1. Choose **SWTOR on Mac > Collect Logs…**. After 10–30 seconds (the menu item says
+   *Collecting Logs…* meanwhile) it saves `SWTOR-on-Mac-logs-<date>.zip` to your Desktop (or,
+   without access to the Desktop, to `~/Library/Logs/SWTOR on Mac`) and shows it in Finder.
 2. Send that zip with a short description of what happened and when to **Pharaphobia on
    Discord** or attach it to a [GitHub issue](https://github.com/jdrly/swtor-on-mac/issues/new/choose).
    Please don't send it to Broadsword or SWTOR customer support: they don't support SWTOR on
    Mac.
 
 The zip holds SWTOR on Mac's logs, `env`, `settings.conf`, `dxvk.conf`,
-`install-manifest.json`, the versions, system information (macOS, chip, memory, displays) and
+`install-manifest.json`, the versions, system information (macOS, chip, memory, displays, the size of macOS's Metal caches for the engine's processes) and
 macOS's crash, hang and spin reports of the last 7 days (from `~/Library/Logs/DiagnosticReports`)
 for the game, Wine, the official launcher and SWTOR on Mac, so you don't have to look for them:
 the newest 20, up to 10 MB together; `system-info.txt` lists which are in the zip and which were
-left out. Your home folder, user name, account
+left out. `gpu-errors.txt` has the GPU errors of the game and Wine from macOS's unified log
+of the last 2 hours (`IOGPUMetalError` counted per process, the last fault lines, the GPU
+driver's events by time and kind, Metal's other errors), since `wine.log` starts anew with every
+game start; other apps' errors are only counted, never named. Your home folder, user name, account
 names and e-mail addresses are replaced, serial numbers and device identifiers are left out,
 and the game's command line (the launcher passes the account on it) is never included. Turn on
 **Settings > Debug Logging** only when asked: it makes the logs much more detailed for the next
@@ -583,7 +590,7 @@ local feed, as in SWGL on Mac.
   0.1.0's: the bridge's source is the same, and `SOURCE_DATE_EPOCH=1792149856` builds it byte
   for byte. 0.1.2's `d3d9.dll` is d9mt main `2a1bc00` built with `SOURCE_DATE_EPOCH=1792457826`,
   the time of `c3f46ce`, which has the same tree: byte for byte the file 0.1.2-dev.2 and dev.3
-  were tested with. 0.1.4 pins main `a779f54`, built with its own commit time.)
+  were tested with. 0.1.4 pins main `b0d4597`, built with its own commit time.)
 - `build.sh` assembles `dist/SWTOR on Mac.app` with Sparkle (pinned download; ad-hoc signed;
   `--install` copies it to /Applications). Needs Xcode 27 (macOS 27 SDK); the app runs on
   macOS 26 and later.
@@ -659,7 +666,7 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 |---|---|---|
 | Wine engine `cx-26.3.0-8` (CrossOver 26.3, Wine 11.0, x86_64 WoW64; the one SWGL on Mac uses) | [athei/wine-build cx-26.3.0-8](https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
 | Sparkle 2.10.0 (bundled) | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
-| d9mt `a779f54` (bundled, `prebuilt/d9mt`; main after jdrly/d9mt#42: the present path's drawable kept until the GPU is done with it (#26), the GPU canary (#27), the PSO key changes (#32–#34, #40; the state cache's mapping version 4), the state cache journal (#35), fixed-function and argument-table fixes (#37, #38)) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/a779f546b530f34b13b494652dae12d8c9563398) | see `prebuilt/d9mt` |
+| d9mt `b0d4597` (bundled, `prebuilt/d9mt`; main after jdrly/d9mt#47: the frame cap `D9MT_FPS_CAP` (#47), and before it the present path's drawable kept until the GPU is done with it (#26), the GPU canary (#27), the PSO key changes (#32–#34, #40; the state cache's mapping version 4), the state cache journal (#35), fixed-function and argument-table fixes (#37, #38)) | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/b0d4597b4ac98166e5e96b0a4175591110f12e8b) | see `prebuilt/d9mt` |
 | The engine's Wine sources (for the Mac driver, `prebuilt/winemac`, and `ntdll.so`, `prebuilt/ntdll`): athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0) (codeload tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006 (only for configuring that build) | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
