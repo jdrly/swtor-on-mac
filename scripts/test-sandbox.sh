@@ -1040,6 +1040,30 @@ n=20; for f in $small; do
   n=$((n + 1))
 done
 fake_report wine-2026-10-10-090000.ips $((8 * 24 * 60))
+# GPU errors: a fake unified log ($SANDBOX/bin/log, which collect-logs.sh reads in a sandbox):
+# the game's and Wine's page faults, another app's (its name must stay out), Metal's full
+# shader cache, the GPU driver's own lines (one naming another app and someone's folder, one
+# naming Wine: only their time, sender and kind come through), and 30 other Metal errors
+mkdir -p "$SANDBOX/bin"
+cat >"$SANDBOX/bin/log" <<EOF
+#!/bin/bash
+[ "\$1 \$2 \$3" = "show --last 2h" ] || exit 2
+echo "Timestamp               Ty Process[PID:TID]"
+echo "2026-10-20 19:04:10.100 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+echo "2026-10-20 19:04:10.101 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+echo "2026-10-20 19:05:00.000 E  swtor.exe[4300:1b] (IOGPU) IOGPUMetalError: <private>"
+echo "2026-10-20 19:05:01.000 E  Secret Diary[777:1c] (IOGPU) IOGPUMetalError: <private>"
+echo "2026-10-20 19:06:00.000 E  wine[4242:1e] (Metal) mdb_txn_commit error: MDB_MAP_FULL: Environment mapsize limit reached"
+echo "2026-10-20 19:07:00.000 Df kernel[0:2f] (AGXG14X) GPU restart, $HOME/x"
+echo "2026-10-20 19:07:01.000 E  kernel[0:2f] (AGXG14X) AGX: page fault in Secret Diary[777], /Users/AnotherPerson/private-project"
+echo "2026-10-20 19:07:02.000 E  kernel[0:2f] (AGX) IOGPUMetalError: timeout of wine64-preloader[4242]"
+for i in \$(seq 10 39); do echo "2026-10-20 19:08:00.\$i E  wine[4242:1f] (Metal) error \$i"; done
+EOF
+chmod +x "$SANDBOX/bin/log"
+# Metal's caches of the engine's processes in the sandbox's user cache dir: two gpuarchiver
+# folders of 1 MB each, no com.apple.metal
+GA="$SANDBOX/usercache/com.codeweavers.CrossOver.wineloader/com.apple.gpuarchiver"
+mkdir -p "$GA/a" "$GA/b" && dd if=/dev/zero of="$GA/a/x" bs=1024 count=1024 2>/dev/null && cp "$GA/a/x" "$GA/b/x"
 zip=$("$APP/Contents/Resources/collect-logs.sh" 2>"$SANDBOX/collect.err" || true)
 check "logs: zip on the sandbox Desktop" test -f "$zip" -a "${zip#"$H/Desktop/"}" != "$zip"
 if [ -f "$zip" ]; then
@@ -1055,7 +1079,70 @@ if [ -f "$zip" ]; then
   check "logs: crash reports redacted (home, user name, keys, e-mail)" eval '! grep -rq -e "$HOME" -e "/Users/$(id -un)/" -e SECRETKEY123 -e player@example.com "$CR" && grep -q "\"procPath\" : \"~/Library/Application Support/SWTOR on Mac/engine/bin/wine\"" "$CR/swtor.exe-2026-10-18-120000.ips"'
   check "logs: system info lists the crash reports, the newest first" eval '[ "$(sed -n "/^Crash reports/,/^\$/p" "$SI" | sed -n "2s/^  \([^ ]*\) .*/\1/p")" = swtor.exe-2026-10-18-120000.ips ] && [ "$(grep -c "^  [^l].*KB)\$" "$SI")" = 20 ]'
   check "logs: system info names the ones left out and why" eval 'grep -q "^  left out: wineserver-2026-10-18-110004.ips (over 10 MB together)" "$SI" && grep -q "^  left out: Star Wars - The Old Republic Launcher-2026-10-18-110005.ips (3500 KB, too large)" "$SI" && [ "$(grep -c "(more than 20 reports)" "$SI")" = 5 ]'
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  GE=$(echo "$SANDBOX"/zip/*/gpu-errors.txt)
+  check "logs: GPU errors counted per game and Wine process, other apps only as a number" eval 'grep -q "^IOGPUMetalError .*: 3 in the game and Wine, 1 in other apps\$" "$GE" && grep -q "^  wine (pid 4242): 2, " "$GE" && grep -q "^  swtor.exe (pid 4300): 1, " "$GE" && ! grep -q "Secret Diary" "$GE"'
+  check "logs: GPU errors: the fault lines, the last 20 other Metal errors, the full shader cache only counted" eval '[ "$(grep -c "IOGPUMetalError: <private>" "$GE")" = 3 ] && [ "$(grep -c "(Metal) error " "$GE")" = 20 ] && grep -q "(Metal) error 39\$" "$GE" && ! grep -q "(Metal) error 19\$" "$GE" && ! grep -q "mdb_txn" "$GE" && grep -q "^Metal.s archive usage index full (MDB_MAP_FULL) in the game and Wine: 1 lines; compiled shaders are still cached\$" "$GE"'
+  check "logs: GPU errors: the GPU driver's lines only as time, sender and kind (no other app, no folder)" eval 'grep -qx "2026-10-20 19:07:00.000 Df kernel (AGXG14X): GPU restart" "$GE" && grep -qx "2026-10-20 19:07:01.000 E kernel (AGXG14X): GPU fault" "$GE" && grep -qx "2026-10-20 19:07:02.000 E kernel (AGX): GPU timeout, names the game or Wine" "$GE" && ! grep -q -e AnotherPerson -e private-project -e "~/x" "$GE"'
+  check "logs: system info has the GPU error count" grep -q "^  IOGPUMetalError .*: 3 in the game and Wine, 1 in other apps\$" "$SI"
+  check "logs: system info has the sizes of Metal's caches for the engine (2 archives of 2 MB, no com.apple.metal)" eval 'grep -qx "  com.apple.gpuarchiver: 2.0 MB, 2 entries" "$SI" && grep -qx "  com.apple.metal: none" "$SI"'
 fi
+# a query that ignores TERM: ended with KILL after the limit and the grace time, and said so
+cat >"$SANDBOX/bin/log" <<'EOF'
+#!/bin/bash
+trap '' TERM
+echo $$ >"${0%/*}/log.pid"
+echo "2026-10-20 19:04:10.100 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+exec sleep 60
+EOF
+mkdir -p "$SANDBOX/zip-timeout"
+t0=$(date +%s)
+zip=$(SWTOR_ON_MAC_GPU_TIMEOUT=2 "$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-timeout" 2>>"$SANDBOX/collect.err" || true)
+t1=$(date +%s)
+check "logs: a query that ignores TERM is ended (2 s limit + 5 s grace: $((t1 - t0)) s)" test -f "$zip" -a $((t1 - t0)) -lt 30
+if [ -f "$zip" ]; then
+  unzip -q -o "$zip" -d "$SANDBOX/zip-timeout"
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  GE=$(echo "$SANDBOX"/zip-timeout/*/gpu-errors.txt)
+  check "logs: GPU errors say the query ran out of time, with what came until then" eval 'grep -qx "(the query ran out of time: what came until then)" "$GE" && grep -q "^IOGPUMetalError .*: 1 in the game and Wine\$" "$GE"'
+fi
+check "logs: no query left running" eval '[ -s "$SANDBOX/bin/log.pid" ] && ! kill -0 "$(cat "$SANDBOX/bin/log.pid")" 2>/dev/null'
+# a query that ends with status 0 on TERM: still out of time (what it wrote may be cut short)
+cat >"$SANDBOX/bin/log" <<'EOF'
+#!/bin/bash
+trap 'kill "$s"; exit 0' TERM
+echo "2026-10-20 19:04:10.100 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+sleep 60 & s=$!
+wait "$s"
+EOF
+mkdir -p "$SANDBOX/zip-term0"
+zip=$(SWTOR_ON_MAC_GPU_TIMEOUT=2 "$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-term0" 2>>"$SANDBOX/collect.err" || true)
+if [ -f "$zip" ]; then
+  unzip -q -o "$zip" -d "$SANDBOX/zip-term0"
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  GE=$(echo "$SANDBOX"/zip-term0/*/gpu-errors.txt)
+fi
+check "logs: a query that ends with status 0 on TERM: GPU errors say it ran out of time" eval '[ -f "$zip" ] && grep -qx "(the query ran out of time: what came until then)" "$GE"'
+# a query that ends while the watchdog hasn't started its sleep yet (an exported sleep function
+# holds it for 3 s first): the watchdog is ended too, at once, and the file has no time-out note
+cat >"$SANDBOX/bin/log" <<'EOF'
+#!/bin/bash
+echo "2026-10-20 19:04:10.100 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+EOF
+mkdir -p "$SANDBOX/zip-early"
+t0=$(date +%s)
+# shellcheck disable=SC2016 # (the function is the inner bash's)
+zip=$(SWTOR_ON_MAC_GPU_TIMEOUT=47 bash -c 'sleep() { local end=$((SECONDS + 3)); while [ "$SECONDS" -lt "$end" ]; do :; done; command sleep "$@"; }
+  export -f sleep; exec "$@"' - "$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-early" 2>>"$SANDBOX/collect.err" || true)
+t1=$(date +%s)
+check "logs: a query that ends before the watchdog's sleep starts ends the watchdog too ($((t1 - t0)) s, limit 47 s)" test -f "$zip" -a $((t1 - t0)) -lt 30
+if [ -f "$zip" ]; then
+  unzip -q -o "$zip" -d "$SANDBOX/zip-early"
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  GE=$(echo "$SANDBOX"/zip-early/*/gpu-errors.txt)
+  check "logs: GPU errors complete, no time-out note" eval '! grep -q "ran out of time" "$GE" && grep -q "^IOGPUMetalError .*: 1 in the game and Wine\$" "$GE"'
+fi
+check "logs: no watchdog sleep left" eval '! pgrep -fx "sleep 47" >/dev/null'
 # the Game Mode links the wrapper would have made at game start ("wine", or "swtor.exe" for a
 # start.exe command)
 pre="$SOM/engine/lib/wine/x86_64-unix/wine"; m=$(stat -f '%Fm' "$pre")
@@ -1171,7 +1258,10 @@ fetch_mode alwaysdrop alwaysdrop fetch-stopped
 check "download: a connection that keeps dropping (both addresses): stopped at 192 of 224 MB, the part kept" eval 'grep -q "^@error The download of Wine engine stopped at 192 of 224 MB" "$SANDBOX/fetch-stopped.txt" && [ "$(stat -f %z "$DLC/$ENGINE_FILE.part")" = 201326592 ]'
 fetch_mode ok ok fetch-resumed
 check "download: the next try continues where it stopped" eval 'grep -q "^@done " "$SANDBOX/fetch-resumed.txt" && grep -q "resuming at 201326592 of" "$SANDBOX/fetch-resumed.log" && [ ! -e "$DLC/$ENGINE_FILE.part" ]'
-check "download: only the sandbox may name another server (the real one stays on the pinned URLs)" eval '(unset SWTOR_ON_MAC_ROOT; SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$SOMSH" fetch-engine 2>&1 | piped "verified download in the cache\|download $(val ENGINE_URL "$SOMSH")")'
+# (outside the sandbox: against the real home, as a dry run; what it said is kept in
+# fetch-real.txt with the time, for a look if it fails)
+(unset SWTOR_ON_MAC_ROOT; date '+%F %T'; SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$SOMSH" fetch-engine 2>&1 && echo "status 0" || echo "status $?") >"$SANDBOX/fetch-real.txt" 2>&1 || true
+check "download: only the sandbox may name another server (the real one stays on the pinned URLs)" grep -q "verified download in the cache\|download $(val ENGINE_URL "$SOMSH")" "$SANDBOX/fetch-real.txt"
 kill "$fserver" 2>/dev/null || true; wait "$fserver" 2>/dev/null || true
 rm -rf "$DLC"
 
