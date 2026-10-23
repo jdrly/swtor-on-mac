@@ -44,6 +44,9 @@
 #   d9mt's startup lines: its GPU path (lossless texture compression, the end-of-pass barrier,
 #             clears that skip stores; d9mt-ab.sh switches them back) and DXVK_CONFIG
 #   the wrapper's "d9mt-ab:" line: development builds' A/B switches (d9mt-ab.sh)
+#   the wrapper's "frame rate limit:" line (0.1.3 and later): the Frame Rate Limit setting and,
+#             with "Only on battery", the power source at the start; d9mt's "frame cap" line:
+#             how it caps (every Nth refresh, the timer, or off because vsync caps already)
 #   D3D9 SM3 hazard  (d9mt 6fa5df7 and later) a shader with the patterns its converter fix
 #             covers, once per shader
 # Also in Collect Logs (session-report.txt). Runs under macOS's /bin/bash 3.2 and awk.
@@ -94,6 +97,9 @@ analyze() {
     /D9MT: attachment load\/store optimization off/ { attoff = 1 }
     /D9MT: memory profile/ { mp = $0; sub(/.*memory profile /, "", mp); sub(/:.*/, "", mp) }
     /^SWTOR on Mac d9mt-ab: / { ab = $0; sub(/^SWTOR on Mac d9mt-ab: /, "", ab) }
+    /^SWTOR on Mac frame rate limit: / { fpsl = $0; sub(/^SWTOR on Mac frame rate limit: /, "", fpsl) }
+    # d9mt'"'"'s plan, logged again when the refresh rate or vsync changes: the last one counts
+    /D9MT: .* frame cap [0-9]+ fps: / { fcap = $0; sub(/.* frame cap /, "", fcap); sub(/ \[[0-9]+ earlier lines suppressed\]$/, "", fcap) }
     # d9mt'"'"'s GPU path (d9mt 6fa5df7 and later; d9mt-ab.sh switches it back to the old one)
     /D9MT: PixelFormatView only on block-compressed textures/ { gpfv = "lossless compression on" }
     /D9MT: PixelFormatView on every texture/ { gpfv = "lossless compression off (D9MT_TEX_PFV=1)" }
@@ -196,7 +202,7 @@ analyze() {
         if (parts[i] !~ /=/) continue
         name = parts[i]; sub(/=.*/, "", name)
         v = parts[i]; sub(/^[^=]*=[0-9]*\//, "", v); sub(/ms.*/, "", v)
-        if (name == "present" || name == "latencyWait" || name == "bgSleep") continue   # mostly vsync/latency waits, the background sleep
+        if (name == "present" || name == "latencyWait" || name == "bgSleep" || name == "capSleep") continue   # mostly vsync/latency waits, the background and frame cap sleeps
         cat[name] += num(v)
       }
       if (rw > 0) cat["renderWait(compiles)"] += rw
@@ -340,6 +346,8 @@ analyze() {
       if (mp != "") print "memory_profile=" mp
       if (budget != "") print "wait_budget=" budget
       if (ab != "") print "ab=" ab
+      if (fpsl != "") print "fps_limit=" fpsl
+      if (fcap != "") print "fps_cap=" fcap
       if (gpfv != "" || gbar != "" || gclr != "") {
         g = gpfv
         if (gbar != "") g = g (g == "" ? "" : ", ") gbar
@@ -462,6 +470,8 @@ report() {
   row "Memory profile" memory_profile
   row "Pipeline wait budget" wait_budget
   row "A/B switches (d9mt-ab.sh)" ab
+  row "Frame Rate Limit" fps_limit
+  row "  d9mt's frame cap" fps_cap
   row "GPU path" gpu_path
   row "DXVK_CONFIG" config_env
   row "Pass splits per frame" split

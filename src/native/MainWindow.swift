@@ -413,7 +413,7 @@ struct StatusTiles: View {
     switch installer.wrapper {
     case "ours":
       return Tile(id: "Launcher hook", symbol: "link",
-                  detail: installer.status["watch_agent"] == "yes" ? "Active · repairs itself" : "Active", tone: .good)
+                  detail: "Active · checked when SWTOR on Mac opens", tone: .good)
     case "replaced" where installer.installed:
       return Tile(id: "Launcher hook", symbol: "link.badge.plus", detail: "Removed by a launcher update", tone: .warning)
     case "replaced":
@@ -493,7 +493,7 @@ struct Highlights: View {
         item("gamecontroller.fill", "Game Mode", "macOS gives the game priority while it is in full screen.")
         }
         GridRow {
-        item("arrow.triangle.2.circlepath", "Survives launcher updates", "It hooks itself back in when the launcher updates its Wine.")
+        item("arrow.triangle.2.circlepath", "After launcher updates", "Hooks itself back in the next time you open SWTOR on Mac after a launcher update.")
         item("arrow.uturn.backward.circle.fill", "Fully reversible", "Uninstall puts the official app back exactly as Broadsword ships it.")
         }
       }
@@ -756,7 +756,7 @@ struct PlayButton: View {
   let prominent: Bool
 
   var body: some View {
-    let play = installer.playAction
+    let play = installer.playButtonAction
     let button = Button(action: action) {
       Group {
         if installer.launching {

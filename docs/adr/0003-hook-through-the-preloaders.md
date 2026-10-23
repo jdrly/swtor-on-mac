@@ -36,8 +36,10 @@ Players must be able to go back to exactly what Broadsword ships.
 
 ## Consequences
 
-- A launcher update that replaces its Wine also removes the hook; the launchd job puts it back,
-  or the window offers *Repair the Launcher Hook* (README, *Launcher updates*).
+- A launcher update that replaces its Wine also removes the hook. The app's hook check puts it
+  back the next time the app opens, or the window offers *Repair the Launcher Hook* (README,
+  *Launcher updates*; [ADR 0005](0005-no-background-helper.md), which replaced the launchd job
+  that did this up to 0.1.3).
 - Every Wine process the launcher starts goes through the wrapper, not only the game's; the
   wrapper has to handle `mac_wine`'s calls and the Wine session correctly (README, *How it
   works*).

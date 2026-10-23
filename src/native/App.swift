@@ -45,7 +45,7 @@ final class Installer {
     Step(id: 3, title: "Install the d9mt graphics driver",
          detail: "The game's Direct3D 9, straight to Metal", symbol: "cpu.fill"),
     Step(id: 4, title: "Hook into the SWTOR launcher",
-         detail: "Plus Game Mode, and a repair after launcher updates", symbol: "link"),
+         detail: "Plus Game Mode; the app checks the hook each time it opens", symbol: "link"),
   ]
   static let uninstallSteps = [
     Step(id: 1, title: "Restore the launcher's own Wine",
@@ -90,7 +90,13 @@ final class Installer {
 
   // MARK: Derived state
 
-  var isBusy: Bool { if case .working = phase { true } else { false } }
+  // An install or uninstall runs, or the hook check (rehook), which can change Broadsword's
+  // Wine folder too: quitting and app updates wait for either, and nothing else starts meanwhile.
+  var isBusy: Bool { rehooking || isOperating }
+  var isOperating: Bool { if case .working = phase { true } else { false } }
+  // Quit was chosen while the hook check ran: the app quits again once the check has finished
+  // (the first quit is cancelled, not deferred: see applicationShouldTerminate).
+  var terminateWhenIdle = false
   var officialPresent: Bool { status["official_app"] == "yes" && status["official_wine"] == "yes" }
   var rosetta: Bool { status["rosetta"] == "yes" }
   var installed: Bool { status["installed"] == "yes" }
@@ -104,6 +110,8 @@ final class Installer {
   var leftovers: Bool { busy == "leftovers" }
   // ending them (End Leftover Wine Processes)
   var endingLeftovers = false
+  // som.sh rehook runs (the launcher hook check when the app opens, and before Play)
+  var rehooking = false
   // the launcher or the game runs (NSWorkspace; the Play button brings it to the front), and
   // the Play button is opening the official app (Play.swift)
   var runningLauncher = false
@@ -161,19 +169,58 @@ final class Installer {
   func refresh(then: (() -> Void)? = nil) {
     guard !isBusy else { then?(); return }
     Task {
-      let values = Installer.parseStatus(await Installer.capture(script: script, arguments: ["status"]))
-      status = values
-      let running = Installer.runningSWTOR(values)
-      runningLauncher = running.launcher != nil
-      runningGame = running.game != nil
-      if launching && (runningLauncher || runningGame) { launchEnded(nil, error: nil) }
-      if let version = values["update_available"], !version.isEmpty, let dir = values["app_dir"] {
-        // once: the file goes, the app's own updater takes it from here
-        try? FileManager.default.removeItem(atPath: dir + "/update-available")
-        if Installer.isNewer(version, than: appVersion) { onUpdateAvailable?(version) }
-      }
+      applyStatus(Installer.parseStatus(await Installer.capture(script: script, arguments: ["status"])))
       then?()
     }
+  }
+
+  // A fresh som.sh status: the window's state, running SWTOR apps, a newer version found
+  private func applyStatus(_ values: [String: String]) {
+    status = values
+    let running = Installer.runningSWTOR(values)
+    runningLauncher = running.launcher != nil
+    runningGame = running.game != nil
+    if launching && (runningLauncher || runningGame) { launchEnded(nil, error: nil) }
+    if let version = values["update_available"], !version.isEmpty, let dir = values["app_dir"] {
+      // once: the file goes, the app's own updater takes it from here
+      try? FileManager.default.removeItem(atPath: dir + "/update-available")
+      if Installer.isNewer(version, than: appVersion) { onUpdateAvailable?(version) }
+    }
+  }
+
+  // The launcher hook check, with no background helper (nothing of SWTOR on Mac runs while the
+  // app is closed): when the app opens, and before Play SWTOR if the hook is gone. som.sh
+  // rehook hooks the wrapper back in if a launcher update replaced it, and leaves it alone
+  // while an install runs, another wrapper is there or the launcher is changing its Wine right
+  // now; the window then shows the hook as it is. then: som.sh's answer ("@done rehooked",
+  // "@done in place", "@notice changing", ...), once the new status is in.
+  func rehook(then: ((String) -> Void)? = nil) {
+    guard !isBusy else { then?(""); return }
+    rehooking = true
+    let script = script
+    Task {
+      // the check and the fresh status both inside the reservation: nothing else starts, and
+      // a quit or an app update waits, until both have finished
+      let answer = Installer.rehookAnswer(await Installer.capture(script: script, arguments: ["rehook"]))
+      let values = Installer.parseStatus(await Installer.capture(script: script, arguments: ["status"]))
+      applyStatus(values)
+      rehooking = false
+      if terminateWhenIdle {
+        terminateWhenIdle = false
+        NSApp.terminate(nil)
+        return
+      }
+      // (in the same main-actor turn as the release: no operation can start in between)
+      then?(answer)
+      onIdle?()
+    }
+  }
+
+  // som.sh rehook's last "@done", "@notice" or "@error" line
+  nonisolated static func rehookAnswer(_ output: String) -> String {
+    output.split(separator: "\n").last {
+      $0.hasPrefix("@done ") || $0.hasPrefix("@notice ") || $0.hasPrefix("@error ")
+    }.map(String.init) ?? ""
   }
 
   // End Leftover Wine Processes: som.sh ends them if nothing else of SWTOR runs. Returns its
@@ -630,9 +677,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-  // Not while installing or uninstalling: the script finishes or rolls back first.
+  // Not while installing or uninstalling: the script finishes or rolls back first. The hook
+  // check takes a moment: this quit is cancelled and the app quits again once the check has
+  // finished (Installer.rehook). Not .terminateLater: AppKit then waits in a modal run loop in
+  // which the check's main-actor continuation never runs, so the app would hang.
   @MainActor func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     guard let installer, installer.isBusy else { return .terminateNow }
+    if installer.rehooking, !installer.isOperating {
+      installer.terminateWhenIdle = true
+      return .terminateCancel
+    }
     let alert = NSAlert()
     alert.messageText = "SWTOR on Mac is still working"
     alert.informativeText = "Wait until it has finished, or press Cancel in the window first."
@@ -653,6 +707,10 @@ struct SWTORonMacApp: App {
     // what the Play button would do, for tests (Play.swift)
     if CommandLine.arguments.contains("--play-target") {
       Installer.printPlayTarget()
+      exit(0)
+    }
+    if CommandLine.arguments.contains("--play-check") {
+      Installer.printPlayTarget(check: true)
       exit(0)
     }
     // whether an app counts as the official launcher, for tests
@@ -687,7 +745,9 @@ struct SWTORonMacApp: App {
           }
           installer.onSWTORQuit = { [settings] in settings.reload() }
           installer.observe()
-          installer.refresh()
+          // the launcher hook check (a launcher update may have replaced it while the app was
+          // closed); it refreshes the status afterwards
+          installer.rehook()
           settings.reload()
           // (not for the UI test script, which drives the window in the background)
           switch ProcessInfo.processInfo.environment["SWTOR_ON_MAC_UI_TEST"] {
