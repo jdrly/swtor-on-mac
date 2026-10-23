@@ -94,7 +94,8 @@ final class Installer {
   // Wine folder too: quitting and app updates wait for either, and nothing else starts meanwhile.
   var isBusy: Bool { rehooking || isOperating }
   var isOperating: Bool { if case .working = phase { true } else { false } }
-  // Quit was chosen while the hook check ran: it goes ahead once the check has finished.
+  // Quit was chosen while the hook check ran: the app quits again once the check has finished
+  // (the first quit is cancelled, not deferred: see applicationShouldTerminate).
   var terminateWhenIdle = false
   var officialPresent: Bool { status["official_app"] == "yes" && status["official_wine"] == "yes" }
   var rosetta: Bool { status["rosetta"] == "yes" }
@@ -206,7 +207,7 @@ final class Installer {
       rehooking = false
       if terminateWhenIdle {
         terminateWhenIdle = false
-        NSApp.reply(toApplicationShouldTerminate: true)
+        NSApp.terminate(nil)
         return
       }
       // (in the same main-actor turn as the release: no operation can start in between)
@@ -669,12 +670,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
   // Not while installing or uninstalling: the script finishes or rolls back first. The hook
-  // check takes a moment: the quit waits for it (Installer.rehook replies).
+  // check takes a moment: this quit is cancelled and the app quits again once the check has
+  // finished (Installer.rehook). Not .terminateLater: AppKit then waits in a modal run loop in
+  // which the check's main-actor continuation never runs, so the app would hang.
   @MainActor func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     guard let installer, installer.isBusy else { return .terminateNow }
     if installer.rehooking, !installer.isOperating {
       installer.terminateWhenIdle = true
-      return .terminateLater
+      return .terminateCancel
     }
     let alert = NSAlert()
     alert.messageText = "SWTOR on Mac is still working"
