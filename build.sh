@@ -155,6 +155,9 @@ install -m 755 scripts/session-report.sh "$R/session-report.sh"
 # Development builds: d9mt's A/B switches for test sessions (only their env reads its file)
 [ "$CHANNEL" = release ] || install -m 755 scripts/d9mt-ab.sh "$R/d9mt-ab.sh"
 install -m 644 src/wine-wrapper.sh "$R/wine-wrapper.sh"
+# The site's typefaces (Brand.swift; Info.plist's ATSApplicationFontsPath registers them)
+mkdir -p "$R/Fonts"
+install -m 644 src/fonts/Unbounded-Variable.ttf src/fonts/JetBrainsMono-Variable.ttf "$R/Fonts/"
 install -m 644 src/dxvk.conf "$R/dxvk.conf"
 
 # Helpers the wrapper runs from Broadsword's Wine/bin-real. Universal: the launcher and its
@@ -195,6 +198,8 @@ cp "$SPARKLE/LICENSE" "$L/sparkle/LICENSE"
 mkdir -p "$L/winemac"
 cp "$WM/COPYING.LIB" "$WM/LICENSE" "$WM/VERSION" "$L/winemac/"
 for p in $WINEMAC_PATCHES; do cp "patches/$p.patch" "$L/winemac/"; done
+mkdir -p "$L/fonts"
+cp src/fonts/Unbounded-OFL.txt src/fonts/JetBrainsMono-OFL.txt "$L/fonts/"
 mkdir -p "$L/ntdll"
 cp "$NT/COPYING.LIB" "$NT/LICENSE" "$NT/VERSION" "patches/$NTDLL_PATCH.patch" "$L/ntdll/"
 cat >"$L/README.txt" <<EOF
@@ -212,6 +217,10 @@ licenses: d9mt/THIRD_PARTY_NOTICES.md and d9mt/LICENSES/.
 
 Sparkle $SPARKLE_VERSION (app updates), https://sparkle-project.org: MIT-style license, see
 sparkle/LICENSE.
+
+Fonts/: Unbounded (https://github.com/googlefonts/unbounded) and JetBrains Mono
+(https://github.com/JetBrains/JetBrainsMono), unmodified: SIL Open Font License 1.1, see
+fonts/Unbounded-OFL.txt and fonts/JetBrainsMono-OFL.txt.
 
 wine/: Wine's Mac driver (dlls/winemac.drv: winemac.so, the x86_64 unix side, and its PE sides
 x86_64-windows/ and i386-windows/winemac.drv) from the sources of the app's Wine engine

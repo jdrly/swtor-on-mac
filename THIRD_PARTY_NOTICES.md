@@ -20,11 +20,13 @@ SWTOR on Mac: they come from the official install from [swtor.com](https://www.s
 | Inside d9mt's binaries: DXVK (zlib/libpng), dxbc-spirv (MIT), LLVM 15.0.7 (Apache-2.0 WITH LLVM-exception, with its regex and ConvertUTF notices), mingw-w64 runtime and winpthreads (ZPL-2.1 / MIT-style / BSD) | as above | see d9mt's notices | `Resources/Licenses/d9mt/THIRD_PARTY_NOTICES.md`, `Resources/Licenses/d9mt/LICENSES/` |
 | **Sparkle** 2.10.0, <https://sparkle-project.org> (app updates; with bsdiff, sais, and other notices) | `Contents/Frameworks/Sparkle.framework` | MIT | `Resources/Licenses/sparkle/LICENSE` |
 | **Wine's Mac driver** (`dlls/winemac.drv`: the x86_64 unix side and the x86_64 and i386 PE sides) from the Wine sources of the app's engine: CodeWeavers' CrossOver 26.3 sources (<https://www.codeweavers.com/crossover/source>) with athei's patches, [athei/wine `d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0) (codeload tar.gz sha256 `7002111d…746e`), changed by [`patches/winemac-physical-keys.patch`](patches/winemac-physical-keys.patch) (the PhysicalKeyboard option), [`winemac-swgl-relative-mouse.patch`](patches/winemac-swgl-relative-mouse.patch) and [`winemac-swgl-input-thread.patch`](patches/winemac-swgl-input-thread.patch) (SWGL on Mac's mouse-look patches) and [`winemac-swtor-mouse.patch`](patches/winemac-swtor-mouse.patch) (raw mouse-look for SWTOR), in that order, and built by [`scripts/build-winemac.sh`](scripts/build-winemac.sh) | `Contents/Resources/wine/winemac.so`, `wine/x86_64-windows/winemac.drv`, `wine/i386-windows/winemac.drv` | LGPL-2.1-or-later. Complete source: those sources plus the patches (also in the app) | `Resources/Licenses/winemac/COPYING.LIB`, `LICENSE`, the four `winemac-*.patch` |
+| **Unbounded** (variable, `wght` 200 to 900), copyright 2022 The Unbounded Project Authors, <https://github.com/googlefonts/unbounded>, from [google/fonts `ofl/unbounded`](https://github.com/google/fonts/tree/main/ofl/unbounded) (`Unbounded[wght].ttf`, sha256 `323b511b…2c3f`), unmodified | `Contents/Resources/Fonts/Unbounded-Variable.ttf` | SIL Open Font License 1.1 | `Resources/Licenses/fonts/Unbounded-OFL.txt` |
+| **JetBrains Mono** (variable, `wght` 100 to 800), copyright 2020 The JetBrains Mono Project Authors, <https://github.com/JetBrains/JetBrainsMono>, from [google/fonts `ofl/jetbrainsmono`](https://github.com/google/fonts/tree/main/ofl/jetbrainsmono) (`JetBrainsMono[wght].ttf`, sha256 `48715a42…feda`), unmodified | `Contents/Resources/Fonts/JetBrainsMono-Variable.ttf` | SIL Open Font License 1.1 | `Resources/Licenses/fonts/JetBrainsMono-OFL.txt` |
 | **Wine's ntdll** (`dlls/ntdll`: the x86_64 unix side, `ntdll.so`) from the same Wine sources of the app's engine ([athei/wine `d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0)), changed by [`patches/ntdll-msync-alert-fd.patch`](patches/ntdll-msync-alert-fd.patch) (with msync, an exiting thread no longer closes an unrelated file descriptor) and built by [`scripts/build-ntdll.sh`](scripts/build-ntdll.sh) | `Contents/Resources/wine/ntdll.so` | LGPL-2.1-or-later. Complete source: those sources plus the patch (also in the app) | `Resources/Licenses/ntdll/COPYING.LIB`, `LICENSE`, `ntdll-msync-alert-fd.patch` |
 
 The same d9mt files and license texts are in this repository under [`prebuilt/d9mt`](prebuilt/d9mt)
 (built by `scripts/build-d9mt.sh`), the Mac driver's under [`prebuilt/winemac`](prebuilt/winemac)
-(built by `scripts/build-winemac.sh`); Sparkle is downloaded by `build.sh` at a pinned version
+(built by `scripts/build-winemac.sh`), the fonts and their licenses under [`src/fonts`](src/fonts); Sparkle is downloaded by `build.sh` at a pinned version
 and sha256.
 
 ## Downloaded at install time (not in the app, not redistributed)
@@ -49,6 +51,7 @@ prefix (Wine's own is kept as `d3d9.dll.wine`).
 
 ## Trademarks
 
-Star Wars: The Old Republic and SWTOR are trademarks of their respective owners. SWTOR on Mac
-is an unofficial community project, not made, endorsed or supported by Broadsword Games,
-Electronic Arts, Lucasfilm or Disney.
+SWTOR on Mac is an unofficial fan project and is not affiliated with or endorsed by Lucasfilm,
+Disney, Electronic Arts or Broadsword Online Games. STAR WARS is a registered trademark of
+Lucasfilm Ltd. Star Wars: The Old Republic and SWTOR are trademarks of their respective owners.
+Mac is a trademark of Apple Inc.

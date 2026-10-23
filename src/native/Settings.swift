@@ -195,6 +195,7 @@ struct SettingsView: View {
       }
       .accessibilityLabel("Settings sections")
       .focused($sidebarFocused)
+      .safeAreaInset(edge: .bottom, spacing: 0) { SidebarBrand() }
       .toolbar(removing: .sidebarToggle)
       .navigationSplitViewColumnWidth(min: 180, ideal: 190, max: 260)
     } detail: {
@@ -402,5 +403,40 @@ struct SettingsView: View {
         }
       }
     }
+  }
+}
+
+// The foot of the Settings sidebar: the wordmark small, and the versions (selectable, for bug
+// reports). The rest of the window is a stock macOS settings window.
+struct SidebarBrand: View {
+  private var version: String {
+    Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Divider()
+      HStack(alignment: .lastTextBaseline, spacing: 7) {
+        Text("SWTOR")
+          .font(.display(16, relativeTo: .headline))
+          .tracking(-0.6)
+          .foregroundStyle(Brand.fg)
+        Text("ON MAC")
+          .font(.display(8.5, .regular, relativeTo: .caption2))
+          .tracking(2.4)
+          .foregroundStyle(Brand.accent)
+      }
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("SWTOR on Mac")
+      Text(([version] + [AppActions.componentVersions().components(separatedBy: " · ").first ?? ""])
+        .filter { !$0.isEmpty }.joined(separator: " · "))
+        .font(.mono(9, .medium))
+        .tracking(0.6)
+        .foregroundStyle(Brand.fg3)
+        .textSelection(.enabled)
+        .lineLimit(1)
+    }
+    .padding(.horizontal, 18)
+    .padding(.bottom, 14)
   }
 }
