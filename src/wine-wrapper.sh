@@ -53,6 +53,25 @@ update_check() {
   fi
 }
 
+# Frame Rate Limit (Settings): the cap d9mt gets for the game, D9MT_FPS_CAP. With "Only on
+# battery", only if the Mac draws from its battery now: one look at macOS's power sources
+# (pmset reads IOKit's), when the game starts; nothing watches it while the game runs.
+# Sets fps_note for wine.log. (SWTOR_PMSET: a stand-in for tests.)
+fps_limit() {
+  fps_note=""
+  case "${SWTOR_FPS_LIMIT:-0}" in 0|off|"") return 0 ;; esac
+  if [ "$SWTOR_FPS_LIMIT_BATTERY" = 1 ]; then
+    case "$("${SWTOR_PMSET:-/usr/bin/pmset}" -g ps 2>/dev/null | sed -n 1p)" in
+      *"'Battery Power'"*) fps_note="$SWTOR_FPS_LIMIT fps (only on battery: on battery)" ;;
+      *"'AC Power'"*) fps_note="off (only on battery: on AC power)"; return 0 ;;
+      *) fps_note="off (only on battery: battery power not confirmed)"; return 0 ;;
+    esac
+  else
+    fps_note="$SWTOR_FPS_LIMIT fps"
+  fi
+  export D9MT_FPS_CAP="$SWTOR_FPS_LIMIT"
+}
+
 case " $* " in
   *swtor.exe*)
     mkdir -p "$LOG_DIR"
@@ -94,6 +113,7 @@ if [ -n "$SWTOR_ENGINE" ]; then
     *swtor.exe*)
       # Debug Logging: Wine debug channels for the game only (RAWMOUSE, THREADCPU lines)
       [ -z "$SWTOR_GAME_WINEDEBUG" ] || export WINEDEBUG="$SWTOR_GAME_WINEDEBUG"
+      fps_limit
       { date; env | grep -E '^(WINE|DYLD_|SWTOR_|DXVK_|MTL_|D9MT_)' | sort; } > "$LOG_DIR/effective-env.txt"
       # Is there a newer SWTOR on Mac? At most once a day, in a detached process (the game
       # does not wait for it; offline it just fails).
@@ -109,6 +129,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
         echo "SWTOR on Mac ${SWTOR_ON_MAC_VERSION:-?}: engine ${SWTOR_ENGINE_ID:-cx24} ${SWTOR_ENGINE_NAME:-${SWTOR_ENGINE##*/}}, d9mt ${SWTOR_D9MT:-?}, started $(date '+%Y-%m-%d %H:%M:%S')" >&2
         # a development build's d9mt A/B switches (d9mt-ab.sh), if any
         [ -z "$SWTOR_D9MT_AB" ] || echo "SWTOR on Mac d9mt-ab: $SWTOR_D9MT_AB" >&2
+        # the Frame Rate Limit, if one is set (d9mt's own "frame cap" line follows)
+        [ -z "$fps_note" ] || echo "SWTOR on Mac frame rate limit: $fps_note" >&2
       else
         exec >/dev/null 2>/dev/null
       fi
