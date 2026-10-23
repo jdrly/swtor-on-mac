@@ -1545,7 +1545,10 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: the A/B switches removed, said so" eval '[ ! -e "$SOM/d9mt-ab.env" ] && grep -q "^Removed a development build.s d9mt A/B switches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: the cold test caches removed, said so" eval '[ ! -e "$COLD" ] && grep -q "^Removed a development build.s d9mt test caches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: env as a release writes it (no A/B include, state cache on, update check on)" eval '! grep -q d9mt-ab "$SOM/env" && [ "$(envv D9MT_TEX_PFV)/$(envv SWTOR_D9MT_AB)" = "<unset>/<unset>" ] && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && grep -qx SWTOR_UPDATE_CHECK=1 "$SOM/env"'
-  check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high)" cmp -s "$SANDBOX/dev-settings.conf" "$SOM/settings.conf"
+  # (this version writes every setting it knows: the Frame Rate Limit's two, which $DEVV does
+  # not know, come in with their defaults; everything else byte for byte)
+  check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high), only fpslimit=off and fpsbattery=off added" \
+    eval 'diff <(grep -v -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/dev-settings.conf") <(grep -v -e "^fpslimit=" -e "^fpsbattery=" "$SOM/settings.conf") >/dev/null && ! grep -q -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/dev-settings.conf" && [ "$(grep -c -x -e fpslimit=off -e fpsbattery=off "$SOM/settings.conf")" = 2 ] && [ "$(grep -c -e "^fpslimit=" -e "^fpsbattery=" "$SOM/settings.conf")" = 2 ]'
   prefix_changes "$SANDBOX/dev-prefix.txt" "" "$SANDBOX/dev-prefix-after.txt" >"$SANDBOX/dev-prefix.diff"
   # (a development build with this version's d3d9.dll, 0.1.2-dev.3 for 0.1.2 and 0.1.3: nothing
   # changes; with an older pin, d3d9.dll)
