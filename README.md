@@ -309,7 +309,7 @@ both, and Uninstall does too.
    Mac.
 
 The zip holds SWTOR on Mac's logs, `env`, `settings.conf`, `dxvk.conf`,
-`install-manifest.json`, the versions, system information (macOS, chip, memory, displays, the size of macOS's Metal caches for the engine's processes, shared with other CrossOver-based apps, and the size of Metal's archive usage index, called full only when its MDB_MAP_FULL lines are in the log) and
+`install-manifest.json`, the versions, system information (macOS, chip, memory, displays, the size of macOS's Metal caches for the engine's processes, shared with other CrossOver-based apps, the size of Metal's archive usage index and the MDB_MAP_FULL events of the last 2 hours beside it) and
 macOS's crash, hang and spin reports of the last 7 days (from `~/Library/Logs/DiagnosticReports`)
 for the game, Wine, the official launcher and SWTOR on Mac, so you don't have to look for them:
 the newest 20, up to 10 MB together; `system-info.txt` lists which are in the zip and which were

@@ -1197,11 +1197,12 @@ if [ -f "$zip" ]; then
   check "logs: system info has the GPU error count" grep -q "^  IOGPUMetalError .*: 3 in the game and Wine, 1 in other apps\$" "$SI"
   check "logs: system info has the sizes of Metal's caches for the engine (2 archives of 2 MB, no com.apple.metal)" eval 'grep -qx "  com.apple.gpuarchiver: 2.0 MB, 2 entries" "$SI" && grep -qx "  com.apple.metal: none" "$SI" && grep -qx "  archive usage index (com.apple.metal/archiveUsage.db): none" "$SI" && grep -q "shared with other CrossOver-based apps, whose processes count too" "$SI"'
 fi
-# Metal's archive usage index: its size, and "full" only with MDB_MAP_FULL lines (its size alone
-# doesn't say so; the one that failed on 2026-10-18 was 1,044,480 bytes): the failing one with its
-# lines, one at 1 MiB without lines (only "near its map's size"), and a small one
+# Metal's archive usage index: its size, and the MDB_MAP_FULL events of the window beside it,
+# never "full" (the size alone doesn't say so, the one that failed on 2026-10-18 was 1,044,480
+# bytes, and the events can be an older index's): the failing size with an event, a fresh 32 KiB
+# index with an older event, 1 MiB without events (only "near its map's size"), and a small one
 MI="$SANDBOX/usercache/com.codeweavers.CrossOver.wineloader/com.apple.metal/archiveUsage.db"
-for c in 1044480:1 1048576:0 524288:0; do
+for c in 1044480:1 32768:1 1048576:0 524288:0; do
   sz=${c%%:*} lines=${c#*:}
   mkdir -p "$MI" && dd if=/dev/zero of="$MI/data.mdb" bs=1024 count=$((sz / 1024)) 2>/dev/null
   { echo '#!/bin/bash'; echo 'echo "Timestamp               Ty Process[PID:TID]"'
@@ -1211,8 +1212,8 @@ for c in 1044480:1 1048576:0 524288:0; do
   zm=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-mdb-$sz" 2>>"$SANDBOX/collect.err" || true)
   im=$(unzip -p "$zm" "*/system-info.txt" 2>/dev/null | grep "archive usage index" || true)
   case $sz in
-    1044480) check "logs: system info: the archive usage index full only by its MDB_MAP_FULL lines, at its real size ($im)" test "$im" = "  archive usage index (com.apple.metal/archiveUsage.db): 1044480 bytes, full: 1 MDB_MAP_FULL lines in the last 2 hours (compiled shaders are still cached)" ;;
-    1048576) check "logs: system info: 1 MiB without MDB_MAP_FULL lines is not called full ($im)" test "$im" = "  archive usage index (com.apple.metal/archiveUsage.db): 1048576 bytes, near its map's size (about 1 MB; full only if MDB_MAP_FULL lines appear)" ;;
+    1044480|32768) check "logs: system info: the index's size and the MDB_MAP_FULL events side by side, its fullness now unknown ($sz bytes: $im)" test "$im" = "  archive usage index (com.apple.metal/archiveUsage.db): $sz bytes; 1 MDB_MAP_FULL events in game/Wine processes during the last 2 hours; current index fullness unknown (compiled shaders are still cached)" ;;
+    1048576) check "logs: system info: 1 MiB without MDB_MAP_FULL events is not called full ($im)" test "$im" = "  archive usage index (com.apple.metal/archiveUsage.db): 1048576 bytes, near its map's size (about 1 MB; no MDB_MAP_FULL events in the last 2 hours)" ;;
     *) check "logs: system info: a small index only by its size ($im)" test "$im" = "  archive usage index (com.apple.metal/archiveUsage.db): 524288 bytes" ;;
   esac
 done

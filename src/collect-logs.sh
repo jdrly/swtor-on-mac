@@ -333,7 +333,8 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
   # gpuarchiver grows by a folder per process that uses Metal, com.apple.metal holds the
   # compiled shaders and the archive usage index (an LMDB with a map of about 1 MiB). The index's
   # size alone doesn't say it is full (LMDB reuses freed pages; the one that failed on 2026-10-18
-  # was 1,044,480 bytes): only the MDB_MAP_FULL lines gpu_errors counted say so. Other
+  # was 1,044,480 bytes), and the MDB_MAP_FULL lines gpu_errors counted may be from an earlier index
+  # or another cache: so the size and those events side by side, its fullness now unknown. Other
   # CrossOver-based apps (CrossOver, SWGL on Mac, GameToMac) share the bundle id, so their
   # processes count in here too.
   echo "Metal's caches of the engine's processes (in the user cache dir, ${METAL_CACHE##*/}/; shared with other CrossOver-based apps, whose processes count too):"
@@ -348,8 +349,9 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
   full=$(cat "$work/gpu-mdbfull" 2>/dev/null || echo 0)
   if [ -f "$idx" ]; then
     n=$(stat -f %z "$idx" 2>/dev/null || echo 0)
-    if [ "${full:-0}" -gt 0 ]; then note=", full: $full MDB_MAP_FULL lines in the last $GPU_HOURS hours (compiled shaders are still cached)"
-    elif [ "$n" -ge 1000000 ]; then note=", near its map's size (about 1 MB; full only if MDB_MAP_FULL lines appear)"
+    # (the events can be an older index's, or another bundle's cache's: they don't make this one full)
+    if [ "${full:-0}" -gt 0 ]; then note="; $full MDB_MAP_FULL events in game/Wine processes during the last $GPU_HOURS hours; current index fullness unknown (compiled shaders are still cached)"
+    elif [ "$n" -ge 1000000 ]; then note=", near its map's size (about 1 MB; no MDB_MAP_FULL events in the last $GPU_HOURS hours)"
     else note=""; fi
     echo "  archive usage index (com.apple.metal/archiveUsage.db): $n bytes$note"
   else
