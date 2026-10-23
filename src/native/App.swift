@@ -241,8 +241,9 @@ final class Installer {
 
   // MARK: Re-checking (event-driven, no polling)
 
-  // the official launcher's bundle, and the game's Game Mode bundle (src/som.sh)
-  nonisolated static let launcherBundleID = "com.solidstatenetworks.host"
+  // the official launcher's bundle ids (BioWare's since launcher 7.2.207, 2026-10-22; Solid State
+  // Networks' launcher host before), and the game's Game Mode bundle (src/som.sh)
+  nonisolated static let launcherBundleIDs = ["com.bioware.starwars-theoldrepubliclauncher", "com.solidstatenetworks.host"]
   nonisolated static let gameBundleID = "cz.jandrly.swtoronmac.game"
   // a SWTOR app quit (the settings window re-reads too)
   var onSWTORQuit: (() -> Void)?
@@ -292,8 +293,13 @@ final class Installer {
 
   nonisolated static func isSWTOR(_ app: NSRunningApplication?) -> Bool {
     guard let app else { return false }
-    if app.bundleIdentifier == launcherBundleID || isGame(app) { return true }
-    return app.executableURL?.path.hasSuffix("/Star Wars - The Old Republic Launcher") == true
+    return isGame(app) || isLauncher(bundleID: app.bundleIdentifier, executable: app.executableURL?.path)
+  }
+
+  // The official launcher: by either of its bundle ids, or by its executable's path
+  nonisolated static func isLauncher(bundleID: String?, executable: String?) -> Bool {
+    if let bundleID, launcherBundleIDs.contains(bundleID) { return true }
+    return executable?.hasSuffix("/Star Wars - The Old Republic Launcher") == true
   }
 
   private func swtorQuit() {
@@ -705,6 +711,13 @@ struct SWTORonMacApp: App {
     }
     if CommandLine.arguments.contains("--play-check") {
       Installer.printPlayTarget(check: true)
+      exit(0)
+    }
+    // whether an app counts as the official launcher, for tests
+    let arguments = CommandLine.arguments
+    if let i = arguments.firstIndex(of: "--is-launcher"), arguments.count > i + 2 {
+      let id = arguments[i + 1] == "-" ? nil : arguments[i + 1]
+      print(Installer.isLauncher(bundleID: id, executable: arguments[i + 2]) ? "launcher" : "not launcher")
       exit(0)
     }
     // whether an app counts as the game, for tests (Play.swift)

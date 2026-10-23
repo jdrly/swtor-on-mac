@@ -4,8 +4,9 @@
 //
 // The official app is where som.sh status finds it (official_app_path: /Applications, or the
 // sandbox's under SWTOR_ON_MAC_ROOT); outside a sandbox, if it is not there, wherever Launch
-// Services knows it by its bundle id (com.solidstatenetworks.host, the launcher's: Solid State
-// Networks' launcher host, so the name must match too). In a sandbox it is never anything
+// Services knows it by one of its bundle ids (Installer.launcherBundleIDs: BioWare's since
+// launcher 7.2.207, Solid State Networks' launcher host before; the name must match too). In a
+// sandbox it is never anything
 // outside the sandbox, and a running SWTOR outside it is not brought to the front.
 //
 //   SWTORonMac --play-target   prints what the button would do and exits (no window, nothing
@@ -71,10 +72,11 @@ extension Installer {
     }
     guard root == nil else { return nil }
     let named = { (url: URL) in url.lastPathComponent.localizedCaseInsensitiveContains("Old Republic") }
-    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: launcherBundleID), named(url) {
-      return url
+    for id in launcherBundleIDs {
+      if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id), named(url) { return url }
+      if let url = NSWorkspace.shared.urlsForApplications(withBundleIdentifier: id).first(where: named) { return url }
     }
-    return NSWorkspace.shared.urlsForApplications(withBundleIdentifier: launcherBundleID).first(where: named)
+    return nil
   }
 
   // path is in folder (both as given, or both standardized: /private/tmp is /tmp)
