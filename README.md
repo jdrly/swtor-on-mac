@@ -291,20 +291,23 @@ update* and a **Repair the Launcher Hook** button.
 
 ## Reporting problems
 
-1. Choose **SWTOR on Mac > Collect Logs…**. It saves `SWTOR-on-Mac-logs-<date>.zip` to your
-   Desktop (or, without access to the Desktop, to `~/Library/Logs/SWTOR on Mac`) and shows it
-   in Finder.
+1. Choose **SWTOR on Mac > Collect Logs…**. After 10–30 seconds (the menu item says
+   *Collecting Logs…* meanwhile) it saves `SWTOR-on-Mac-logs-<date>.zip` to your Desktop (or,
+   without access to the Desktop, to `~/Library/Logs/SWTOR on Mac`) and shows it in Finder.
 2. Send that zip with a short description of what happened and when to **Pharaphobia on
    Discord** or attach it to a [GitHub issue](https://github.com/jdrly/swtor-on-mac/issues/new/choose).
    Please don't send it to Broadsword or SWTOR customer support: they don't support SWTOR on
    Mac.
 
 The zip holds SWTOR on Mac's logs, `env`, `settings.conf`, `dxvk.conf`,
-`install-manifest.json`, the versions, system information (macOS, chip, memory, displays) and
+`install-manifest.json`, the versions, system information (macOS, chip, memory, displays, the size of macOS's Metal caches for the engine's processes) and
 macOS's crash, hang and spin reports of the last 7 days (from `~/Library/Logs/DiagnosticReports`)
 for the game, Wine, the official launcher and SWTOR on Mac, so you don't have to look for them:
 the newest 20, up to 10 MB together; `system-info.txt` lists which are in the zip and which were
-left out. Your home folder, user name, account
+left out. `gpu-errors.txt` has the GPU errors of the game and Wine from macOS's unified log
+of the last 2 hours (`IOGPUMetalError` counted per process, the last fault lines, the GPU
+driver's events by time and kind, Metal's other errors), since `wine.log` starts anew with every
+game start; other apps' errors are only counted, never named. Your home folder, user name, account
 names and e-mail addresses are replaced, serial numbers and device identifiers are left out,
 and the game's command line (the launcher passes the account on it) is never included. Turn on
 **Settings > Debug Logging** only when asked: it makes the logs much more detailed for the next
