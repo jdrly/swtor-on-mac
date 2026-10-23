@@ -53,7 +53,14 @@ som() { "$SOMSH" "$@"; }
 st() { som status | sed -n "s/^$1=//p"; }
 # what the window's Play button would do (the app's own resolution; nothing is opened)
 play_target() { "$APP/Contents/MacOS/SWTORonMac" --play-target 2>/dev/null; }
-is_macho() { file -b "$1" | grep -q '^Mach-O'; }
+# what a press would do: the hook check first (som.sh rehook), then the fresh status
+play_check() { "$APP/Contents/MacOS/SWTORonMac" --play-check 2>/dev/null; }
+# piped <grep options and patterns>: grep -q for a pipe's end. It reads all of its input: grep -q
+# would stop at the first match, and the writer then dies of SIGPIPE, which under pipefail fails
+# the pipe (a check that should pass fails at random) or, after a !, passes it (one that should
+# fail passes)
+piped() { grep "$@" >/dev/null; }
+is_macho() { file -b "$1" | piped '^Mach-O'; }
 # reg_has <key as in user.reg, with \\> <value line>: the value is set under that key
 reg_has() {
   K="[$1]" V="$2" awk 'BEGIN { k = ENVIRON["K"]; v = ENVIRON["V"] }
@@ -70,8 +77,11 @@ snap() {
     find . -path '*/AppData/Local/SWTOR/swtor/settings*' -prune -o -type f -print0 | sort -z | xargs -0 shasum -a 256 )
 }
 AGENT_PLIST="$H/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist"
-# the watch job as launchd would start it (the sandbox never loads it into launchd)
-watch() { SWTOR_ON_MAC_SETTLE="${SETTLE:-1}" /bin/bash "$SOM/agent/som.sh" watch; }
+# the app's launcher hook check (som.sh rehook, when the app opens and before Play); its answer
+# in $SANDBOX/rehook.txt. SETTLE: how recent a change in Wine/bin counts as an update still
+# writing (0: none does)
+rehook() { SWTOR_ON_MAC_SETTLE="${SETTLE:-0}" som rehook >"$SANDBOX/rehook.txt" 2>&1; }
+said() { grep -qx "$1" "$SANDBOX/rehook.txt"; }
 notes() { if [ -f "$LOGS/notifications.log" ]; then wc -l <"$LOGS/notifications.log" | tr -d ' '; else echo 0; fi; }
 # the engine's loader: lib/wine/x86_64-unix/wine (CrossOver 26), or bin/wine-preloader (0.0.x)
 loader_of() { if [ -f "$1/bin/wine-preloader" ]; then echo "$1/bin/wine-preloader"; else echo "$1/lib/wine/x86_64-unix/wine"; fi; }
@@ -359,7 +369,7 @@ sleep 0.5
 l3=$(cat "$SANDBOX/child.pid")
 check "leftovers: status busy=leftovers" test "$(st busy)" = leftovers
 check "leftovers: not counted as running" test "$(st running)" = no
-check "leftovers: names ($(st busy_detail))" eval 'st busy_detail | grep -q winedevice.exe'
+check "leftovers: names ($(st busy_detail))" eval 'st busy_detail | piped winedevice.exe'
 check "leftovers: settings running=no" test "$(som settings | sed -n 's/^running=//p')" = no
 s1=$(orphan "$EB/wineserver"); sleep 0.3
 check "session: status busy=session" test "$(st busy)" = session
@@ -405,8 +415,8 @@ kill "$ws"; sleep 0.3
 # neither the launcher nor anything to end
 mw=$(orphan "$BS_APP/Contents/MacOS/mac_wine" 30); sleep 0.3
 check "Broadsword's Wine without its wineserver: busy=leftovers ($(st busy))" test "$(st busy)" = leftovers
-check "Broadsword's Wine leftover: named ($(st busy_detail))" eval 'st busy_detail | grep -q winedevice.exe'
-check "mac_wine: not taken for the launcher" eval '! som status | grep -qx busy=launcher'
+check "Broadsword's Wine leftover: named ($(st busy_detail))" eval 'st busy_detail | piped winedevice.exe'
+check "mac_wine: not taken for the launcher" eval '! som status | piped -x busy=launcher'
 som end-leftovers >"$SANDBOX/end3.txt" 2>&1 || bad "end-leftovers (Broadsword's) exit"
 sleep 0.3
 check "end-leftovers: Broadsword's Wine leftover ended" all_gone "$w" "$l4"
@@ -419,6 +429,16 @@ kill "$p3" "$d1" "$d2" 2>/dev/null || true; wait "$p3" 2>/dev/null || true
 pkill -f "$SANDBOX/decoy/" 2>/dev/null || true
 rm -f "$EB/wineserver" "$EB/ws.pid"
 # l4 is still running: the next (failed) install ends it first
+
+echo "== 2b. what the app takes for the official launcher (by bundle id, else its executable)"
+# (launcher 7.2.207 changed the bundle id from Solid State Networks' to BioWare's)
+is_launcher() { "$APP/Contents/MacOS/SWTORonMac" --is-launcher "$@" 2>/dev/null; }
+check "launcher: BioWare's bundle id (7.2.207 and later)" test "$(is_launcher com.bioware.starwars-theoldrepubliclauncher /x/y)" = launcher
+check "launcher: Solid State Networks' bundle id (before 7.2.207)" test "$(is_launcher com.solidstatenetworks.host /x/y)" = launcher
+check "launcher: by its executable, whatever the id" test "$(is_launcher org.example.other "/Applications/Star Wars - The Old Republic.app/Contents/MacOS/Star Wars - The Old Republic Launcher")" = launcher
+check "launcher: not another app" test "$(is_launcher com.apple.Safari /Applications/Safari.app/Contents/MacOS/Safari)" = "not launcher"
+check "launcher: the stand-in official app's id is one of them ($(plutil -extract CFBundleIdentifier raw -o - "$BS_APP/Contents/Info.plist" 2>/dev/null))" \
+  test "$(is_launcher "$(plutil -extract CFBundleIdentifier raw -o - "$BS_APP/Contents/Info.plist" 2>/dev/null)" /x/y)" = launcher
 
 echo "== 2c. what the app takes for the game (it brings the game to the front when it starts)"
 # Launch Services knows the game by the path CrossOver starts it from: winetemp-<...>/wine, a
@@ -474,7 +494,7 @@ check "install: no engine libraries folder (self-contained engine)" test ! -e "$
 check "install: manifest engine_id cx26" test "$(plutil -extract engine_id raw -o - "$SOM/install-manifest.json")" = cx26
 sys="$SOM/prefix/drive_c/windows/system32"
 check "install: d9mt d3d9.dll" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
-check "install: Wine's d3d9 kept ($(dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=20 2>/dev/null))" eval 'dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=20 2>/dev/null | grep -q -e "Wine builtin" -e "Wine placeholder"'
+check "install: Wine's d3d9 kept ($(dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=20 2>/dev/null))" eval 'dd if="$sys/d3d9.dll.wine" bs=1 skip=64 count=20 2>/dev/null | piped -e "Wine builtin" -e "Wine placeholder"'
 check "install: RetinaMode=y" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
 WM="$SOM/engine/lib/wine/x86_64-unix"
 WL="$SOM/engine/lib/wine"
@@ -545,21 +565,19 @@ check "install: env feed" grep -q '^SWTOR_UPDATE_FEED="https://github.com/jdrly/
 check "install: env notifications to a file (sandbox)" grep -q '^SWTOR_NOTIFY_LOG=' "$SOM/env"
 check "install: env HUD off" grep -q '^#MTL_HUD_ENABLED=1' "$SOM/env"
 check "install: env Game Mode on" grep -q '^SWTOR_GAMEMODE_APP=' "$SOM/env"
-check "install: launchd job written" plutil -lint -s "$AGENT_PLIST"
-check "install: launchd job watches Wine/bin" test "$(plutil -extract WatchPaths.0 raw -o - "$AGENT_PLIST")" = "$BS_WINE/bin"
-check "install: launchd job not at load" test "$(plutil -extract RunAtLoad raw -o - "$AGENT_PLIST")" = false
-check "install: launchd job throttled" test "$(plutil -extract ThrottleInterval raw -o - "$AGENT_PLIST")" = 30
-check "install: launchd job runs the agent copy" test "$(plutil -extract ProgramArguments.1 raw -o - "$AGENT_PLIST")" = "$SOM/agent/som.sh"
-check "install: agent copy" test -f "$SOM/agent/som.sh" -a -f "$SOM/agent/wine-wrapper.sh" -a -x "$SOM/agent/helpers/hold-launcher"
-# (a real install's job may be loaded: it must not be the sandbox's)
-check "install: launchd job not loaded (sandbox)" eval '! launchctl print "gui/$(id -u)/cz.jandrly.swtoronmac.watch" 2>/dev/null | grep -qF "$SOM/"'
-check "install: status watch_agent" test "$(st watch_agent)" = yes
+# no background helper: nothing of SWTOR on Mac runs while the app is closed (the app checks the
+# hook when it opens: som.sh rehook)
+check "install: no launchd job, no agent copy" test ! -e "$AGENT_PLIST" -a ! -e "$SOM/agent"
+# (a real install of 0.1.3 or older may have its job loaded: it must not be the sandbox's)
+check "install: no launchd job of the sandbox loaded" eval '! launchctl print "gui/$(id -u)/cz.jandrly.swtoronmac.watch" 2>/dev/null | piped -F "$SOM/"'
+check "install: status says nothing of a launchd job" eval '! som status | piped -e "^watch_agent=" -e "^launch_agent="'
+check "install: manifest names no launchd job" eval '! grep -q launch_agent "$SOM/install-manifest.json"'
 check "install: manifest settings user" test -n "$(plutil -extract settings_user raw -o - "$SOM/install-manifest.json")"
 check "play: opens the sandbox's official app ($(play_target))" test "$(play_target)" = "launch $BS_APP"
 # without it the button is off: never the real app in /Applications (Launch Services' lookup
 # by bundle id is only for the real system)
 mv "$BS_APP" "$SANDBOX/official-app-away"
-check "play: sandbox app gone, not the real one ($(play_target))" eval 'play_target | grep -q "^unavailable The official SWTOR app was not found"'
+check "play: sandbox app gone, not the real one ($(play_target))" eval 'play_target | piped "^unavailable The official SWTOR app was not found"'
 mv "$SANDBOX/official-app-away" "$BS_APP"
 
 echo "== 4b. settings"
@@ -579,6 +597,18 @@ som set debug on >/dev/null && check "set debug: flags file edits kept" grep -qx
 som set memory high >/dev/null && check "set memory high" grep -qx 'D9MT_MEMORY_PROFILE=high' "$SOM/env"
 som set gamemode off >/dev/null && check "set gamemode off" grep -q '^#SWTOR_GAMEMODE_APP=' "$SOM/env"
 som set updates off >/dev/null && check "set updates off" grep -qx 'SWTOR_UPDATE_CHECK=0' "$SOM/env"
+check "settings: Frame Rate Limit off, only on battery off by default" test "$(som settings | sed -n 's/^fpslimit=//p')/$(som settings | sed -n 's/^fpsbattery=//p')" = off/off
+check "settings: no limit in the env by default" eval 'grep -qx SWTOR_FPS_LIMIT=0 "$SOM/env" && grep -qx SWTOR_FPS_LIMIT_BATTERY=0 "$SOM/env"'
+som set fpslimit 30 >/dev/null && check "set fpslimit 30" eval 'grep -qx SWTOR_FPS_LIMIT=30 "$SOM/env" && grep -qx fpslimit=30 "$SOM/settings.conf"'
+som set fpsbattery on >/dev/null && check "set fpsbattery on" eval 'grep -qx SWTOR_FPS_LIMIT_BATTERY=1 "$SOM/env" && grep -qx fpsbattery=on "$SOM/settings.conf"'
+for v in 40 45 60; do som set fpslimit $v >/dev/null; done
+check "set fpslimit 40, 45, 60" grep -qx SWTOR_FPS_LIMIT=60 "$SOM/env"
+check "set fpslimit: 25 refused" eval '! som set fpslimit 25 >/dev/null 2>&1 && grep -qx SWTOR_FPS_LIMIT=60 "$SOM/env"'
+check "set fpslimit: empty refused" eval '! som set fpslimit "" >/dev/null 2>&1'
+# (two allowed values with a space between would become a command in env)
+check "set: two values in one refused (fpslimit '30 40', 'off 30'; hudpos, mousespeed), env unchanged" \
+  eval '! som set fpslimit "30 40" >/dev/null 2>&1 && ! som set fpslimit "off 30" >/dev/null 2>&1 && ! som set hudpos "topleft topcenter" >/dev/null 2>&1 && ! som set mousespeed "0.5 0.75" >/dev/null 2>&1 && grep -qx SWTOR_FPS_LIMIT=60 "$SOM/env"'
+som set fpslimit 45 >/dev/null
 check "set: bad value refused" eval '! som set memory huge >/dev/null 2>&1'
 check "set: bad key refused" eval '! som set foo on >/dev/null 2>&1'
 cp "$SANDBOX/fake" "$SOM/engine/bin/test-leftover"; l5=$(orphan "$SOM/engine/bin/test-leftover"); sleep 0.3
@@ -695,6 +725,9 @@ if [ "$CHANNEL" = dev ]; then
   check "ab: an unknown switch refused, the switches kept" eval '! "$AB" turbo >/dev/null 2>&1 && [ "$(envv D9MT_TEX_PFV)" = 1 ]'
   check "ab: a bad cold name refused" eval '! "$AB" "cold=../x" >/dev/null 2>&1 && [ "$(envv SWTOR_D9MT_AB)" = pfv ]'
   check "ab: status names them" eval '"$AB" | grep "for the next game start: pfv$" >/dev/null'
+  "$AB" cap=30 cap-noalign dxvkcap=40 >/dev/null
+  check "ab: cap=30 cap-noalign dxvkcap=40" eval '[ "$(envv D9MT_FPS_CAP)/$(envv D9MT_FPS_CAP_ALIGN)/$(envv DXVK_CONFIG)" = "30/0/d3d9.maxFrameRate=40" ]'
+  check "ab: cap=10 and cap=x refused, the switches kept" eval '! "$AB" cap=10 >/dev/null 2>&1 && ! "$AB" cap=x >/dev/null 2>&1 && [ "$(envv D9MT_FPS_CAP)" = 30 ]'
   mkdir -p "$H/Library/Caches/SWTOR on Mac/d9mt-ab/t1"
   check "ab: a cold name used before: warned" eval '"$AB" cold=t1 | grep "used before" >/dev/null'
   "$AB" reset --clean >/dev/null
@@ -717,6 +750,7 @@ check "reinstall: wrapper ours" test "$(st wrapper)" = ours
 check "reinstall: no Wine left running" test -z "$(sandbox_wine)"
 check "reinstall: settings kept" eval 'grep -qx memory=high "$SOM/settings.conf" && grep -qx D9MT_MEMORY_PROFILE=high "$SOM/env" && grep -qx DXVK_LOG_LEVEL=info "$SOM/env"'
 check "reinstall: vsync stays off" eval '! grep -q "^d3d9.presentInterval" "$SOM/dxvk.conf"'
+check "reinstall: Frame Rate Limit 45 only on battery stays" eval 'grep -qx SWTOR_FPS_LIMIT=45 "$SOM/env" && grep -qx SWTOR_FPS_LIMIT_BATTERY=1 "$SOM/env"'
 check "reinstall: Retina stays on" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
 check "reinstall: the app's Mac driver stays" wm_is app
 check "reinstall: PhysicalKeyboard stays y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="y"'
@@ -728,7 +762,8 @@ som set hud off >/dev/null; som set hudpos topcenter >/dev/null
 som set physkeys off >/dev/null && check "set physkeys off again: the app's driver (raw mouse-look on)" wm_is app
 som set vsync on >/dev/null; som set debug off >/dev/null; som set memory auto >/dev/null
 som set gamemode on >/dev/null; som set updates on >/dev/null
-check "settings: back to the defaults" test "$(som settings | sed -n 's/^debug=//p')" = off
+som set fpslimit off >/dev/null; som set fpsbattery off >/dev/null
+check "settings: back to the defaults" eval '[ "$(som settings | sed -n "s/^debug=//p")" = off ] && grep -qx SWTOR_FPS_LIMIT=0 "$SOM/env"'
 
 echo "== 6b. the wrapper's daily update check (stub engine; the game is never started)"
 U="$SANDBOX/update-check"
@@ -802,9 +837,34 @@ check "wrapper: no start line for the game" eval '! grep -q "wine start: swtor.e
 check "wrapper: one line per other Wine start, the command's first word" eval 'test "$(grep -c "wine start: reg.exe (parent $$ " "$U/logs/hold.log")" = 1'
 check "wrapper: nothing else of the command logged" eval '! grep -rq SECRETTOKEN "$U/logs"'
 printf 'SWTOR_LOG_FILTER=.\nSWTOR_D9MT_AB="pfv cold=x"\n' >>"$U/env"; game
-check "wrapper: wine.log's second line names the A/B switches" eval 'sed -n 2p "$U/logs/wine.log" | grep -qx "SWTOR on Mac d9mt-ab: pfv cold=x"'
+check "wrapper: wine.log's second line names the A/B switches" eval 'sed -n 2p "$U/logs/wine.log" | piped -x "SWTOR on Mac d9mt-ab: pfv cold=x"'
 sed -i '' '/^SWTOR_D9MT_AB=/d' "$U/env"; game
 check "wrapper: no A/B line without switches" eval '! grep -q "d9mt-ab" "$U/logs/wine.log"'
+# Frame Rate Limit: D9MT_FPS_CAP for the game; with only on battery, by the power source at the
+# game's start (a stand-in for pmset -g ps)
+cat >"$U/pmset" <<'PMSET'
+#!/bin/bash
+[ "$*" = "-g ps" ] || exit 1
+echo "Now drawing from '$(cat "$(dirname "$0")/power")'"
+echo " -InternalBattery-0 (id=1234)	80%; discharging; 3:00 remaining present: true"
+PMSET
+chmod +x "$U/pmset"
+fx() { sed -n 's/^D9MT_FPS_CAP=//p' "$U/logs/effective-env.txt"; }
+printf 'SWTOR_FPS_LIMIT=30\nSWTOR_FPS_LIMIT_BATTERY=0\nSWTOR_PMSET="%s/pmset"\n' "$U" >>"$U/env"; echo "AC Power" >"$U/power"; game
+check "wrapper: Frame Rate Limit 30: D9MT_FPS_CAP=30 for the game ($(fx))" test "$(fx)" = 30
+check "wrapper: wine.log names the limit" grep -qx "SWTOR on Mac frame rate limit: 30 fps" "$U/logs/wine.log"
+sed -i '' 's/^SWTOR_FPS_LIMIT_BATTERY=0$/SWTOR_FPS_LIMIT_BATTERY=1/' "$U/env"; game
+check "wrapper: only on battery, on AC power: no cap" eval '[ -z "$(fx)" ] && grep -qx "SWTOR on Mac frame rate limit: off (only on battery: on AC power)" "$U/logs/wine.log"'
+echo "Battery Power" >"$U/power"; game
+check "wrapper: only on battery, on battery: D9MT_FPS_CAP=30" eval '[ "$(fx)" = 30 ] && grep -qx "SWTOR on Mac frame rate limit: 30 fps (only on battery: on battery)" "$U/logs/wine.log"'
+echo "UPS Power" >"$U/power"; game
+check "wrapper: only on battery, on UPS power: no cap, not taken for AC" eval '[ -z "$(fx)" ] && grep -qx "SWTOR on Mac frame rate limit: off (only on battery: battery power not confirmed)" "$U/logs/wine.log"'
+rm -f "$U/pmset"; game
+check "wrapper: only on battery, no answer from pmset: no cap, said so" eval '[ -z "$(fx)" ] && grep -qx "SWTOR on Mac frame rate limit: off (only on battery: battery power not confirmed)" "$U/logs/wine.log"'
+sed -i '' 's/^SWTOR_FPS_LIMIT=30$/SWTOR_FPS_LIMIT=0/' "$U/env"; game
+check "wrapper: limit off: no D9MT_FPS_CAP, no line" eval '[ -z "$(fx)" ] && ! grep -q "frame rate limit" "$U/logs/wine.log"'
+check "wrapper: other Wine starts get no cap" eval '! grep -q D9MT_FPS_CAP "$U/logs/hold.log"'
+check "pmset -g ps names the power source as the wrapper reads it" eval '/usr/bin/pmset -g ps | sed -n 1p | piped -E "^Now drawing from '"'"'(AC|Battery|UPS) Power'"'"'"'
 
 echo "== 6f. session-report.sh: the lines of d9mt 6fa5df7 (a sample log)"
 R="$SANDBOX/report"
@@ -812,6 +872,8 @@ mkdir -p "$R"
 cat >"$R/wine.log" <<'LOG'
 SWTOR on Mac 0.1.1-dev.1: engine cx26 cx-26.3.0-8, d9mt 6fa5df7, started 2026-10-18 20:00:00
 SWTOR on Mac d9mt-ab: pfv vsync-off
+SWTOR on Mac frame rate limit: 30 fps (only on battery: on battery)
+warn:  D9MT: 20:00:01.100 frame cap 30 fps: timer, cadence 33.33 ms (vsync off)
 info:  Found config env: d3d9.presentInterval=0
 info:  D9MT: PixelFormatView on every texture (D9MT_TEX_PFV=1): no lossless compression
 info:  D9MT: end-of-pass barrier before Fragment|Blit|Dispatch, vertex fences for vertex textures
@@ -834,6 +896,8 @@ has() { grep -qF -- "$1" "$R/report.txt"; }
 check "report: the A/B switches" grep -qE '^  A/B switches \(d9mt-ab\.sh\) +pfv vsync-off$' "$R/report.txt"
 check "report: the GPU path" has "lossless compression off (D9MT_TEX_PFV=1), narrow pass barrier, clears skip stores"
 check "report: DXVK_CONFIG" has "d3d9.presentInterval=0"
+check "report: the Frame Rate Limit" grep -qE '^  Frame Rate Limit +30 fps \(only on battery: on battery\)$' "$R/report.txt"
+check "report: d9mt's frame cap" grep -qE "^    d9mt's frame cap +30 fps: timer, cadence 33\.33 ms \(vsync off\)$" "$R/report.txt"
 check "report: pass splits (frame-weighted)" has "6.0 (4.0 with a submit), 260 MiB loaded again"
 check "report: state cache loaded" has "ok, 40 entries, 39 to prewarm, 1 invalid dropped"
 check "report: prewarm" has "built 37, failed 1, skipped 0, done 0.8 s after the start (991 ms of builds, paused 201 ms)"
@@ -889,7 +953,7 @@ check "session: then mac_wine's call" test "$(sed -n 2p "$T/wine-args")" = 'reg 
 check "session: wineserver -p10" test "$(cat "$TE/ws.args")" = -p10
 check "session: the wineserver inherited no fds" test -z "$(tr -d ' \n' <"$TE/ws.fds")"
 check "session: its system process has /dev/null as stdout and stderr" eval 'test "$(lsof -a -p "$sp" -d 1,2 -Fn 2>/dev/null | grep -c "^n/dev/null")" = 2'
-check "session: and nothing of the caller's" eval '! lsof -p "$sp" 2>/dev/null | grep -q caller-fd'
+check "session: and nothing of the caller's" eval '! lsof -p "$sp" 2>/dev/null | piped caller-fd'
 macwine_call
 check "session: a second Wine call joins it (no second bootstrap)" test "$(grep -c SWTORonMacSession "$T/wine-args")" = 1
 check "session: one start logged" test "$(grep -c 'Wine session started' "$T/logs/hold.log")" = 1
@@ -925,18 +989,55 @@ check "reap: the other prefix's leftover, for its own prefix" all_gone "$o1"
 check "reap: and still not the running session's" alive "$l3"
 # 0.1.1's wrappers call hold-launcher with the game's pid: nothing happens
 check "hold-launcher <pid> (0.1.1's wrapper): nothing to do" eval '"$HL" $$ 2>"$T/logs/old.log" && grep -q "not holding the launcher" "$T/logs/old.log"'
-check "hold-launcher: no AppKit (never an app of the launcher's)" eval '! nm -u "$HL" | grep -q -e NSApplication -e _objc_'
+check "hold-launcher: no AppKit (never an app of the launcher's)" eval '! nm -u "$HL" | piped -e NSApplication -e _objc_'
 kill "$(cat "$TE/ws.pid")" "$l3" "$dd" 2>/dev/null || true
 sleep 0.3
 check "session test: nothing of it left" test -z "$("$HL" --paths | grep -F "$T/")"
 rm -rf "$(sd "$P1")" "$(sd "$P2")"
 rm -f "/tmp/.wine-$(id -u)/swtor-on-mac-$(printf '%x-%x' "$(stat -f %d "$P1")" "$(stat -f %i "$P1")").lock"
 
-echo "== 6c. the launchd job (simulated: run as launchd would)"
-watch; check "watch: wrapper in place, nothing to do" test "$(st wrapper)" = ours
-check "watch: logged" grep -q 'the wrapper is in place' "$LOGS/watch.log"
-rm -f "$BS_WINE/bin-real/setsid-exec"; watch
-check "watch: missing helper restored" test -x "$BS_WINE/bin-real/setsid-exec"
+echo "== 6c. the launcher hook check when the app opens (som.sh rehook)"
+rehook; check "rehook: wrapper in place, nothing to do, said so" eval '[ "$(st wrapper)" = ours ] && said "@done in place"'
+check "rehook: logged" grep -q 'the wrapper is in place' "$LOGS/rehook.log"
+rm -f "$BS_WINE/bin-real/setsid-exec"; rehook
+check "rehook: missing helper restored" test -x "$BS_WINE/bin-real/setsid-exec"
+# a helper repair is a change too: only with the lock, and not while the launcher writes
+rm -f "$BS_WINE/bin-real/setsid-exec"; mkdir "$SOM/.lock"; rehook; rmdir "$SOM/.lock"
+check "rehook: a missing helper left alone while an install runs, said so" eval 'said "@notice busy" && [ ! -e "$BS_WINE/bin-real/setsid-exec" ]'
+touch "$BS_WINE/bin/wine64"; SETTLE=60 rehook
+check "rehook: a missing helper left alone right after a change in Wine/bin, said so" eval 'said "@notice changing" && [ ! -e "$BS_WINE/bin-real/setsid-exec" ]'
+rehook
+check "rehook: then restored" eval 'said "@done in place" && [ -x "$BS_WINE/bin-real/setsid-exec" ]'
+# an older version's launchd job, with a stand-in for launchctl (in a sandbox none is called
+# otherwise): it stays, files and all, if it can't be unloaded, and goes once it can
+FL="$SANDBOX/fake-launchctl"; mkdir -p "$FL"
+cat >"$FL/launchctl" <<'FAKE'
+#!/bin/bash
+d="${0%/*}"; echo "$*" >>"$d/calls"
+case "$1" in
+  print) [ -e "$d/broken" ] && exit 5; [ -e "$d/loaded" ] && exit 0; exit 113 ;;
+  bootout) [ -e "$d/stuck" ] && exit 5; rm -f "$d/loaded" ;;
+  *) exit 2 ;;
+esac
+FAKE
+chmod +x "$FL/launchctl"
+old_job() { mkdir -p "${AGENT_PLIST%/*}" "$SOM/agent" && echo plist >"$AGENT_PLIST" && echo old >"$SOM/agent/som.sh" && : >"$FL/loaded"; }
+old_job; : >"$FL/stuck"
+# shellcheck disable=SC2034 # (used in check's eval strings)
+m0=$(shasum -a 256 "$SOM/install-manifest.json" "$SOM/env")
+SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-stuck.txt" 2>&1 && bad "install with a stuck old job went ahead"
+check "old launchd job that won't stop: Install refuses before changing anything, says what to run" eval 'grep -q "^@error The launcher-update guard of an older SWTOR on Mac .* could not be stopped (loaded), so nothing was changed. Run this in Terminal, then try again: launchctl bootout gui/" "$SANDBOX/agent-stuck.txt" && [ "$(shasum -a 256 "$SOM/install-manifest.json" "$SOM/env")" = "$m0" ] && [ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ] && [ ! -d "$SOM/.lock" ]'
+SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som uninstall >"$SANDBOX/agent-stuck-un.txt" 2>&1 && bad "uninstall with a stuck old job went ahead"
+check "old launchd job that won't stop: Uninstall refuses before changing anything" eval 'grep -q "^@error The launcher-update guard of an older SWTOR on Mac" "$SANDBOX/agent-stuck-un.txt" && [ "$(st wrapper)" = ours ] && [ -f "$SOM/install-manifest.json" ] && [ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ]'
+rm -f "$FL/stuck"; : >"$FL/broken"
+SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-broken.txt" 2>&1 && bad "install with launchctl failing went ahead"
+check "launchctl can't tell whether the old job runs: Install refuses, nothing changed, its files kept" eval 'grep -q "^@error SWTOR on Mac could not check whether the launcher-update guard of an older version .* still runs (unknown (launchctl print: status 5)), so nothing was changed" "$SANDBOX/agent-broken.txt" && [ "$(shasum -a 256 "$SOM/install-manifest.json" "$SOM/env")" = "$m0" ] && [ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ]'
+rm -f "$FL/broken"
+SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-unload.txt" 2>&1 || bad "install with a loaded old job"
+check "old launchd job loaded: unloaded, then its files removed, said so" eval 'grep -qx "bootout gui/$(id -u)/cz.jandrly.swtoronmac.watch" "$FL/calls" && [ ! -e "$FL/loaded" ] && [ ! -e "$AGENT_PLIST" ] && [ ! -e "$SOM/agent" ] && grep -q "^Removed the launcher-update guard of an older version" "$SANDBOX/agent-unload.txt"'
+SWTOR_ON_MAC_LAUNCHCTL="$FL/launchctl" som install >"$SANDBOX/agent-none.txt" 2>&1 || bad "install with no old job"
+# (bootouts so far: the stuck Install's, the stuck Uninstall's, the successful one's)
+check "no old launchd job: nothing to unload or remove" eval '[ "$(grep -c bootout "$FL/calls")" = 3 ] && ! grep -q -e "launcher-update guard" "$SANDBOX/agent-none.txt"'
 
 echo "== 7. a launcher update replaced the wrapper"
 launcher_update() {
@@ -945,27 +1046,41 @@ launcher_update() {
 }
 launcher_update
 check "update: status replaced" test "$(st wrapper)" = replaced
-check "play: off until the hook is repaired" eval 'play_target | grep -q "^unavailable A launcher update removed the hook"'
+check "play: off until the hook is repaired" eval 'play_target | piped "^unavailable A launcher update removed the hook"'
+# a press checks the hook first, whatever the window last saw: while the launcher still writes
+# it waits, after that it hooks back in and opens the official app
+check "press while the launcher still writes: wait, the hook left alone" eval '[ "$(SWTOR_ON_MAC_SETTLE=60 play_check)" = "unavailable SWTOR'"'"'s launcher is changing its Wine right now. Wait until it has finished, then press Play SWTOR again." ] && [ "$(st wrapper)" = replaced ]'
+check "press after the update: hooked back in, then the official app" eval '[ "$(SWTOR_ON_MAC_SETTLE=0 play_check)" = "launch $BS_APP" ] && [ "$(st wrapper)" = ours ]'
+launcher_update
 som install >"$SANDBOX/reinstall2.txt" 2>&1 || bad "reinstall after update"
 check "update: wrapper back" test "$(st wrapper)" = ours
-echo "== 7b. ...and the launchd job puts it back by itself"
+echo "== 7b. ...and the app's check when it opens puts it back (no background helper)"
 launcher_update; n=$(notes)
-mkdir "$SOM/.lock"; watch; rmdir "$SOM/.lock"
-check "watch: leaves a running install alone" test "$(st wrapper)" = replaced
-t0=$SECONDS; SETTLE=3 watch
-check "watch: waited for Wine/bin to settle ($((SECONDS - t0)) s)" test $((SECONDS - t0)) -ge 2
-check "watch: wrapper back" test "$(st wrapper)" = ours
-check "watch: notified" test "$(notes)" -gt "$n"
-check "watch: manifest has the new preloader" test "$(plutil -extract original_preloaders_sha256.wine64-preloader raw -o - "$SOM/install-manifest.json")" = "$(shasum -a 256 "$BS_WINE/bin-real/wine64-preloader" | cut -d" " -f1)"
-check "watch: manifest still JSON" plutil -convert json -o /dev/null "$SOM/install-manifest.json"
-n=$(notes); watch
-check "watch: idempotent (no second notification)" test "$(notes)" = "$n"
+mkdir "$SOM/.lock"; rehook; rmdir "$SOM/.lock"
+check "rehook: leaves a running install alone, said so" eval '[ "$(st wrapper)" = replaced ] && said "@notice busy"'
+SETTLE=60 rehook
+check "rehook: Wine/bin changed just now (an update still writing): left alone, said so, no waiting" eval '[ "$(st wrapper)" = replaced ] && said "@notice changing"'
+# between rehook's first look and its lock (staged with SWTOR_ON_MAC_TEST_BETWEEN): an install
+# took the lock, or an uninstall finished; either way nothing is changed
+SWTOR_ON_MAC_TEST_BETWEEN='mkdir "$SOM/.lock"' rehook; rmdir "$SOM/.lock"
+check "rehook: an install that started after its first look: left alone, said so" eval '[ "$(st wrapper)" = replaced ] && said "@notice busy"'
+# (the command runs inside som.sh, which has $SOM but not $SANDBOX)
+SWTOR_ON_MAC_TEST_BETWEEN='mv "$SOM/install-manifest.json" "$SOM/manifest.moved"; mv "$SOM/env" "$SOM/env.moved"' rehook
+check "rehook: an uninstall that finished after its first look: nothing hooked in, said so" eval 'said "@done not installed" && is_macho "$BS_WINE/bin/wine64-preloader" && is_macho "$BS_WINE/bin/wine-preloader"'
+mv "$SOM/manifest.moved" "$SOM/install-manifest.json"; mv "$SOM/env.moved" "$SOM/env"
+rehook
+check "rehook: wrapper back, said so" eval '[ "$(st wrapper)" = ours ] && said "@done rehooked"'
+check "rehook: manifest has the new preloader" test "$(plutil -extract original_preloaders_sha256.wine64-preloader raw -o - "$SOM/install-manifest.json")" = "$(shasum -a 256 "$BS_WINE/bin-real/wine64-preloader" | cut -d" " -f1)"
+check "rehook: manifest still JSON" plutil -convert json -o /dev/null "$SOM/install-manifest.json"
+rehook
+check "rehook: idempotent" eval '[ "$(st wrapper)" = ours ] && said "@done in place"'
 # a launcher half way through its update: a preloader missing
-launcher_update; mv "$BS_WINE/bin/wine-preloader" "$SANDBOX/wp.tmp"; n=$(notes); watch
-check "watch: half-updated folder only notified" test "$(notes)" -gt "$n" -a ! -e "$BS_WINE/bin/wine-preloader"
-check "watch: half-updated folder untouched" is_macho "$BS_WINE/bin/wine64-preloader"
-mv "$SANDBOX/wp.tmp" "$BS_WINE/bin/wine-preloader"; watch
-check "watch: complete again, wrapper back" test "$(st wrapper)" = ours
+launcher_update; mv "$BS_WINE/bin/wine-preloader" "$SANDBOX/wp.tmp"; rehook
+check "rehook: half-updated folder left alone, said so" eval 'said "@notice changing" && [ ! -e "$BS_WINE/bin/wine-preloader" ]'
+check "rehook: half-updated folder untouched" is_macho "$BS_WINE/bin/wine64-preloader"
+mv "$SANDBOX/wp.tmp" "$BS_WINE/bin/wine-preloader"; rehook
+check "rehook: complete again, wrapper back" eval '[ "$(st wrapper)" = ours ] && said "@done rehooked"'
+check "rehook: no system notification (the app is open and shows the hook)" test "$(notes)" = "$n"
 
 echo "== 7c. the wrapper template copied by hand (@CONF@ not filled in: it would run Broadsword's Wine)"
 raw_wrapper() { # [<env path>]: the template, or the template filled in for another env
@@ -977,18 +1092,18 @@ raw_wrapper() { # [<env path>]: the template, or the template filled in for anot
 }
 raw_wrapper
 check "raw wrapper: status replaced, not ours" test "$(st wrapper)" = replaced
-check "raw wrapper: play off until the hook is repaired" eval 'play_target | grep -q "^unavailable "'
+check "raw wrapper: play off until the hook is repaired" eval 'play_target | piped "^unavailable "'
 zip=$("$APP/Contents/Resources/collect-logs.sh" 2>/dev/null || true)
-check "raw wrapper: Collect Logs says it is not filled in" eval 'unzip -p "$zip" "*/system-info.txt" | grep -q "wine64-preloader: .*NOT FILLED IN"'
+check "raw wrapper: Collect Logs says it is not filled in" eval 'unzip -p "$zip" "*/system-info.txt" | piped "wine64-preloader: .*NOT FILLED IN"'
 rm -f "$zip"
 som install >"$SANDBOX/reinstall-raw.txt" 2>&1 || bad "reinstall over a raw wrapper"
 check "raw wrapper: Reinstall repairs it" eval '[ "$(st wrapper)" = ours ] && grep -qxF "CONF=\"$SOM/env\"" "$BS_WINE/bin/wine64-preloader" && grep -qxF "CONF=\"$SOM/env\"" "$BS_WINE/bin/wine-preloader"'
-raw_wrapper; SETTLE=1 watch
-check "raw wrapper: the launchd job repairs it by itself" eval '[ "$(st wrapper)" = ours ] && ! grep -q "@CONF@" "$BS_WINE/bin/wine64-preloader"'
+raw_wrapper; rehook
+check "raw wrapper: the app's check repairs it" eval '[ "$(st wrapper)" = ours ] && ! grep -q "@CONF@" "$BS_WINE/bin/wine64-preloader"'
 raw_wrapper "$SANDBOX/elsewhere/env"
 check "wrapper of another install (another env): status replaced" test "$(st wrapper)" = replaced
-SETTLE=1 watch
-check "wrapper of another install: the launchd job repairs it" test "$(st wrapper)" = ours
+rehook
+check "wrapper of another install: the app's check repairs it" test "$(st wrapper)" = ours
 
 echo "== 8. uninstall restores the official install byte for byte, and copies the game settings back"
 GS_REL="AppData/Local/SWTOR/swtor/settings"
@@ -1035,6 +1150,30 @@ n=20; for f in $small; do
   n=$((n + 1))
 done
 fake_report wine-2026-10-10-090000.ips $((8 * 24 * 60))
+# GPU errors: a fake unified log ($SANDBOX/bin/log, which collect-logs.sh reads in a sandbox):
+# the game's and Wine's page faults, another app's (its name must stay out), Metal's full
+# shader cache, the GPU driver's own lines (one naming another app and someone's folder, one
+# naming Wine: only their time, sender and kind come through), and 30 other Metal errors
+mkdir -p "$SANDBOX/bin"
+cat >"$SANDBOX/bin/log" <<EOF
+#!/bin/bash
+[ "\$1 \$2 \$3" = "show --last 2h" ] || exit 2
+echo "Timestamp               Ty Process[PID:TID]"
+echo "2026-10-20 19:04:10.100 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+echo "2026-10-20 19:04:10.101 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+echo "2026-10-20 19:05:00.000 E  swtor.exe[4300:1b] (IOGPU) IOGPUMetalError: <private>"
+echo "2026-10-20 19:05:01.000 E  Secret Diary[777:1c] (IOGPU) IOGPUMetalError: <private>"
+echo "2026-10-20 19:06:00.000 E  wine[4242:1e] (Metal) mdb_txn_commit error: MDB_MAP_FULL: Environment mapsize limit reached"
+echo "2026-10-20 19:07:00.000 Df kernel[0:2f] (AGXG14X) GPU restart, $HOME/x"
+echo "2026-10-20 19:07:01.000 E  kernel[0:2f] (AGXG14X) AGX: page fault in Secret Diary[777], /Users/AnotherPerson/private-project"
+echo "2026-10-20 19:07:02.000 E  kernel[0:2f] (AGX) IOGPUMetalError: timeout of wine64-preloader[4242]"
+for i in \$(seq 10 39); do echo "2026-10-20 19:08:00.\$i E  wine[4242:1f] (Metal) error \$i"; done
+EOF
+chmod +x "$SANDBOX/bin/log"
+# Metal's caches of the engine's processes in the sandbox's user cache dir: two gpuarchiver
+# folders of 1 MB each, no com.apple.metal
+GA="$SANDBOX/usercache/com.codeweavers.CrossOver.wineloader/com.apple.gpuarchiver"
+mkdir -p "$GA/a" "$GA/b" && dd if=/dev/zero of="$GA/a/x" bs=1024 count=1024 2>/dev/null && cp "$GA/a/x" "$GA/b/x"
 zip=$("$APP/Contents/Resources/collect-logs.sh" 2>"$SANDBOX/collect.err" || true)
 check "logs: zip on the sandbox Desktop" test -f "$zip" -a "${zip#"$H/Desktop/"}" != "$zip"
 if [ -f "$zip" ]; then
@@ -1050,7 +1189,70 @@ if [ -f "$zip" ]; then
   check "logs: crash reports redacted (home, user name, keys, e-mail)" eval '! grep -rq -e "$HOME" -e "/Users/$(id -un)/" -e SECRETKEY123 -e player@example.com "$CR" && grep -q "\"procPath\" : \"~/Library/Application Support/SWTOR on Mac/engine/bin/wine\"" "$CR/swtor.exe-2026-10-18-120000.ips"'
   check "logs: system info lists the crash reports, the newest first" eval '[ "$(sed -n "/^Crash reports/,/^\$/p" "$SI" | sed -n "2s/^  \([^ ]*\) .*/\1/p")" = swtor.exe-2026-10-18-120000.ips ] && [ "$(grep -c "^  [^l].*KB)\$" "$SI")" = 20 ]'
   check "logs: system info names the ones left out and why" eval 'grep -q "^  left out: wineserver-2026-10-18-110004.ips (over 10 MB together)" "$SI" && grep -q "^  left out: Star Wars - The Old Republic Launcher-2026-10-18-110005.ips (3500 KB, too large)" "$SI" && [ "$(grep -c "(more than 20 reports)" "$SI")" = 5 ]'
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  GE=$(echo "$SANDBOX"/zip/*/gpu-errors.txt)
+  check "logs: GPU errors counted per game and Wine process, other apps only as a number" eval 'grep -q "^IOGPUMetalError .*: 3 in the game and Wine, 1 in other apps\$" "$GE" && grep -q "^  wine (pid 4242): 2, " "$GE" && grep -q "^  swtor.exe (pid 4300): 1, " "$GE" && ! grep -q "Secret Diary" "$GE"'
+  check "logs: GPU errors: the fault lines, the last 20 other Metal errors, the full shader cache only counted" eval '[ "$(grep -c "IOGPUMetalError: <private>" "$GE")" = 3 ] && [ "$(grep -c "(Metal) error " "$GE")" = 20 ] && grep -q "(Metal) error 39\$" "$GE" && ! grep -q "(Metal) error 19\$" "$GE" && ! grep -q "mdb_txn" "$GE" && grep -q "^Metal.s archive usage index full (MDB_MAP_FULL) in the game and Wine: 1 lines; compiled shaders are still cached\$" "$GE"'
+  check "logs: GPU errors: the GPU driver's lines only as time, sender and kind (no other app, no folder)" eval 'grep -qx "2026-10-20 19:07:00.000 Df kernel (AGXG14X): GPU restart" "$GE" && grep -qx "2026-10-20 19:07:01.000 E kernel (AGXG14X): GPU fault" "$GE" && grep -qx "2026-10-20 19:07:02.000 E kernel (AGX): GPU timeout, names the game or Wine" "$GE" && ! grep -q -e AnotherPerson -e private-project -e "~/x" "$GE"'
+  check "logs: system info has the GPU error count" grep -q "^  IOGPUMetalError .*: 3 in the game and Wine, 1 in other apps\$" "$SI"
+  check "logs: system info has the sizes of Metal's caches for the engine (2 archives of 2 MB, no com.apple.metal)" eval 'grep -qx "  com.apple.gpuarchiver: 2.0 MB, 2 entries" "$SI" && grep -qx "  com.apple.metal: none" "$SI"'
 fi
+# a query that ignores TERM: ended with KILL after the limit and the grace time, and said so
+cat >"$SANDBOX/bin/log" <<'EOF'
+#!/bin/bash
+trap '' TERM
+echo $$ >"${0%/*}/log.pid"
+echo "2026-10-20 19:04:10.100 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+exec sleep 60
+EOF
+mkdir -p "$SANDBOX/zip-timeout"
+t0=$(date +%s)
+zip=$(SWTOR_ON_MAC_GPU_TIMEOUT=2 "$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-timeout" 2>>"$SANDBOX/collect.err" || true)
+t1=$(date +%s)
+check "logs: a query that ignores TERM is ended (2 s limit + 5 s grace: $((t1 - t0)) s)" test -f "$zip" -a $((t1 - t0)) -lt 30
+if [ -f "$zip" ]; then
+  unzip -q -o "$zip" -d "$SANDBOX/zip-timeout"
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  GE=$(echo "$SANDBOX"/zip-timeout/*/gpu-errors.txt)
+  check "logs: GPU errors say the query ran out of time, with what came until then" eval 'grep -qx "(the query ran out of time: what came until then)" "$GE" && grep -q "^IOGPUMetalError .*: 1 in the game and Wine\$" "$GE"'
+fi
+check "logs: no query left running" eval '[ -s "$SANDBOX/bin/log.pid" ] && ! kill -0 "$(cat "$SANDBOX/bin/log.pid")" 2>/dev/null'
+# a query that ends with status 0 on TERM: still out of time (what it wrote may be cut short)
+cat >"$SANDBOX/bin/log" <<'EOF'
+#!/bin/bash
+trap 'kill "$s"; exit 0' TERM
+echo "2026-10-20 19:04:10.100 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+sleep 60 & s=$!
+wait "$s"
+EOF
+mkdir -p "$SANDBOX/zip-term0"
+zip=$(SWTOR_ON_MAC_GPU_TIMEOUT=2 "$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-term0" 2>>"$SANDBOX/collect.err" || true)
+if [ -f "$zip" ]; then
+  unzip -q -o "$zip" -d "$SANDBOX/zip-term0"
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  GE=$(echo "$SANDBOX"/zip-term0/*/gpu-errors.txt)
+fi
+check "logs: a query that ends with status 0 on TERM: GPU errors say it ran out of time" eval '[ -f "$zip" ] && grep -qx "(the query ran out of time: what came until then)" "$GE"'
+# a query that ends while the watchdog hasn't started its sleep yet (an exported sleep function
+# holds it for 3 s first): the watchdog is ended too, at once, and the file has no time-out note
+cat >"$SANDBOX/bin/log" <<'EOF'
+#!/bin/bash
+echo "2026-10-20 19:04:10.100 E  wine[4242:1a] (IOGPU) IOGPUMetalError: <private>"
+EOF
+mkdir -p "$SANDBOX/zip-early"
+t0=$(date +%s)
+# shellcheck disable=SC2016 # (the function is the inner bash's)
+zip=$(SWTOR_ON_MAC_GPU_TIMEOUT=47 bash -c 'sleep() { local end=$((SECONDS + 3)); while [ "$SECONDS" -lt "$end" ]; do :; done; command sleep "$@"; }
+  export -f sleep; exec "$@"' - "$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-early" 2>>"$SANDBOX/collect.err" || true)
+t1=$(date +%s)
+check "logs: a query that ends before the watchdog's sleep starts ends the watchdog too ($((t1 - t0)) s, limit 47 s)" test -f "$zip" -a $((t1 - t0)) -lt 30
+if [ -f "$zip" ]; then
+  unzip -q -o "$zip" -d "$SANDBOX/zip-early"
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  GE=$(echo "$SANDBOX"/zip-early/*/gpu-errors.txt)
+  check "logs: GPU errors complete, no time-out note" eval '! grep -q "ran out of time" "$GE" && grep -q "^IOGPUMetalError .*: 1 in the game and Wine\$" "$GE"'
+fi
+check "logs: no watchdog sleep left" eval '! pgrep -fx "sleep 47" >/dev/null'
 # the Game Mode links the wrapper would have made at game start ("wine", or "swtor.exe" for a
 # start.exe command)
 pre="$SOM/engine/lib/wine/x86_64-unix/wine"; m=$(stat -f '%Fm' "$pre")
@@ -1119,7 +1321,7 @@ cached() { # <url> <sha256>: the path of the verified download in .cache
   if [ ! -f "$f" ]; then mkdir -p "${f%/*}"; curl -fsSL -o "$f.part" "$1" && mv "$f.part" "$f"; fi
   [ "$(shasum -a 256 "$f" | cut -d' ' -f1)" = "$2" ] && echo "$f"
 }
-val() { sed -n "s/^$1=//p" "$2" | head -1; }
+val() { sed -n "/^$1=/{s/^$1=//p;q;}" "$2"; }   # (the first one; no pipe to head, see has)
 DLC="$H/Library/Caches/SWTOR on Mac/downloads"
 seed() { mkdir -p "$DLC"; cp -c "$@" "$DLC/"; }
 NEW_ENGINE=$(cached "$(val ENGINE_URL "$SOMSH")" "$(val ENGINE_SHA256 "$SOMSH")")
@@ -1166,7 +1368,10 @@ fetch_mode alwaysdrop alwaysdrop fetch-stopped
 check "download: a connection that keeps dropping (both addresses): stopped at 192 of 224 MB, the part kept" eval 'grep -q "^@error The download of Wine engine stopped at 192 of 224 MB" "$SANDBOX/fetch-stopped.txt" && [ "$(stat -f %z "$DLC/$ENGINE_FILE.part")" = 201326592 ]'
 fetch_mode ok ok fetch-resumed
 check "download: the next try continues where it stopped" eval 'grep -q "^@done " "$SANDBOX/fetch-resumed.txt" && grep -q "resuming at 201326592 of" "$SANDBOX/fetch-resumed.log" && [ ! -e "$DLC/$ENGINE_FILE.part" ]'
-check "download: only the sandbox may name another server (the real one stays on the pinned URLs)" eval '(unset SWTOR_ON_MAC_ROOT; SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$SOMSH" fetch-engine 2>&1 | grep -q "verified download in the cache\|download $(val ENGINE_URL "$SOMSH")")'
+# (outside the sandbox: against the real home, as a dry run; what it said is kept in
+# fetch-real.txt with the time, for a look if it fails)
+(unset SWTOR_ON_MAC_ROOT; date '+%F %T'; SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$SOMSH" fetch-engine 2>&1 && echo "status 0" || echo "status $?") >"$SANDBOX/fetch-real.txt" 2>&1 || true
+check "download: only the sandbox may name another server (the real one stays on the pinned URLs)" grep -q "verified download in the cache\|download $(val ENGINE_URL "$SOMSH")" "$SANDBOX/fetch-real.txt"
 kill "$fserver" 2>/dev/null || true; wait "$fserver" 2>/dev/null || true
 rm -rf "$DLC"
 
@@ -1214,10 +1419,12 @@ if [ -x "$OLD_APP/Contents/Resources/som.sh" ]; then
 
   echo "== 11c. upgrade"
   seed "$NEW_ENGINE"
+  old_agent=$([ -f "$AGENT_PLIST" ] && echo yes || echo no)
   t0=$SECONDS
   som install >"$SANDBOX/upgrade.txt" 2>&1 || { tail -20 "$SANDBOX/upgrade.txt"; bad "upgrade exit"; }
   echo "  (upgrade took $((SECONDS - t0)) s)"
   check "upgrade: @done" grep -q '^@done' "$SANDBOX/upgrade.txt"
+  check "upgrade: $OLDV's launchd job and agent copy removed ($OLDV had one: $old_agent)" test ! -e "$AGENT_PLIST" -a ! -e "$SOM/agent"
   check "upgrade: said so" grep -q "^Upgrading SWTOR on Mac $OLDV" "$SANDBOX/upgrade.txt"
   check "upgrade: the new engine (engine_current=$(st engine_current), installed_engine=$(st installed_engine))" test "$(st engine_current)" = yes -a "$(st installed_engine)" = "$(val ENGINE_NAME "$SOMSH")"
   check "upgrade: Wine $(sbx_wine --version 2>/dev/null)" test "$(sbx_wine --version 2>/dev/null)" = wine-11.0
@@ -1253,7 +1460,7 @@ if [ -x "$OLD_APP/Contents/Resources/som.sh" ]; then
   check "downgrade: @done" grep -q '^@done' "$SANDBOX/downgrade.txt"
   check "downgrade: CrossOver 24.0.7 with its libraries again" eval 'test -f "$SOM/engine/bin/wine-preloader" -a -d "$SOM/frameworks" && [ "$(cat "$SOM/engine/.som-source")" = "$OLD_SHA" ]'
   check "downgrade: manifest $OLDV" test "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$OLDV"
-  check "downgrade: Wine $(sbx_wine --version 2>/dev/null)" eval 'sbx_wine --version 2>/dev/null | grep -q "^wine-9.0"'
+  check "downgrade: Wine $(sbx_wine --version 2>/dev/null)" eval 'sbx_wine --version 2>/dev/null | piped "^wine-9.0"'
   check "downgrade: settings kept" eval 'grep -qx physkeys=on "$SOM/settings.conf" && grep -qx memory=high "$SOM/settings.conf" && grep -qx retina=off "$SOM/settings.conf"'
   check "downgrade: $OLDV's Mac driver (game keys by position)" cmp -s "$OLD_APP/Contents/Resources/wine/winemac.so" "$SOM/engine/lib/wine/x86_64-unix/winemac.so"
   check "downgrade: game settings kept" grep -qx "keybinds-from-$OLDV" "$GS/upgrade-marker.ini"
@@ -1307,28 +1514,95 @@ fi
 # ContainerId), and without the monitors the display driver enumerates (while the Mac's display
 # sleeps, wineboot adds virtual ones: Enum\DISPLAY, the monitor class and interface keys, and
 # the display adapter class, which gains a link to them)
-prefix_snap() {
-  snap "$SOM/prefix" | grep -v -e '\.reg$' -e '\.reg|' -e '/dll[0-9a-f]*\.tmp$' -e '/dll[0-9a-f]*\.tmp|' \
+prefix_snap() {  # [prefix folder, default $SOM/prefix]
+  local p="${1:-$SOM/prefix}"
+  snap "$p" | grep -v -e '\.reg$' -e '\.reg|' -e '/dll[0-9a-f]*\.tmp$' -e '/dll[0-9a-f]*\.tmp|' \
     -e '^\./dosdevices/[a-y]:' -e '^\./dosdevices/z::'
   for r in system.reg user.reg userdef.reg; do
-    printf '%s ' "$r"; sed -e 's/^\(\[.*\]\) [0-9]*$/\1/' -e '/^#time=/d' -e '/^"PendingFileRenameOperations"=/d' -e '/^"ContainerId"=/d' "$SOM/prefix/$r" |
+    printf '%s ' "$r"; sed -e 's/^\(\[.*\]\) [0-9]*$/\1/' -e '/^#time=/d' -e '/^"PendingFileRenameOperations"=/d' -e '/^"ContainerId"=/d' "$p/$r" |
       awk 'index($0, "[") == 1 { skip = index($0, "\\\\Enum\\\\DISPLAY\\\\") || index($0, "{E6F07B5F-EE97-4A90-B076-33F57BF4EAA7}") ||
              index($0, "\\\\Class\\\\{4D36E96E-E325-11CE-BFC1-08002BE10318}") || index($0, "\\\\Class\\\\{4D36E968-E325-11CE-BFC1-08002BE10318}") } !skip' |
       shasum -a 256 | cut -d' ' -f1
   done
 }
+# prefix_changes <prefix_snap file> [prefix folder] [file for the snapshot now]: what differs in
+# the prefix now, one a line: a file's path (its metadata or its checksum), a registry file's
+# name (system.reg ...), and any other differing snapshot line as it is, so that nothing drops
+# out unnoticed. (Sections 15 and 16 keep both snapshots, so the comparison can be repeated.)
+prefix_changes() {
+  { prefix_snap "${2:-}" | tee "${3:-/dev/null}" | diff "$1" - || true; } | awk '
+    !/^[<>] / { next }
+    { l = substr($0, 3) }
+    l ~ /^\.\/[^|]*\|/ { sub(/\|.*/, "", l); print l; next }
+    l ~ /^[0-9a-f]+  \.\// && index(l, "  ") == 65 { print substr(l, 67); next }
+    l ~ /^(system|user|userdef)\.reg [0-9a-f]+$/ { sub(/ .*/, "", l); print l; next }
+    { print l }' | sort -u
+}
 # engine_same <name>: the engine's files that differ from $SANDBOX/<name>-engine (listed in
 # $SANDBOX/<name>-engine.diff) are the same code, but for ntdll.so and ntdll.so.stock (the
-# app's build and the engine's own, checked by ntdll_is_apps). A Developer ID build of either side signs its
-# Mach-O files, winemetal.so and winemac.so, with signatures of their own: those may differ,
-# their code not.
+# app's build and the engine's own, checked by ntdll_is_apps) and the app's Mac driver where
+# this version's build differs from the other's (winemac.so and its PE sides: then exactly this
+# app's files). A Developer ID build of either side signs its Mach-O files, winemetal.so and
+# winemac.so, with signatures of their own: those may differ, their code not.
 engine_same() {
   local f
   while IFS= read -r f; do
     case "$f" in ""|./lib/wine/x86_64-unix/ntdll.so|./lib/wine/x86_64-unix/ntdll.so.stock) continue ;; esac
+    case "$f" in
+      ./lib/wine/x86_64-unix/winemac.so)
+        ! cmp -s "$APP/Contents/Resources/wine/winemac.so" "$SOM/engine/$f" || continue ;;
+      ./lib/wine/x86_64-windows/winemac.drv|./lib/wine/i386-windows/winemac.drv)
+        ! cmp -s "$APP/Contents/Resources/wine/${f#./lib/wine/}" "$SOM/engine/$f" || continue ;;
+    esac
     macho_same "$SANDBOX/$1-engine/$f" "$SOM/engine/$f" || { echo "  differs: $f"; return 1; }
   done <"$SANDBOX/$1-engine.diff"
 }
+
+# prefix_changes itself (sections 15 and 16 allow only d3d9.dll to change): on a fake prefix,
+# a changed registry value, another file next to d3d9.dll and a new file are each reported,
+# a changed d3d9.dll alone gives just its path
+# piped itself (every check that greps a pipe uses it; a name of its own, as has is the session
+# report's): under pipefail, a match early in a long
+# output passes, and the same check negated fails (with grep -q both go wrong: the writer dies
+# of SIGPIPE once grep has stopped reading)
+echo "== 14a. a check on a pipe reads all of it"
+check "pipes: a match early in a long output passes" eval 'seq 1 200000 | piped -x 1'
+check "pipes: the same check negated fails" eval '! ( ! seq 1 200000 | piped -x 1 )'
+check "pipes: no check greps a pipe with grep -q" eval '! grep -n "| *grep -q" "$REPO/scripts/test-sandbox.sh" | grep -v "^[0-9]*: *#" | piped .'
+check "pipes: no helper is defined twice (a later one would replace the earlier for every check after it)" \
+  eval '[ -z "$(grep -o -E "^ *[A-Za-z_][A-Za-z0-9_]*\\(\\) *\\{" "$REPO/scripts/test-sandbox.sh" | sed -E "s/^ *//; s/\\(\\).*//" | sort | uniq -d)" ]'
+
+echo "== 14b. the prefix comparison sees what changed"
+FP="$SANDBOX/fake-prefix"; rm -rf "$FP"; mkdir -p "$FP/drive_c/windows/system32"
+echo dll >"$FP/drive_c/windows/system32/d3d9.dll"; echo x >"$FP/drive_c/windows/system32/d3d9Xdll"
+for r in system.reg user.reg userdef.reg; do printf 'WINE REGISTRY Version 2\n\n[Software\\\\Test] 1\n"A"="1"\n' >"$FP/$r"; done
+prefix_snap "$FP" >"$SANDBOX/fake-prefix.txt"
+echo dll2 >"$FP/drive_c/windows/system32/d3d9.dll"
+check "prefix comparison: a changed d3d9.dll alone gives just its path" eval '[ "$(prefix_changes "$SANDBOX/fake-prefix.txt" "$FP")" = ./drive_c/windows/system32/d3d9.dll ]'
+sed -i '' 's/"A"="1"/"A"="2"/' "$FP/user.reg"
+check "prefix comparison: a changed registry value is reported (user.reg)" eval 'prefix_changes "$SANDBOX/fake-prefix.txt" "$FP" | piped -x user.reg'
+sed -i '' 's/"A"="2"/"A"="1"/' "$FP/user.reg"; echo y >"$FP/drive_c/windows/system32/d3d9Xdll"
+check "prefix comparison: a file named like d3d9.dll is reported and not taken for it" eval '[ -n "$(prefix_changes "$SANDBOX/fake-prefix.txt" "$FP" | grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll)" ]'
+echo new >"$FP/drive_c/new.txt"
+check "prefix comparison: a new file is reported" eval 'prefix_changes "$SANDBOX/fake-prefix.txt" "$FP" | piped -x ./drive_c/new.txt'
+rm -rf "$FP"
+
+# engine_same itself (sections 15 and 16): on fake engines, this app's Mac driver over another
+# build passes; a Mac driver that isn't this app's, or another changed file, fails
+echo "== 14c. the engine comparison allows only this app's Mac driver"
+FE="$SANDBOX/fake-som"; rm -rf "$FE" "$SANDBOX/fake-engine"
+mkdir -p "$FE/engine/lib/wine/x86_64-unix" "$SANDBOX/fake-engine/lib/wine/x86_64-unix"
+cp "$APP/Contents/Resources/wine/winemac.so" "$FE/engine/lib/wine/x86_64-unix/winemac.so"
+echo older >"$SANDBOX/fake-engine/lib/wine/x86_64-unix/winemac.so"
+echo ./lib/wine/x86_64-unix/winemac.so >"$SANDBOX/fake-engine.diff"
+check "engine comparison: this app's Mac driver over another build passes" eval '( SOM="$FE"; engine_same fake )'
+echo other >"$FE/engine/lib/wine/x86_64-unix/winemac.so"
+check "engine comparison: a Mac driver that isn't this app's fails" eval '! ( SOM="$FE"; engine_same fake ) >/dev/null 2>&1'
+cp "$APP/Contents/Resources/wine/winemac.so" "$FE/engine/lib/wine/x86_64-unix/winemac.so"
+echo a >"$SANDBOX/fake-engine/lib/wine/x86_64-unix/other.so"; echo b >"$FE/engine/lib/wine/x86_64-unix/other.so"
+echo ./lib/wine/x86_64-unix/other.so >>"$SANDBOX/fake-engine.diff"
+check "engine comparison: another changed file fails" eval '! ( SOM="$FE"; engine_same fake ) >/dev/null 2>&1'
+rm -rf "$FE" "$SANDBOX/fake-engine" "$SANDBOX/fake-engine.diff"
 
 if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   PREVSOM="$PREV_APP/Contents/Resources/som.sh"
@@ -1349,7 +1623,7 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   envnorm() {
     sed -e "s/$PREVV/V/g; s/$APPV/V/g" -e 's/^SWTOR_D9MT=.*/SWTOR_D9MT=H/' "$1" |
       { if [ "$CHANNEL" = dev ]; then sed 's/^SWTOR_UPDATE_CHECK=.*/SWTOR_UPDATE_CHECK=X/'; else cat; fi; } |
-      grep -v -e '^#' -e '^$' -e '^D9MT_STATE_CACHE=' -e 'd9mt-ab\.env'
+      grep -v -e '^#' -e '^$' -e '^D9MT_STATE_CACHE=' -e 'd9mt-ab\.env' -e '^SWTOR_FPS_LIMIT=' -e '^SWTOR_FPS_LIMIT_BATTERY='
   }
   prefix_snap >"$SANDBOX/prev-prefix.txt"
   snap "$SOM/engine" >"$SANDBOX/prev-engine.txt"
@@ -1358,23 +1632,26 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   check "$PREVV: env has the D9MT_STATE_CACHE line exactly if $PREVV writes it" eval '[ "$(grep -c "^D9MT_STATE_CACHE=" "$SOM/env")" = "$(grep -q "^D9MT_STATE_CACHE=" "$PREVSOM" && echo 1 || echo 0)" ]'
   check "$PREVV: no Wine left running" test -z "$(sandbox_wine)"
 
+  # (0.1.3 and older set up a launchd job for launcher updates; in a sandbox it is written, never loaded)
+  prev_agent=$([ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ] && echo yes || echo no)
   som install >"$SANDBOX/prev-upgrade.txt" 2>&1 || { tail -20 "$SANDBOX/prev-upgrade.txt"; bad "install over $PREVV exit"; }
+  check "over $PREVV: its launchd job and agent copy removed, said so ($PREVV had one: $prev_agent)" eval '[ ! -e "$AGENT_PLIST" ] && [ ! -e "$SOM/agent" ] && { grep -q "^Removed the launcher-update guard of an older version" "$SANDBOX/prev-upgrade.txt" || [ "$prev_agent" = no ]; }'
   check "over $PREVV: @done, manifest $APPV" eval 'grep -q "^@done" "$SANDBOX/prev-upgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$APPV" ]'
   check "over $PREVV: the engine already in place, no download" eval 'grep -q "is already in place" "$SANDBOX/prev-upgrade.txt" && ! grep -q "Unpacking the Wine engine" "$SANDBOX/prev-upgrade.txt"'
-  { prefix_snap | diff "$SANDBOX/prev-prefix.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-prefix.diff"
+  prefix_changes "$SANDBOX/prev-prefix.txt" "" "$SANDBOX/prev-prefix-after.txt" >"$SANDBOX/prev-prefix.diff"
   # (a previous release with this version's d3d9.dll, 0.1.2 for 0.1.3: nothing changes)
-  check "over $PREVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" eval '[ -z "$(grep -v -x ./drive_c/windows/system32/d3d9.dll "$SANDBOX/prev-prefix.diff")" ]'
+  check "over $PREVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" eval '[ -z "$(grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll "$SANDBOX/prev-prefix.diff")" ]'
   check "over $PREVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/prev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-engine.diff"
-  check "over $PREVV: the engine unchanged, signatures aside, but ntdll.so ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same prev
+  check "over $PREVV: the engine unchanged, signatures aside, but ntdll.so and this app's Mac driver ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same prev
   # ($PREVV's ntdll.so: the engine's own, or, from 0.1.2 on, the app's build in its own signature)
   check "over $PREVV: the app's ntdll.so, the engine's own kept as .stock" eval 'ntdll_is_apps && { cmp -s "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" || macho_same "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so"; }'
   check "over $PREVV: winemetal.so is $PREVV's code (LC_UUID $(dwarfdump -u "$WM/winemetal.so" | awk '{ print $2 }'))" eval 'macho_same "$PREV_APP/Contents/Resources/d9mt/winemetal.so" "$WM/winemetal.so" && [ "$(dwarfdump -u "$WM/winemetal.so" | awk "{ print \$2 }")" = "$(dwarfdump -u "$PREV_APP/Contents/Resources/d9mt/winemetal.so" | awk "{ print \$2 }")" ]'
   check "over $PREVV: winemetal.dll byte for byte $PREVV's" cmp -s "$PREV_APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll"
-  # (settings.conf: this version writes every setting it knows, so one $PREVV does not know,
-  # hudpos, comes in with its default)
-  check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter), dxvk.conf unchanged" eval 'diff <(grep -v "^hudpos=" "$SANDBOX/prev-settings.conf") <(grep -v "^hudpos=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
-  check "over $PREVV: env: the state cache line$([ "$CHANNEL" = dev ] && echo " and the A/B include") added, the rest as before (versions aside)" eval 'diff <(envnorm "$SANDBOX/prev-env") <(envnorm "$SOM/env") >"$SANDBOX/prev-env.diff" && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ]'
+  # (settings.conf: this version writes every setting it knows, so the ones $PREVV does not know,
+  # hudpos, fpslimit and fpsbattery, come in with their defaults)
+  check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter, fpslimit=off, fpsbattery=off), dxvk.conf unchanged" eval 'diff <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/prev-settings.conf") <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && grep -qx fpslimit=off "$SOM/settings.conf" && grep -qx fpsbattery=off "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
+  check "over $PREVV: env: the state cache line, the Frame Rate Limit lines (off)$([ "$CHANNEL" = dev ] && echo " and the A/B include") added, the rest as before (versions aside)" eval 'diff <(envnorm "$SANDBOX/prev-env") <(envnorm "$SOM/env") >"$SANDBOX/prev-env.diff" && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && [ "$(envv SWTOR_FPS_LIMIT)/$(envv SWTOR_FPS_LIMIT_BATTERY)" = 0/0 ]'
   check "over $PREVV: no Wine left running" test -z "$(sandbox_wine)"
   [ "$CHANNEL" != dev ] || "$APP/Contents/Resources/d9mt-ab.sh" pfv >/dev/null
 
@@ -1422,22 +1699,30 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   rm -rf "$SANDBOX/dev-engine" && cp -c -R -p "$SOM/engine" "$SANDBOX/dev-engine"
   cp "$SOM/settings.conf" "$SANDBOX/dev-settings.conf"
 
+  dev_agent=$([ -f "$AGENT_PLIST" ] && [ -d "$SOM/agent" ] && echo yes || echo no)
   som install >"$SANDBOX/dev-upgrade.txt" 2>&1 || { tail -20 "$SANDBOX/dev-upgrade.txt"; bad "install over $DEVV exit"; }
+  check "over $DEVV: its launchd job and agent copy removed ($DEVV had one: $dev_agent)" test ! -e "$AGENT_PLIST" -a ! -e "$SOM/agent"
   check "over $DEVV: @done, manifest $APPV" eval 'grep -q "^@done" "$SANDBOX/dev-upgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$APPV" ]'
   check "over $DEVV: the A/B switches removed, said so" eval '[ ! -e "$SOM/d9mt-ab.env" ] && grep -q "^Removed a development build.s d9mt A/B switches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: the cold test caches removed, said so" eval '[ ! -e "$COLD" ] && grep -q "^Removed a development build.s d9mt test caches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: env as a release writes it (no A/B include, state cache on, update check on)" eval '! grep -q d9mt-ab "$SOM/env" && [ "$(envv D9MT_TEX_PFV)/$(envv SWTOR_D9MT_AB)" = "<unset>/<unset>" ] && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && grep -qx SWTOR_UPDATE_CHECK=1 "$SOM/env"'
-  check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high)" cmp -s "$SANDBOX/dev-settings.conf" "$SOM/settings.conf"
-  check "over $DEVV: the same d3d9.dll as $DEVV" cmp -s "$DEV_APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
-  check "over $DEVV: the prefix as $DEVV left it" eval 'prefix_snap | diff "$SANDBOX/dev-prefix.txt" - >"$SANDBOX/dev-prefix.diff"'
+  # (this version writes every setting it knows: the Frame Rate Limit's two, which $DEVV does
+  # not know, come in with their defaults; everything else byte for byte)
+  check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high), only fpslimit=off and fpsbattery=off added" \
+    eval '! grep -q -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/dev-settings.conf" && [ "$(grep -c "^fpslimit=" "$SOM/settings.conf")" = 1 ] && grep -qx fpslimit=off "$SOM/settings.conf" && [ "$(grep -c "^fpsbattery=" "$SOM/settings.conf")" = 1 ] && grep -qx fpsbattery=off "$SOM/settings.conf" && cmp -s "$SANDBOX/dev-settings.conf" <(perl -ne "print unless /^(fpslimit|fpsbattery)=/" "$SOM/settings.conf")'
+  prefix_changes "$SANDBOX/dev-prefix.txt" "" "$SANDBOX/dev-prefix-after.txt" >"$SANDBOX/dev-prefix.diff"
+  # (a development build with this version's d3d9.dll, 0.1.2-dev.3 for 0.1.2 and 0.1.3: nothing
+  # changes; with an older pin, d3d9.dll)
+  check "over $DEVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/dev-prefix.diff"))" eval '[ -z "$(grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll "$SANDBOX/dev-prefix.diff")" ]'
+  check "over $DEVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/dev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/dev-engine.diff"
-  check "over $DEVV: the engine unchanged, signatures aside, but ntdll.so ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev
+  check "over $DEVV: the engine unchanged, signatures aside, but ntdll.so and this app's Mac driver ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev
   # ($DEVV's ntdll.so: the engine's own, or, from 0.1.2-dev.1 on, the app's build in its own
   # signature, its code ours)
   check "over $DEVV: the app's ntdll.so, the engine's own kept as .stock ($DEVV had $(cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" && echo "the engine's" || echo "the app's build"))" eval 'ntdll_is_apps && { cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" || macho_same "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so"; }'
   check "over $DEVV: no Wine left running" test -z "$(sandbox_wine)"
   som install >"$SANDBOX/dev-reinstall.txt" 2>&1 || bad "reinstall after $DEVV exit"
-  check "over $DEVV: a Reinstall after it has nothing more to remove" eval 'grep -q "^@done" "$SANDBOX/dev-reinstall.txt" && ! grep -q "^Removed a development build" "$SANDBOX/dev-reinstall.txt"'
+  check "over $DEVV: a Reinstall after it has nothing more to remove" eval 'grep -q "^@done" "$SANDBOX/dev-reinstall.txt" && ! grep -q -e "^Removed a development build" -e "^Removed the launcher-update guard" "$SANDBOX/dev-reinstall.txt"'
   som uninstall >"$SANDBOX/uninstall5.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall5.txt"; bad "uninstall after $DEVV"; }
   check "uninstall after $DEVV: official install identical to stock" like_stock uninstall5
   check "uninstall after $DEVV: app files and caches gone" eval 'for c in engine prefix gamemode env settings.conf install-manifest.json d9mt-ab.env dev-defaults; do [ ! -e "$SOM/$c" ] || exit 1; done; [ ! -e "$H/Library/Caches/SWTOR on Mac" ]'

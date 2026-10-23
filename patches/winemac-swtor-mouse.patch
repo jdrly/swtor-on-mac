@@ -18,7 +18,8 @@ SWTOR on Mac's changes on top of SWGL on Mac's two mouse patches
   (SWTOR on Mac 0.1.0-dev.1 and earlier) can leave this PE side with an older unix side.
 - Debug output: warn+rawmouse, a RAWMOUSE line a second while moves are sent (both sources,
   the measured ratio); warn+threadcpu, a THREADCPU line a second from the input thread: the
-  CPU time of the process, its busiest threads and the session's wineserver, in the process
+  CPU time of the process, its busiest threads and the session's wineserver (its task times
+  are Mach ticks, 41.67 ns each on Apple silicon, converted with hw.tbfrequency), in the process
   whose ThreadCpuStats option is on (swtor.exe; the session's other processes inherit its
   WINEDEBUG and stderr).
 
@@ -329,7 +330,7 @@ diff -ru a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
 diff -ru a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
 --- a/dlls/winemac.drv/mouse.c
 +++ b/dlls/winemac.drv/mouse.c
-@@ -26,8 +26,14 @@
+@@ -26,8 +26,15 @@
  
  #include "config.h"
  
@@ -341,10 +342,11 @@ diff -ru a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
 +#include <poll.h>
 +#include <stdlib.h>
 +#include <sys/proc_info.h>
++#include <sys/sysctl.h>
  #include <pthread.h>
  #include <pthread/qos.h>
  #include <os/lock.h>
-@@ -39,6 +45,8 @@
+@@ -39,6 +46,8 @@
  #include "wine/server.h"
  
  WINE_DEFAULT_DEBUG_CHANNEL(cursor);
@@ -353,7 +355,7 @@ diff -ru a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
  
  
  static pthread_mutex_t cursor_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
-@@ -298,8 +306,19 @@
+@@ -298,8 +307,19 @@
          len += snprintf(buf + len, sizeof(buf) - len, "%s%s %u events (%d,%d)", i ? ", " : "",
                          names[i], events, dx, dy);
      }
@@ -375,7 +377,7 @@ diff -ru a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
      raw_mouse_stats_ns = now;
  }
  
-@@ -349,7 +368,7 @@
+@@ -349,7 +369,7 @@
          tail = __atomic_load_n(&raw_moves_tail, __ATOMIC_ACQUIRE);
      }
  
@@ -384,7 +386,7 @@ diff -ru a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
  
      pthread_mutex_unlock(&raw_moves_mutex);
  }
-@@ -451,6 +470,136 @@
+@@ -451,6 +471,153 @@
  
  
  /***********************************************************************
@@ -442,6 +444,23 @@ diff -ru a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
 +    return found;
 +}
 +
++/* PROC_PIDTASKINFO's times are Mach absolute-time ticks, not nanoseconds: 41.67 ns each on
++   Apple silicon (hw.tbfrequency 24 MHz), also for a process under Rosetta, whose
++   mach_timebase_info says 1/1. (PROC_PIDTHREADINFO's thread times are nanoseconds.) */
++static uint64_t thread_cpu_ticks_to_ns(uint64_t ticks)
++{
++    static uint64_t freq;
++
++    if (!freq)
++    {
++        uint64_t f = 0;
++        size_t size = sizeof(f);
++        if (sysctlbyname("hw.tbfrequency", &f, &size, NULL, 0) || !f) f = 1000000000;
++        freq = f;
++    }
++    return ticks / freq * 1000000000 + ticks % freq * 1000000000 / freq;
++}
++
 +static void trace_thread_cpu(void)
 +{
 +    static uint64_t handles[THREAD_CPU_MAX];
@@ -459,7 +478,7 @@ diff -ru a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
 +        struct proc_taskinfo ti;
 +        if (proc_pidinfo(thread_cpu_server, PROC_PIDTASKINFO, 0, &ti, sizeof(ti)) == sizeof(ti))
 +        {
-+            uint64_t ns = ti.pti_total_user + ti.pti_total_system;
++            uint64_t ns = thread_cpu_ticks_to_ns(ti.pti_total_user + ti.pti_total_system);
 +            server = thread_cpu_server_ns ? ns - thread_cpu_server_ns : 0;
 +            thread_cpu_server_ns = ns;
 +        }
@@ -521,7 +540,7 @@ diff -ru a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
   *              macdrv_raw_input_thread
   *
   * The body of the raw input thread, a Wine thread of this process created
-@@ -461,13 +610,25 @@
+@@ -461,13 +628,25 @@
  {
      int fds[2], expected = 0;
      char buf[64];
@@ -549,7 +568,7 @@ diff -ru a/dlls/winemac.drv/mouse.c b/dlls/winemac.drv/mouse.c
      if (!__atomic_compare_exchange_n(&raw_input_thread_state, &expected, 1, FALSE,
                                       __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
      {
-@@ -494,6 +655,22 @@
+@@ -494,6 +673,22 @@
  
      for (;;)
      {

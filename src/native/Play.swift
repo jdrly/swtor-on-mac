@@ -4,13 +4,16 @@
 //
 // The official app is where som.sh status finds it (official_app_path: /Applications, or the
 // sandbox's under SWTOR_ON_MAC_ROOT); outside a sandbox, if it is not there, wherever Launch
-// Services knows it by its bundle id (com.solidstatenetworks.host, the launcher's: Solid State
-// Networks' launcher host, so the name must match too). In a sandbox it is never anything
+// Services knows it by one of its bundle ids (Installer.launcherBundleIDs: BioWare's since
+// launcher 7.2.207, Solid State Networks' launcher host before; the name must match too). In a
+// sandbox it is never anything
 // outside the sandbox, and a running SWTOR outside it is not brought to the front.
 //
 //   SWTORonMac --play-target   prints what the button would do and exits (no window, nothing
 //                              is opened): "launch <path>", "show launcher|game" or
 //                              "unavailable <reason>"
+//   SWTORonMac --play-check    the same after the hook check that a press runs first (som.sh
+//                              rehook, then a fresh status): what a press would then do
 //   SWTORonMac --is-game BUNDLE_ID PATH PID   "game" or "not game": whether an app with that
 //                              bundle id ("-": none), executable path and process counts as the
 //                              game (isGame), for tests
@@ -29,6 +32,12 @@ extension Installer {
   // Settings: "Quit SWTOR on Mac after launching" (off by default)
   static let quitAfterLaunchKey = "quitAfterLaunch"
 
+  // The SWTOR launcher or the game runs: the window's warp stops (Warp.swift), so the app takes
+  // no CPU or GPU time from the game.
+  var swtorRunning: Bool {
+    runningLauncher || runningGame || busy == "launcher" || busy == "game"
+  }
+
   // What the button does right now.
   var playAction: PlayAction {
     Installer.playAction(status: status, working: isBusy, launcher: runningLauncher, game: runningGame)
@@ -43,7 +52,7 @@ extension Installer {
     guard status["installed"] == "yes" else { return .unavailable("Install SWTOR on Mac first.") }
     switch status["wrapper"] {
     case "ours": break
-    case "replaced": return .unavailable("A launcher update removed the hook. Repair it first.")
+    case "replaced": return .unavailable("A launcher update removed the hook. Play SWTOR hooks it back in first, or click Repair.")
     default: return .unavailable("The launcher hook is not active. Reinstall SWTOR on Mac first.")
     }
     let busy = status["busy"] ?? ""
@@ -69,10 +78,11 @@ extension Installer {
     }
     guard root == nil else { return nil }
     let named = { (url: URL) in url.lastPathComponent.localizedCaseInsensitiveContains("Old Republic") }
-    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: launcherBundleID), named(url) {
-      return url
+    for id in launcherBundleIDs {
+      if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id), named(url) { return url }
+      if let url = NSWorkspace.shared.urlsForApplications(withBundleIdentifier: id).first(where: named) { return url }
     }
-    return NSWorkspace.shared.urlsForApplications(withBundleIdentifier: launcherBundleID).first(where: named)
+    return nil
   }
 
   // path is in folder (both as given, or both standardized: /private/tmp is /tmp)
@@ -188,12 +198,48 @@ extension Installer {
     pid > 0 && (kill(pid, 0) == 0 || errno == EPERM)
   }
 
-  // The button. then: an error to show, if any.
+  // What the button offers: as playAction, but a hook that a launcher update replaced (or that
+  // is Broadsword's own again) can be pressed too: the press checks and repairs it first.
+  var playButtonAction: PlayAction {
+    let action = playAction
+    if case .unavailable = action, installed, !isBusy, wrapper == "replaced" || wrapper == "stock",
+       let url = Installer.officialAppURL(status) {
+      return .launch(url)
+    }
+    return action
+  }
+
+  nonisolated static let changingMessage =
+    "SWTOR's launcher is changing its Wine right now. Wait until it has finished, then press Play SWTOR again."
+
+  // What a press does after the hook check: playAction on the fresh status, with the reason
+  // the check gave if it had to leave the hook alone.
+  nonisolated static func playAfterCheck(answer: String, status: [String: String], working: Bool = false,
+                                        launcher: Bool, game: Bool) -> PlayAction {
+    let action = playAction(status: status, working: working, launcher: launcher, game: game)
+    if answer == "@notice changing", case .unavailable = action { return .unavailable(changingMessage) }
+    return action
+  }
+
+  // The button. then: an error to show, if any. Before opening the official app, the hook
+  // check runs (a launcher update may have replaced the hook since the last status, cached or
+  // not), and the fresh status decides; showing a running launcher or game needs no check.
   func play(then: @escaping (String?) -> Void) {
-    switch playAction {
+    switch playButtonAction {
     case .unavailable(let reason): then(reason)
     case .show: showSWTOR(then: then)
-    case .launch(let url): launch(url, then: then)
+    case .launch:
+      rehook { [weak self] answer in
+        guard let self else { return }
+        // the operation state right now (an install or uninstall can't have started meanwhile,
+        // the check held the reservation, but it is what decides)
+        switch Installer.playAfterCheck(answer: answer, status: self.status, working: self.isBusy,
+                                        launcher: self.runningLauncher, game: self.runningGame) {
+        case .unavailable(let reason): then(reason)
+        case .show: self.showSWTOR(then: then)
+        case .launch(let url): self.launch(url, then: then)
+        }
+      }
     }
   }
 
@@ -245,12 +291,12 @@ extension Installer {
     then(nil)
   }
 
-  // SWTORonMac --play-target
-  nonisolated static func printPlayTarget() {
+  // som.sh <arguments>, synchronously (the command-line modes)
+  nonisolated static func runScript(_ arguments: [String]) -> String {
     let script = Bundle.main.resourceURL!.appendingPathComponent("som.sh")
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/bash")
-    process.arguments = [script.path, "status"]
+    process.arguments = [script.path] + arguments
     process.standardInput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
     let pipe = Pipe()
@@ -260,9 +306,18 @@ extension Installer {
       output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
       process.waitUntilExit()
     }
-    let status = parseStatus(output)
+    return output
+  }
+
+  // SWTORonMac --play-target, and --play-check (after the hook check a press runs first)
+  nonisolated static func printPlayTarget(check: Bool = false) {
+    let answer = check ? rehookAnswer(runScript(["rehook"])) : ""
+    let status = parseStatus(runScript(["status"]))
     let running = runningSWTOR(status)
-    switch playAction(status: status, working: false, launcher: running.launcher != nil, game: running.game != nil) {
+    let action = check
+      ? playAfterCheck(answer: answer, status: status, launcher: running.launcher != nil, game: running.game != nil)
+      : playAction(status: status, working: false, launcher: running.launcher != nil, game: running.game != nil)
+    switch action {
     case .launch(let url): print("launch \(url.path)")
     case .show(let game): print("show \(game ? "game" : "launcher")")
     case .unavailable(let reason): print("unavailable \(reason)")

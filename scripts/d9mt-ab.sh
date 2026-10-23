@@ -20,6 +20,11 @@
 #   vsync-off     DXVK_CONFIG d3d9.presentInterval=0 (vsync off, whatever Settings says)
 #   repro         DXVK_CONFIG d3d9.reproducibleCommandStream=True (no implicit mid-frame
 #                 submits: the split counters without them)
+#   cap=<fps>     D9MT_FPS_CAP=<fps> (20-1000): d9mt's frame cap, as Settings' Frame Rate Limit
+#                 sets it (that one wins while it is on)
+#   cap-noalign   D9MT_FPS_CAP_ALIGN=0: the cap's timer only, presents not aligned to vsync
+#   dxvkcap=<fps> DXVK_CONFIG d3d9.maxFrameRate=<fps>: DXVK's frame limiter (busy-waits the last
+#                 4+ ms of every sleep), the cap before 0.1.3, for comparison
 #   cold=<name>   an empty shader cache and pipeline archives of their own for this run, in
 #                 ~/Library/Caches/SWTOR on Mac/d9mt-ab/<name> (D9MT_AIR_CACHE,
 #                 D9MT_PSO_ARCHIVE_DIR): the game starts as after an update that changed
@@ -81,6 +86,16 @@ for a in "$@"; do
       var 'D9MT_TEX_PFV=1'; var 'D9MT_PASS_BARRIER=all'; var 'D9MT_CLEAR_DISCARD=0' ;;
     vsync-off) add "$a"; case "$config" in *presentInterval*) ;; *) config="${config:+$config;}d3d9.presentInterval=0" ;; esac ;;
     repro) add "$a"; case "$config" in *reproducible*) ;; *) config="${config:+$config;}d3d9.reproducibleCommandStream=True" ;; esac ;;
+    cap=*|dxvkcap=*)
+      n=${a#*=}
+      case "$n" in ''|*[!0-9]*) echo "$a: a frame rate, 20 to 1000" >&2; exit 2 ;; esac
+      [ "$n" -ge 20 ] && [ "$n" -le 1000 ] || { echo "$a: a frame rate, 20 to 1000" >&2; exit 2; }
+      add "$a"
+      case "$a" in
+        cap=*) var "D9MT_FPS_CAP=$n" ;;
+        *) case "$config" in *maxFrameRate*) ;; *) config="${config:+$config;}d3d9.maxFrameRate=$n" ;; esac ;;
+      esac ;;
+    cap-noalign) add "$a"; var 'D9MT_FPS_CAP_ALIGN=0' ;;
     cold=*)
       n=${a#cold=}
       case "$n" in ''|*[!A-Za-z0-9._-]*|.*) echo "cold=<name>: letters, digits, . _ - only" >&2; exit 2 ;; esac
