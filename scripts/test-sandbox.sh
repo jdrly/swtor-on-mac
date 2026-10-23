@@ -1548,7 +1548,7 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   # (this version writes every setting it knows: the Frame Rate Limit's two, which $DEVV does
   # not know, come in with their defaults; everything else byte for byte)
   check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high), only fpslimit=off and fpsbattery=off added" \
-    eval 'diff <(grep -v -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/dev-settings.conf") <(grep -v -e "^fpslimit=" -e "^fpsbattery=" "$SOM/settings.conf") >/dev/null && ! grep -q -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/dev-settings.conf" && [ "$(grep -c -x -e fpslimit=off -e fpsbattery=off "$SOM/settings.conf")" = 2 ] && [ "$(grep -c -e "^fpslimit=" -e "^fpsbattery=" "$SOM/settings.conf")" = 2 ]'
+    eval '! grep -q -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/dev-settings.conf" && [ "$(grep -c "^fpslimit=" "$SOM/settings.conf")" = 1 ] && grep -qx fpslimit=off "$SOM/settings.conf" && [ "$(grep -c "^fpsbattery=" "$SOM/settings.conf")" = 1 ] && grep -qx fpsbattery=off "$SOM/settings.conf" && cmp -s "$SANDBOX/dev-settings.conf" <(perl -ne "print unless /^(fpslimit|fpsbattery)=/" "$SOM/settings.conf")'
   prefix_changes "$SANDBOX/dev-prefix.txt" "" "$SANDBOX/dev-prefix-after.txt" >"$SANDBOX/dev-prefix.diff"
   # (a development build with this version's d3d9.dll, 0.1.2-dev.3 for 0.1.2 and 0.1.3: nothing
   # changes; with an older pin, d3d9.dll)
