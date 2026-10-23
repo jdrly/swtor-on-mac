@@ -528,8 +528,10 @@ enum AppActions {
   }
 }
 
-// Collect Logs…: Resources/collect-logs.sh zips the logs for a bug report (a few seconds: off
-// the main thread) and prints the zip's path; then say where it is and show it in Finder.
+// Collect Logs…: Resources/collect-logs.sh zips the logs for a bug report (10-30 s, most of it
+// reading GPU errors from macOS's unified log: off the main thread, the menu item says
+// "Collecting Logs…" meanwhile) and prints the zip's path; then say where it is and show it in
+// Finder.
 @MainActor @Observable
 final class LogCollector {
   var busy = false
@@ -613,7 +615,7 @@ struct AppCommands: Commands {
       }
       .keyboardShortcut(",")
       .disabled(!installer.installed)
-      Button("Collect Logs…") { logs.collect() }
+      Button(logs.busy ? "Collecting Logs…" : "Collect Logs…") { logs.collect() }
         .disabled(logs.busy)
     }
     CommandGroup(replacing: .newItem) {}
