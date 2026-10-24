@@ -322,6 +322,10 @@ and the game's command line (the launcher passes the account on it) is never inc
 **Settings > Debug Logging** only when asked: it makes the logs much more detailed for the next
 game start, at some cost in performance, so turn it off again afterwards.
 
+`D9MT-GPU-HUNG` in `wine.log` means that submitted GPU work didn't complete for about 10 seconds
+and d9mt ended the game (`D9MT_GPU_HUNG=continue` keeps the old behaviour, a frozen game). Collect
+Logs before starting the game again, which replaces `wine.log`.
+
 ## Known issues
 
 - **The Wine engine changed in 0.1** (CrossOver 26.3 with Wine 11, before CrossOver 24.0.7
@@ -591,11 +595,12 @@ local feed, as in SWGL on Mac.
   (Homebrew bash, mingw-w64, cmake, ninja, Xcode; an LLVM 15 build for macOS 26 via
   `D9MT_LLVM`): d9mt's `scripts/fetch-deps.sh` (dxbc-spirv at its pin with d9mt's patches),
   then a build from scratch every time. It is reproducible: `SOURCE_DATE_EPOCH` is the commit's
-  time, and the same `D9MT_WORK` path gives the same `d3d9.dll`. (0.1.1's `winemetal.dll` is
-  0.1.0's: the bridge's source is the same, and `SOURCE_DATE_EPOCH=1792149856` builds it byte
-  for byte. 0.1.2's `d3d9.dll` is d9mt main `2a1bc00` built with `SOURCE_DATE_EPOCH=1792457826`,
+  time, and the same `D9MT_WORK` path gives the same `d3d9.dll`. (The bridge's source is
+  0.1.0's, so the script builds it with `SOURCE_DATE_EPOCH=1792149856`, which gives 0.1.0's
+  `winemetal.dll` byte for byte at the default `D9MT_WORK` (its image base follows the path too), and checks both bridge files against their shipped sha256. 0.1.2's `d3d9.dll` is d9mt main `2a1bc00` built with `SOURCE_DATE_EPOCH=1792457826`,
   the time of `c3f46ce`, which has the same tree: byte for byte the file 0.1.2-dev.2 and dev.3
-  were tested with. 0.1.4 pins main `b0d4597` and 0.1.5 main `08827cb`, each built with its own commit time.)
+  were tested with. 0.1.4 pins main `b0d4597` and 0.1.5 main `08827cb`, each built with its own commit time;
+  `08827cb`'s at the default `D9MT_WORK`.)
 - `build.sh` assembles `dist/SWTOR on Mac.app` with Sparkle (pinned download; ad-hoc signed;
   `--install` copies it to /Applications). Needs Xcode 27 (macOS 27 SDK); the app runs on
   macOS 26 and later.
