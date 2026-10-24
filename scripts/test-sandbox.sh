@@ -825,6 +825,7 @@ echo "\$@" >>"$U/wine-args"
 case " \$* " in
   *swtor.exe*)
     echo "\$\$ \$PPID" >"$U/game-pids"
+    [ ! -f "$U/game-closefd" ] || { exec 3>&-; exec /bin/sleep 3; }
     [ ! -f "$U/game-sleep" ] || exec /bin/sleep "\$(cat "$U/game-sleep")"
     [ ! -f "$U/game-signal" ] || kill -s "\$(cat "$U/game-signal")" \$\$
     [ ! -f "$U/game-exit" ] || exit "\$(cat "$U/game-exit")" ;;
@@ -955,6 +956,13 @@ check "wrapper: the launcher's child is hold-launcher, the game its child" eval 
 kill -TERM "$wp"; st=0; wait "$wp" || st=$?; sleep 0.2
 check "wrapper: TERM to the launcher's child ends the game, nothing is left (status $st)" eval '[ "$st" = 143 ] && [ -n "$gp" ] && ! alive "$gp" && tail -1 "$U/logs/hold.log" | piped -E "\): signal 15 \(SIGTERM\)\$"'
 rm -f "$U/game-sleep"
+# a pipe the game closes ends for its other side while the game still runs: hold-launcher
+# keeps no copy of the caller's fds (as when the game was the launcher's child itself)
+touch "$U/game-closefd"; rm -f "$U/eof"
+( "$U/bin/wine64-preloader" "$U/bin/wine64" 'C:\swtor\retailclient\swtor.exe' 3>&1 >/dev/null 2>&1 | { cat >/dev/null; : >"$U/eof"; } ) & pp=$!
+sleep 1.5
+check "wrapper: a pipe the game closes ends while the game runs (no copy left in hold-launcher)" test -e "$U/eof"
+wait "$pp" || true; rm -f "$U/game-closefd"
 # an older hold-launcher (no --run-game): the game in the wrapper's process, as before, no line
 cp "$U/bin-real/hold-launcher" "$U/hold-launcher.new"
 printf '#!/bin/bash\nexit 1\n' >"$U/bin-real/hold-launcher"
@@ -1294,8 +1302,13 @@ Intranet IP: 192.168.77.23
 2026-10-24 16:00:41 mac_wine: reg add HKCU\Software\Broadsword --registry-token -t $REGTOKEN --session="ab cd"
 2026-10-24 16:00:42 connected to 10.11.12.13:443 (en0 aa:bb:cc:dd:ee:77, fe80::1c2b:3a4d:5e6f:7a77)
 2026-10-24 16:00:43 user $ACCT logged in, files in $HOME/Library/Caches and /Users/SomeoneElse77/x
+2026-10-24 16:00:44 {"cmd": "mac_wine --registry-token -t \\"QUOTEDTOKEN77\\" --session=\\"PLANTEDSESSION77\\"", "arg": "--session='PLANTEDSESSION78'"}
+2026-10-24 16:00:45 connected to server 192.168.77.24:443 and 2001:db8::77, fe80::1%en0; std::string, 16:00:45
+Machine Name: Rex
+2026-10-24 16:00:46 running on Rex (Index 3)
 EOF
-printf '2026-10-24 16:00:41 mac_wine: --registry-token -t "QUOTEDTOKEN77"\n' >"$LL/host.quoted.log"
+# (a JWT's header, cut off: the redaction doesn't know it as a token, the leak check does)
+printf '2026-10-24 16:00:41 auth eyJhbGciOiJIUzI1NiJ9 (cut off)\n' >"$LL/host.cut.log"
 # two game starts in SWTOR on Mac's logs: one that ended after 3 s, then one that ran
 printf '2026-10-24 16:00:45 [4711] game ended after 0:00:03 (lang=de-de torsets=main,de-de): exit code 5\n2026-10-24 18:10:00 [4800] game ended after 2:05:10 (lang=en-us torsets=main,en-us): exit code 0\n' >>"$LOGS/hold.log"
 echo "SWTOR on Mac game language: lang=de-de torsets=main,de-de, LANG=de_DE.UTF-8" >"$LOGS/wine.log.1"
@@ -1315,10 +1328,10 @@ if [ -f "$zip" ]; then
   # shellcheck disable=SC2034 # (used in check's eval strings)
   LZ=$(echo "$SANDBOX"/zip/*/launcher-logs) ZD=$(echo "$SANDBOX"/zip/*) SI=$(echo "$SANDBOX"/zip/*/system-info.txt)
   check "logs: the launcher's logs, redacted (the version kept, the game's command line left out)" eval 'grep -q "Version: 7.2.207.0" "$LZ/host.developer.log" && grep -qx "Machine Name: NAME" "$LZ/host.developer.log" && grep -q -- "swtor.exe\" \[SWTOR on Mac: the rest of the game.s command line, from its account name on, left out\]\$" "$LZ/host.developer.log" && ! grep -q -- "-set password" "$LZ/host.developer.log"'
-  check "logs: no planted account name, token, Mac name, IP or id anywhere in the zip" eval '! LC_ALL=C grep -r -i -q -F -e "$ACCT" -e "$JWT" -e "$REGTOKEN" -e "$MACNAME" -e 192.168.77.23 -e 10.11.12.13 -e aa:bb:cc:dd:ee:77 -e fe80::1c2b -e 0f1e2d3c -e 9a8b7c6d -e SomeoneElse77 -e "$HOME" "$ZD"'
+  check "logs: no planted account name, token, session, Mac name (also a short one), IP or id anywhere in the zip; the rest of the line kept" eval '! LC_ALL=C grep -r -i -q -F -e "$ACCT" -e "$JWT" -e "$REGTOKEN" -e "$MACNAME" -e 192.168.77.23 -e 192.168.77.24 -e 10.11.12.13 -e aa:bb:cc:dd:ee:77 -e fe80::1 -e 2001:db8 -e 0f1e2d3c -e 9a8b7c6d -e SomeoneElse77 -e QUOTEDTOKEN77 -e PLANTEDSESSION77 -e PLANTEDSESSION78 -e "$HOME" "$ZD" && ! LC_ALL=C grep -r -w -q -F Rex "$ZD" && grep -q "running on NAME (Index 3)" "$LZ/host.developer.log" && grep -q "std::string, 16:00:45" "$LZ/host.developer.log"'
   check "logs: this Mac's own name not in the zip" eval '[ ${#THISMAC} -lt 4 ] || ! LC_ALL=C grep -r -i -q -F -e "$THISMAC" "$ZD"'
-  check "logs: the leak check left out the launcher log with a quoted token, and says so" eval '[ ! -e "$LZ/host.quoted.log" ] && ! grep -rq QUOTEDTOKEN77 "$ZD" && grep -qx "  launcher-logs/host.quoted.log" "$ZD/left-out.txt"'
-  check "logs: system info: the official app (version, bundle id, owner, signature, the half-written files)" eval 'grep -q "^  version .*, bundle id $(plutil -extract CFBundleIdentifier raw -o - "$BS_APP/Contents/Info.plist")\$" "$SI" && grep -q "^  owner " "$SI" && grep -q "^  signature (codesign --verify --deep --strict): " "$SI" && grep -qx "    Contents/Frameworks/Launcher.dylib.solidpartial" "$SI"'
+  check "logs: the leak check left out only the launcher log with a cut-off token, and says so" eval '[ -e "$LZ/host.developer.log" ] && [ ! -e "$LZ/host.cut.log" ] && ! grep -rq eyJhbGciOiJIUzI1NiJ9 "$ZD" && [ "$(cat "$ZD/left-out.txt")" = "$(printf "Left out: a name, home folder or token the redaction missed was still in these files\n  launcher-logs/host.cut.log")" ]'
+  check "logs: system info: the official app (version, bundle id, owner, signature, the half-written files)" eval 'grep -q "^  version .*, bundle id $(plutil -extract CFBundleIdentifier raw -o - "$BS_APP/Contents/Info.plist")\$" "$SI" && grep -q "^  owner you, group [a-z]" "$SI" && grep -q "^  signature (codesign --verify --deep --strict): " "$SI" && grep -qx "    Contents/Frameworks/Launcher.dylib.solidpartial" "$SI"'
   check "logs: system info: how each game start ended, the earlier start's wine.log in the zip" eval 'grep -q "^  .*game ended after 0:00:03 (lang=de-de torsets=main,de-de): exit code 5\$" "$SI" && grep -q "^  .*game ended after 2:05:10 (lang=en-us torsets=main,en-us): exit code 0\$" "$SI" && grep -q "lang=de-de" "$ZD/logs/wine.log.1"'
   # shellcheck disable=SC2034 # (used in check's eval strings)
   CR=$(echo "$SANDBOX"/zip/*/crash-reports) SI=$(echo "$SANDBOX"/zip/*/system-info.txt)

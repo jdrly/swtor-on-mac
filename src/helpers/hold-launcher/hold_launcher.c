@@ -31,7 +31,8 @@
 //
 // --run-game: runs the game, PROGRAM ARGS (the engine's wine with the launcher's command), as
 // this process's child with everything of this process (its stdio and other fds, its process
-// group, its environment), passes TERM, INT, HUP and QUIT on to it, and when it ends appends
+// group, its environment) and keeps none of those fds itself (stdio on /dev/null, the rest
+// closed: what the game closes is closed), passes TERM, INT, HUP and QUIT on to it, and when it ends appends
 // one line to HOLD_LOG: how long it ran and how it ended (exit code or signal), with NOTE (the
 // game's language). Then this process ends as the game did (its exit code; TERM, INT, HUP and
 // KILL raised again, other signals as exit 128 + signal: no crash report of its own), so the
@@ -410,6 +411,12 @@ static int run_game(const char *holdlog, const char *note, char **argv)
         return 127;
     }
     game_pid = pid;
+    // While it waits, this process holds nothing of the caller's: a pipe or socket the game
+    // closes ends for its other side as if the game were the launcher's child itself.
+    close_inherited_fds(-1);
+    int null = open("/dev/null", O_RDWR);
+    for (int fd = 0; fd <= 2 && null >= 0; fd++) dup2(null, fd);
+    if (null > 2) close(null);
     struct sigaction sa = { .sa_handler = pass_on, .sa_flags = SA_RESTART };
     sigemptyset(&sa.sa_mask);
     for (size_t i = 0; i < sizeof(game_signals) / sizeof(*game_signals); i++) sigaction(game_signals[i], &sa, NULL);

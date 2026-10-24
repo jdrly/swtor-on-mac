@@ -59,23 +59,25 @@ launcher_accounts="$(LC_ALL=C grep -h -o -E -- "-set username [^ '\"]+" "$LAUNCH
   sed -E 's/^-set username \\*//; s/\\+$//' | sort -u)"
 accounts="$(printf '%s\n%s\n' "$accounts" "$launcher_accounts" | sed '/^$/d' | sort -u)"
 # Names to replace wherever they are, in any case (NAME), and to look for in the leak check:
-# the Mac's names, the launcher's account names and the "Machine Name: ..." it logged. Only
-# those of 4 characters or more (shorter ones only as whole words, as accounts above), and not
-# a model's own name ("MacBook Pro", "iMac.local": the model has to stay readable) or a common
-# word (as for the user name in redact); the longest first.
-literals="$work/literals"
+# the Mac's names, the launcher's account names and the "Machine Name: ..." it logged; those of
+# 2 or 3 characters only as whole words ($literals_short: "Rex", not the "rex" in "Index").
+# Not a model's own name ("MacBook Pro", "iMac.local": the model has to stay readable) or a
+# common word (as for the user name in redact); the longest first.
+literals="$work/literals" literals_short="$work/literals-short"
 { scutil --get ComputerName; scutil --get LocalHostName; scutil --get HostName; hostname -s; hostname
   printf '%s\n' "$launcher_accounts"
   LC_ALL=C grep -h -o -E 'Machine Name: .+$' "$LAUNCHER_LOGS"/*.log | sed 's/^Machine Name: //'
 } 2>/dev/null | tr -d '\r' | LC_ALL=C awk '
   { l = tolower($0); sub(/\.local$/, "", l); gsub(/-/, " ", l) }
-  length($0) >= 4 && l !~ /^(mac|imac|macbook|macbook air|macbook pro|mac mini|mac studio|mac pro|localhost)( [0-9]+)?$/ &&
+  length($0) >= 2 && l !~ /^(mac|imac|macbook|macbook air|macbook pro|mac mini|mac studio|mac pro|localhost)( [0-9]+)?$/ &&
   l !~ /^(admin|user|users|test|game|wine|guest|root|home|apple|swtor|shared|crossover)$/ {
-    print length($0) "\t" $0 }' | sort -rn | cut -f2- | uniq >"$literals"
+    print length($0) "\t" $0 }' | sort -rn | cut -f2- | uniq >"$work/names"
+awk 'length($0) >= 4' "$work/names" >"$literals"
+awk 'length($0) < 4' "$work/names" >"$literals_short"
 
 redact() {  # [launcher] stdin → stdout (launcher: also launcher_rules)
   SOM_HOME_PATH="$HOME" SOM_ROOT_HOME="$H" SOM_USER="$(id -un)" SOM_NAME="$(id -F 2>/dev/null)" SOM_ACCOUNTS="$accounts" \
-  LC_ALL=C awk -v litfile="$literals" -v launcher="${1:+1}" '
+  LC_ALL=C awk -v litfile="$literals" -v shortfile="$literals_short" -v launcher="${1:+1}" '
     # Replace w with r in s, ignoring case; only where w is a whole word if whole is set.
     function rep(s, w, r, whole,    ls, lw, res, p, n, before, after, last) {
       if (w == "") return s
@@ -120,9 +122,22 @@ redact() {  # [launcher] stdin → stdout (launcher: also launcher_rules)
       out = ""
       while (match(s, /[0-9][0-9]?[0-9]?\.[0-9][0-9]?[0-9]?\.[0-9][0-9]?[0-9]?\.[0-9][0-9]?[0-9]?/)) {
         pre = substr(s, 1, RSTART - 1); m = substr(s, RSTART, RLENGTH)
-        if (m == "127.0.0.1" || tolower(substr(pre, length(pre) - 9)) ~ /(version|ver|v)[:= ]*$/ || pre ~ /[0-9.]$/) out = out pre m
+        if (m == "127.0.0.1" || tolower(" " pre) ~ /[^a-z](version|ver|v)[:= ]*$/ || pre ~ /[0-9.]$/) out = out pre m
         else out = out pre "IP"
         s = substr(s, RSTART + RLENGTH)
+      }
+      return out s
+    }
+    # IPv6 addresses: a run of hex digits and colons, not part of a word, with "::" (fe80::1,
+    # 2001:db8::1) or 4 colons or more (the full form; MAC addresses are taken before)
+    function ipv6(s,    out, pre, m, rest, nc, t) {
+      out = ""
+      while (match(s, /[0-9A-Fa-f:]*:[0-9A-Fa-f:]*/)) {
+        pre = substr(s, 1, RSTART - 1); m = substr(s, RSTART, RLENGTH); rest = substr(s, RSTART + RLENGTH)
+        t = m; nc = gsub(/:/, ":", t)
+        if ((index(m, "::") || nc >= 4) && m ~ /[0-9A-Fa-f]/ && pre !~ /[A-Za-z0-9_.]$/ && rest !~ /^[A-Za-z0-9_]/) out = out pre "IP6"
+        else out = out pre m
+        s = rest
       }
       return out s
     }
@@ -143,7 +158,7 @@ redact() {  # [launcher] stdin → stdout (launcher: also launcher_rules)
       gsub("[Cc]:\\\\+[Uu]sers\\\\+[^\\\\ \"\047:]+", "C:\\users\\USER", s)
       gsub(/[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]/, "MAC-ADDRESS", s)
       s = ipv4(s)
-      gsub(/[0-9A-Fa-f]+:[0-9A-Fa-f]*:[0-9A-Fa-f]*:[0-9A-Fa-f]*:[0-9A-Fa-f:]*[0-9A-Fa-f]/, "IP6", s)
+      s = ipv6(s)
       return s
     }
     BEGIN {
@@ -157,6 +172,7 @@ redact() {  # [launcher] stdin → stdout (launcher: also launcher_rules)
       for (i in w) common[w[i]] = 1
       n = split(ENVIRON["SOM_ACCOUNTS"], accounts, "\n")
       nl = 0; while ((getline l < litfile) > 0) lit[++nl] = l
+      ns = 0; while ((getline l < shortfile) > 0) short[++ns] = l
     }
     {
       line = tolower($0)
@@ -171,10 +187,15 @@ redact() {  # [launcher] stdin → stdout (launcher: also launcher_rules)
       for (i = 1; i <= n; i++) if (length(accounts[i]) >= 2) s = rep(s, accounts[i], "ACCOUNT", 1)
       if (launcher) s = launcher_rules(s)
       for (i = 1; i <= nl; i++) s = rep(s, lit[i], "NAME", 0)
+      for (i = 1; i <= ns; i++) s = rep(s, short[i], "NAME", 1)
       # the launcher'"'"'s session token (its registry calls) and session, JWT-style tokens
-      gsub("--registry-token -t [^ \"\047]+", "--registry-token -t TOKEN", s)
-      gsub("--session=\"[^\"]*\"", "--session=\"REDACTED\"", s)
-      gsub("--session=[^ \"\047]+", "--session=REDACTED", s)
+      # (a value in quotes, also JSON-escaped ones, \"...\", is one value with its spaces)
+      gsub("--registry-token[ \t]+-t[ \t]+\\\\*\"[^\"]*\"", "--registry-token -t TOKEN", s)
+      gsub("--registry-token[ \t]+-t[ \t]+\\\\*\047[^\047]*\047", "--registry-token -t TOKEN", s)
+      gsub("--registry-token[ \t]+-t[ \t]+[^ \t\"\047\\\\]+", "--registry-token -t TOKEN", s)
+      gsub("--session=\\\\*\"[^\"]*\"", "--session=REDACTED", s)
+      gsub("--session=\\\\*\047[^\047]*\047", "--session=REDACTED", s)
+      gsub("--session=[^ \t\"\047\\\\]+", "--session=REDACTED", s)
       gsub(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)?/, "TOKEN", s)
       s = setargs(s)
       s = secrets(s)
@@ -406,7 +427,11 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
     echo "  version $(plutil -extract CFBundleShortVersionString raw -o - "$plist" 2>/dev/null || echo ?)" \
       "($(plutil -extract CFBundleVersion raw -o - "$plist" 2>/dev/null || echo ?))," \
       "bundle id $(plutil -extract CFBundleIdentifier raw -o - "$plist" 2>/dev/null || echo ?)"
-    echo "  owner $(stat -f '%Su:%Sg %Sp' "$BS_APP"), changed $(stat -f '%Sm' -t '%F %R' "$BS_APP")"
+    # (the owner as root, you or another user: another user's name is theirs)
+    o=$(stat -f '%Su' "$BS_APP"); g=$(stat -f '%Sg' "$BS_APP")
+    case "$o" in root) ;; "$(id -un)") o="you" ;; *) o="another user" ;; esac
+    case "$g" in wheel|admin|staff) ;; *) g="another group" ;; esac
+    echo "  owner $o, group $g, $(stat -f '%Sp' "$BS_APP"), changed $(stat -f '%Sm' -t '%F %R' "$BS_APP")"
     partial=$(find "$BS_APP" -name '*.solidpartial' 2>/dev/null | sed "s|^$BS_APP/||")
     if [ -n "$partial" ]; then
       echo "  half-written files of a self-update that did not finish (*.solidpartial):"
@@ -471,12 +496,25 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
 } 2>&1 | redact >"$out/system-info.txt"
 
 # The leak check: a file that still has one of the names above, a home folder's path or an
-# account name or token on a command line is left out (left-out.txt names it).
+# account name, session or token on a command line is left out (left-out.txt names it). (A
+# redacted value may end a quoted string, REDACTED" or REDACTED\", not go on after one; a token
+# that begins as a JWT's header, eyJ..., is one even when cut off.)
+cat >"$work/leak-patterns" <<'EOF'
+-set[[:space:]]+username[[:space:]]+[^R[:space:]]
+--registry-token[[:space:]]+-t[[:space:]]+[^T]
+--session=[^R]
+--session=REDACTED[^[:space:],;)}"'\\]
+--session=REDACTED\\*["'][A-Za-z0-9]
+eyJ[A-Za-z0-9_-]{8}
+EOF
+# found <grep options>: a match, or grep failed (the check fails closed)
+found() { LC_ALL=C grep -q "$@"; [ $? != 1 ]; }
 ( cd "$out" && find . -type f ) | sed 's|^\./||' | while IFS= read -r rel; do
   f="$out/$rel"
-  if { [ -s "$literals" ] && LC_ALL=C grep -q -i -F -f "$literals" "$f"; } ||
-     LC_ALL=C grep -q -F -e "$HOME/" -e "$H/" -e "/Users/$(id -un)/" "$f" ||
-     LC_ALL=C grep -q -E -e '-set[[:space:]]+username[[:space:]]+[^R[:space:]]' -e '--registry-token -t [^T]' "$f"; then
+  if { [ -s "$literals" ] && found -i -F -f "$literals" "$f"; } ||
+     { [ -s "$literals_short" ] && found -i -w -F -f "$literals_short" "$f"; } ||
+     found -F -e "$HOME/" -e "$H/" -e "/Users/$(id -un)/" "$f" ||
+     found -E -f "$work/leak-patterns" "$f"; then
     rm -f "$f"
     echo "$rel"
   fi
