@@ -213,7 +213,7 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
   [ ! -e "$work/gpu-timeout" ] || timedout=1
   # (a line: date time type process[pid:tid] (sender) message; only other apps' names have spaces)
   LC_ALL=C awk -v lines="$GPU_LINES" -v mlines="$METAL_LINES" -v st="$st" -v timedout="$timedout" \
-      -v summary="$work/gpu-summary" '
+      -v summary="$work/gpu-summary" -v mdbfull="$work/gpu-mdbfull" '
     !/^[0-9][0-9][0-9][0-9]-/ { next }
     { name = $4; sub(/\[.*/, "", name); ours = name ~ /^wine/ || name == "swtor.exe" }
     name == "kernel" {
@@ -242,6 +242,7 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
       if (other) s = s ", " other " in other apps"
       print s; print s >summary
       for (i = 1; i <= keys; i++) print "  " order[i] ": " n[order[i]] ", " first[order[i]] " to " last[order[i]]
+      print cachefull + 0 >mdbfull
       if (cachefull) print "Metal'"'"'s archive usage index full (MDB_MAP_FULL) in the game and Wine: " cachefull " lines; compiled shaders are still cached"
       print ""
       print "The last " lines " lines of them and of the GPU driver (AGX):"
@@ -330,8 +331,13 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
   echo
   # Metal's caches of the engine's processes (macOS's, not the app's; nothing is changed here):
   # gpuarchiver grows by a folder per process that uses Metal, com.apple.metal holds the
-  # compiled shaders and the archive usage index
-  echo "Metal's caches of the engine's processes (in the user cache dir, ${METAL_CACHE##*/}/):"
+  # compiled shaders and the archive usage index (an LMDB with a map of about 1 MiB). The index's
+  # size alone doesn't say it is full (LMDB reuses freed pages; the one that failed on 2026-10-18
+  # was 1,044,480 bytes), and the MDB_MAP_FULL lines gpu_errors counted may be from an earlier index
+  # or another cache: so the size and those events side by side, its fullness now unknown. Other
+  # CrossOver-based apps (CrossOver, SWGL on Mac, GameToMac) share the bundle id, so their
+  # processes count in here too.
+  echo "Metal's caches of the engine's processes (in the user cache dir, ${METAL_CACHE##*/}/; shared with other CrossOver-based apps, whose processes count too):"
   for c in com.apple.gpuarchiver com.apple.metal; do
     if [ -d "$METAL_CACHE/$c" ]; then
       echo "  $c: $(du -sk "$METAL_CACHE/$c" 2>/dev/null | awk '{ printf "%.1f MB", $1 / 1024 }'), $(ls -A "$METAL_CACHE/$c" 2>/dev/null | wc -l | tr -d ' ') entries"
@@ -339,6 +345,18 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
       echo "  $c: none"
     fi
   done
+  idx="$METAL_CACHE/com.apple.metal/archiveUsage.db/data.mdb"
+  full=$(cat "$work/gpu-mdbfull" 2>/dev/null || echo 0)
+  if [ -f "$idx" ]; then
+    n=$(stat -f %z "$idx" 2>/dev/null || echo 0)
+    # (the events can be an older index's, or another bundle's cache's: they don't make this one full)
+    if [ "${full:-0}" -gt 0 ]; then note="; $full MDB_MAP_FULL events in game/Wine processes during the last $GPU_HOURS hours; current index fullness unknown (compiled shaders are still cached)"
+    elif [ "$n" -ge 1000000 ]; then note=", near its map's size (about 1 MB; no MDB_MAP_FULL events in the last $GPU_HOURS hours)"
+    else note=""; fi
+    echo "  archive usage index (com.apple.metal/archiveUsage.db): $n bytes$note"
+  else
+    echo "  archive usage index (com.apple.metal/archiveUsage.db): none"
+  fi
   echo
   # names only, never the command line (it has the account)
   echo "Running SWTOR, Wine and SWTOR on Mac processes (name only):"
