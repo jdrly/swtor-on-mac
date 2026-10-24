@@ -940,7 +940,7 @@ check "wrapper: the failed start's wine.log kept as wine.log.1, the new one in w
 check "wrapper: hold.log: the working start's exit code 0" eval 'tail -1 "$U/logs/hold.log" | piped -E "game ended after 0:00:0[0-3] \(not given\): exit code 0\$"'
 echo USR1 >"$U/game-signal"; st=0; start_game || st=$?; rm -f "$U/game-signal"
 check "wrapper: a game ended by a signal: logged, and the launcher sees it (158: $st)" eval '[ "$st" = 158 ] && tail -1 "$U/logs/hold.log" | piped -E "\): signal 30 \(SIGUSR1\)\$"'
-for i in 1 2 3; do game; done
+for i in 1 2 3 4; do game; done
 check "wrapper: the last 4 starts before this one kept, no more" eval '[ "$(cd "$U/logs" && ls wine.log*)" = "$(printf "wine.log\nwine.log.1\nwine.log.2\nwine.log.3\nwine.log.4")" ] && grep -q "lang=de-de" "$U/logs/wine.log.4" && ! grep -q "lang=de-de" "$U/logs/wine.log.3"'
 check "wrapper: no account name or token in the logs" eval '! grep -rq -e TESTACCOUNT -e SECRETTOKEN "$U/logs"'
 # TERM, INT, HUP and QUIT for the launcher's child (hold-launcher) go on to the game; killed by
@@ -1314,7 +1314,7 @@ if [ -f "$zip" ]; then
   check "logs: system info has the Mac" grep -q '^Mac: ' "$SANDBOX"/zip/*/system-info.txt
   # shellcheck disable=SC2034 # (used in check's eval strings)
   LZ=$(echo "$SANDBOX"/zip/*/launcher-logs) ZD=$(echo "$SANDBOX"/zip/*) SI=$(echo "$SANDBOX"/zip/*/system-info.txt)
-  check "logs: the launcher's logs, redacted (the version kept, the game's command line left out)" eval 'grep -q "Version: 7.2.207.0" "$LZ/host.developer.log" && grep -qx "Machine Name: NAME" "$LZ/host.developer.log" && grep -q -- "swtor.exe\" -set username ... \[SWTOR on Mac: the rest of the game.s command line left out\]\$" "$LZ/host.developer.log" && ! grep -q -- "-set password" "$LZ/host.developer.log"'
+  check "logs: the launcher's logs, redacted (the version kept, the game's command line left out)" eval 'grep -q "Version: 7.2.207.0" "$LZ/host.developer.log" && grep -qx "Machine Name: NAME" "$LZ/host.developer.log" && grep -q -- "swtor.exe\" \[SWTOR on Mac: the rest of the game.s command line, from its account name on, left out\]\$" "$LZ/host.developer.log" && ! grep -q -- "-set password" "$LZ/host.developer.log"'
   check "logs: no planted account name, token, Mac name, IP or id anywhere in the zip" eval '! LC_ALL=C grep -r -i -q -F -e "$ACCT" -e "$JWT" -e "$REGTOKEN" -e "$MACNAME" -e 192.168.77.23 -e 10.11.12.13 -e aa:bb:cc:dd:ee:77 -e fe80::1c2b -e 0f1e2d3c -e 9a8b7c6d -e SomeoneElse77 -e "$HOME" "$ZD"'
   check "logs: this Mac's own name not in the zip" eval '[ ${#THISMAC} -lt 4 ] || ! LC_ALL=C grep -r -i -q -F -e "$THISMAC" "$ZD"'
   check "logs: the leak check left out the launcher log with a quoted token, and says so" eval '[ ! -e "$LZ/host.quoted.log" ] && ! grep -rq QUOTEDTOKEN77 "$ZD" && grep -qx "  launcher-logs/host.quoted.log" "$ZD/left-out.txt"'

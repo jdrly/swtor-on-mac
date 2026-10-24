@@ -132,7 +132,7 @@ redact() {  # [launcher] stdin → stdout (launcher: also launcher_rules)
     function launcher_rules(s) {
       # (the game'"'"'s command line from its account name on: never in the zip, redacted or not;
       # the wrapper logs the game'"'"'s language itself)
-      sub(/-set[ \t]+username.*/, "-set username ... [SWTOR on Mac: the rest of the game'"'"'s command line left out]", s)
+      sub(/-set[ \t]+username.*/, "[SWTOR on Mac: the rest of the game'"'"'s command line, from its account name on, left out]", s)
       gsub("Session Id: .*", "Session Id: REDACTED", s)
       gsub("Machine Id: .*", "Machine Id: REDACTED", s)
       gsub("Machine Name: .*", "Machine Name: NAME", s)
@@ -476,7 +476,7 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
   f="$out/$rel"
   if { [ -s "$literals" ] && LC_ALL=C grep -q -i -F -f "$literals" "$f"; } ||
      LC_ALL=C grep -q -F -e "$HOME/" -e "$H/" -e "/Users/$(id -un)/" "$f" ||
-     LC_ALL=C grep -q -E -e '-set[[:space:]]+username[[:space:]]+[^R.[:space:]]' -e '--registry-token -t [^T]' "$f"; then
+     LC_ALL=C grep -q -E -e '-set[[:space:]]+username[[:space:]]+[^R[:space:]]' -e '--registry-token -t [^T]' "$f"; then
     rm -f "$f"
     echo "$rel"
   fi
