@@ -601,7 +601,7 @@ local feed, as in SWGL on Mac.
   too), and checks both bridge files against their shipped sha256. 0.1.2's `d3d9.dll` is d9mt
   main `2a1bc00` built with `SOURCE_DATE_EPOCH=1792457826`, the time of `c3f46ce`, which has
   the same tree: byte for byte the file 0.1.2-dev.2 and dev.3 were tested with. 0.1.4 pins
-  main `b0d4597` and 0.1.5 main `08827cb`, each built with its own commit time, `08827cb` at
+  main `b0d4597` and 0.1.6 main `08827cb`, each built with its own commit time, `08827cb` at
   the default `D9MT_WORK`.)
 - `build.sh` assembles `dist/SWTOR on Mac.app` with Sparkle (pinned download; ad-hoc signed;
   `--install` copies it to /Applications). Needs Xcode 27 (macOS 27 SDK); the app runs on
