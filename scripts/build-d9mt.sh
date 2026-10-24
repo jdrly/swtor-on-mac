@@ -25,13 +25,20 @@
 # after d9mt's scripts/fetch-deps.sh has put its dxbc-spirv checkout at the pin with
 # patches/dxbc-spirv applied (build-driver.sh refuses an unpatched tree). The output is
 # reproducible: SOURCE_DATE_EPOCH is the pinned commit's time, and the same D9MT_WORK path gives
-# the same d3d9.dll (its PE image base follows the path: mingw's auto image base).
+# the same d3d9.dll (its PE image base follows the path: mingw's auto image base). The bridge is
+# built with BRIDGE_EPOCH instead: its source is 0.1.0's, and that time gives 0.1.0's
+# winemetal.dll byte for byte (its PE timestamp), so the shipped bridge stays the same file; the
+# build checks both bridge files against BRIDGE_SHA256.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 REPO="${D9MT_SRC:-https://github.com/jdrly/d9mt.git}"
-COMMIT=b0d4597b4ac98166e5e96b0a4175591110f12e8b
+COMMIT=08827cb17dabe6c07053bf85c9a6502107aa1da7
 MACOS_MIN=26.0
+# the bridge as 0.1.0 shipped it (the time of its source; checked after the build)
+BRIDGE_EPOCH=1792149856
+BRIDGE_SHA256="740a27c2474dbfe4f744f44bcbcb06d8db48149f680008aee808c6958159812d winemetal.dll
+2f66ab120f0a6b65403c1f7b8ec7b048c4ed0b891600dd6b2aa5644d265186b8 winemetal.so"
 V="${D9MT_WORK:-/tmp/swtor-on-mac-d9mt}"
 OUT="$ROOT/prebuilt/d9mt"
 export PATH="/opt/homebrew/bin:$PATH"   # the d9mt scripts need bash >= 4.3
@@ -63,7 +70,7 @@ if newer_than_min "$llvm_min"; then
   exit 1
 fi
 echo "[d9mt] bridge"
-SMOKE=0 scripts/build-bridge.sh >build-bridge.log 2>&1 || { tail -20 build-bridge.log; exit 1; }
+SOURCE_DATE_EPOCH=$BRIDGE_EPOCH SMOKE=0 scripts/build-bridge.sh >build-bridge.log 2>&1 || { tail -20 build-bridge.log; exit 1; }
 echo "[d9mt] driver (x86_64)"
 ARCH=x64 scripts/build-driver.sh >build-driver-x64.log 2>&1 || { tail -20 build-driver-x64.log; exit 1; }
 
@@ -91,5 +98,9 @@ if [ "$compat" -eq 0 ] || [ "$compat" -lt "$newer" ]; then
   echo "d3d9.dll: $newer metallibs for macOS newer than $MACOS_MIN but $compat Compat ones" >&2
   exit 1
 fi
+while read -r sum f; do
+  [ "$(shasum -a 256 "$OUT/$f" | cut -d' ' -f1)" = "$sum" ] ||
+    { echo "$f is not the shipped bridge's (sha256 $sum): did bridge/ change? Then update BRIDGE_EPOCH and BRIDGE_SHA256" >&2; exit 1; }
+done <<<"$BRIDGE_SHA256"
 echo "[d9mt] built for macOS $MACOS_MIN (winemetal.so minos $so_min)"
 echo "[d9mt] prebuilt/d9mt: $(ls "$OUT" | tr '\n' ' ')"
