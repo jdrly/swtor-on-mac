@@ -1171,7 +1171,7 @@ for i in \$(seq 10 39); do echo "2026-10-20 19:08:00.\$i E  wine[4242:1f] (Metal
 EOF
 chmod +x "$SANDBOX/bin/log"
 # Metal's caches of the engine's processes in the sandbox's user cache dir: two gpuarchiver
-# folders of 1 MB each, no com.apple.metal
+# folders of 1 MB each, no com.apple.metal (so no archive usage index; a full one comes later)
 GA="$SANDBOX/usercache/com.codeweavers.CrossOver.wineloader/com.apple.gpuarchiver"
 mkdir -p "$GA/a" "$GA/b" && dd if=/dev/zero of="$GA/a/x" bs=1024 count=1024 2>/dev/null && cp "$GA/a/x" "$GA/b/x"
 zip=$("$APP/Contents/Resources/collect-logs.sh" 2>"$SANDBOX/collect.err" || true)
@@ -1195,8 +1195,29 @@ if [ -f "$zip" ]; then
   check "logs: GPU errors: the fault lines, the last 20 other Metal errors, the full shader cache only counted" eval '[ "$(grep -c "IOGPUMetalError: <private>" "$GE")" = 3 ] && [ "$(grep -c "(Metal) error " "$GE")" = 20 ] && grep -q "(Metal) error 39\$" "$GE" && ! grep -q "(Metal) error 19\$" "$GE" && ! grep -q "mdb_txn" "$GE" && grep -q "^Metal.s archive usage index full (MDB_MAP_FULL) in the game and Wine: 1 lines; compiled shaders are still cached\$" "$GE"'
   check "logs: GPU errors: the GPU driver's lines only as time, sender and kind (no other app, no folder)" eval 'grep -qx "2026-10-20 19:07:00.000 Df kernel (AGXG14X): GPU restart" "$GE" && grep -qx "2026-10-20 19:07:01.000 E kernel (AGXG14X): GPU fault" "$GE" && grep -qx "2026-10-20 19:07:02.000 E kernel (AGX): GPU timeout, names the game or Wine" "$GE" && ! grep -q -e AnotherPerson -e private-project -e "~/x" "$GE"'
   check "logs: system info has the GPU error count" grep -q "^  IOGPUMetalError .*: 3 in the game and Wine, 1 in other apps\$" "$SI"
-  check "logs: system info has the sizes of Metal's caches for the engine (2 archives of 2 MB, no com.apple.metal)" eval 'grep -qx "  com.apple.gpuarchiver: 2.0 MB, 2 entries" "$SI" && grep -qx "  com.apple.metal: none" "$SI"'
+  check "logs: system info has the sizes of Metal's caches for the engine (2 archives of 2 MB, no com.apple.metal)" eval 'grep -qx "  com.apple.gpuarchiver: 2.0 MB, 2 entries" "$SI" && grep -qx "  com.apple.metal: none" "$SI" && grep -qx "  archive usage index (com.apple.metal/archiveUsage.db): none" "$SI" && grep -q "shared with other CrossOver-based apps, whose processes count too" "$SI"'
 fi
+# Metal's archive usage index: its size, and the MDB_MAP_FULL events of the window beside it,
+# never "full" (the size alone doesn't say so, the one that failed on 2026-10-18 was 1,044,480
+# bytes, and the events can be an older index's): the failing size with an event, a fresh 32 KiB
+# index with an older event, 1 MiB without events (only "near its map's size"), and a small one
+MI="$SANDBOX/usercache/com.codeweavers.CrossOver.wineloader/com.apple.metal/archiveUsage.db"
+for c in 1044480:1 32768:1 1048576:0 524288:0; do
+  sz=${c%%:*} lines=${c#*:}
+  mkdir -p "$MI" && dd if=/dev/zero of="$MI/data.mdb" bs=1024 count=$((sz / 1024)) 2>/dev/null
+  { echo '#!/bin/bash'; echo 'echo "Timestamp               Ty Process[PID:TID]"'
+    [ "$lines" = 0 ] || echo 'echo "2026-10-20 19:06:00.000 E  wine[4242:1e] (Metal) mdb_txn_commit error: MDB_MAP_FULL: Environment mapsize limit reached"'
+  } >"$SANDBOX/bin/log"; chmod +x "$SANDBOX/bin/log"
+  mkdir -p "$SANDBOX/zip-mdb-$sz"
+  zm=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-mdb-$sz" 2>>"$SANDBOX/collect.err" || true)
+  im=$(unzip -p "$zm" "*/system-info.txt" 2>/dev/null | grep "archive usage index" || true)
+  case $sz in
+    1044480|32768) check "logs: system info: the index's size and the MDB_MAP_FULL events side by side, its fullness now unknown ($sz bytes: $im)" test "$im" = "  archive usage index (com.apple.metal/archiveUsage.db): $sz bytes; 1 MDB_MAP_FULL events in game/Wine processes during the last 2 hours; current index fullness unknown (compiled shaders are still cached)" ;;
+    1048576) check "logs: system info: 1 MiB without MDB_MAP_FULL events is not called full ($im)" test "$im" = "  archive usage index (com.apple.metal/archiveUsage.db): 1048576 bytes, near its map's size (about 1 MB; no MDB_MAP_FULL events in the last 2 hours)" ;;
+    *) check "logs: system info: a small index only by its size ($im)" test "$im" = "  archive usage index (com.apple.metal/archiveUsage.db): 524288 bytes" ;;
+  esac
+done
+rm -rf "$MI"
 # a query that ignores TERM: ended with KILL after the limit and the grace time, and said so
 cat >"$SANDBOX/bin/log" <<'EOF'
 #!/bin/bash
