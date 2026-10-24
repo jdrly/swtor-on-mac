@@ -597,10 +597,12 @@ local feed, as in SWGL on Mac.
   then a build from scratch every time. It is reproducible: `SOURCE_DATE_EPOCH` is the commit's
   time, and the same `D9MT_WORK` path gives the same `d3d9.dll`. (The bridge's source is
   0.1.0's, so the script builds it with `SOURCE_DATE_EPOCH=1792149856`, which gives 0.1.0's
-  `winemetal.dll` byte for byte at the default `D9MT_WORK` (its image base follows the path too), and checks both bridge files against their shipped sha256. 0.1.2's `d3d9.dll` is d9mt main `2a1bc00` built with `SOURCE_DATE_EPOCH=1792457826`,
-  the time of `c3f46ce`, which has the same tree: byte for byte the file 0.1.2-dev.2 and dev.3
-  were tested with. 0.1.4 pins main `b0d4597` and 0.1.5 main `08827cb`, each built with its own commit time;
-  `08827cb`'s at the default `D9MT_WORK`.)
+  `winemetal.dll` byte for byte at the default `D9MT_WORK` (its image base follows the path
+  too), and checks both bridge files against their shipped sha256. 0.1.2's `d3d9.dll` is d9mt
+  main `2a1bc00` built with `SOURCE_DATE_EPOCH=1792457826`, the time of `c3f46ce`, which has
+  the same tree: byte for byte the file 0.1.2-dev.2 and dev.3 were tested with. 0.1.4 pins
+  main `b0d4597` and 0.1.5 main `08827cb`, each built with its own commit time, `08827cb` at
+  the default `D9MT_WORK`.)
 - `build.sh` assembles `dist/SWTOR on Mac.app` with Sparkle (pinned download; ad-hoc signed;
   `--install` copies it to /Applications). Needs Xcode 27 (macOS 27 SDK); the app runs on
   macOS 26 and later.
