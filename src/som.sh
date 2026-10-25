@@ -1426,10 +1426,23 @@ cmd_end_leftovers() {
 # (which may not end in one): a dismissed time stays that event's. Exit 0: found, 1: none, 2:
 # the log could not be read, also when the query ran out of time. Needs no root: 1h takes about
 # a second, 24h a few. The query gets SWTOR_ON_MAC_BTM_TIMEOUT s (default 60) and is ended after
-# that (TERM, KILL a second later), so nothing of it outlives this script.
+# that (btm_stop), and so it is when this script ends early (TERM, INT, HUP): nothing of it
+# outlives this script, short of a KILL to the script itself (Collect Logs ends the process
+# group).
 # SWTOR_ON_MAC_BTM_LOG=<file> reads that file instead (a test's fixture, compact style); in a
 # sandbox nothing else is read (not even a test's bin/log: that is Collect Logs' GPU query's).
 BTM_LINE='not allowed by BTM so terminating its subordinates'
+# Ends btm-check's query, if it runs: TERM, KILL after a second if it is still there, then waits
+# for it. On the time limit and on the way out (also when this script is ended itself).
+btm_stop() {
+  local i=0
+  [ -n "${BTM_QPID:-}" ] || return 0
+  kill "$BTM_QPID" 2>/dev/null || true
+  while kill -0 "$BTM_QPID" 2>/dev/null && [ "$i" -lt 5 ]; do sleep 0.2; i=$((i + 1)); done
+  kill -KILL "$BTM_QPID" 2>/dev/null || true
+  wait "$BTM_QPID" 2>/dev/null || true
+  BTM_QPID=""
+}
 BTM_PREDICATE="process == \"loginwindow\" AND eventMessage CONTAINS \"$BTM_LINE\" AND eventMessage CONTAINS \"Old Republic Launcher\""
 cmd_btm_check() {
   local window=${1:-24h} limit=${SWTOR_ON_MAC_BTM_TIMEOUT:-60} st=0 t0=$SECONDS
@@ -1441,7 +1454,7 @@ cmd_btm_check() {
   fi
   # the query, a child of this script ($! is the query itself), ended with it in any case
   BTM_OUT=$(mktemp "${TMPDIR:-/tmp}/som-btm.XXXXXX") BTM_QPID=""
-  trap '[ -z "$BTM_QPID" ] || kill "$BTM_QPID" 2>/dev/null; rm -f "$BTM_OUT"' EXIT
+  trap 'btm_stop; rm -f "$BTM_OUT"' EXIT
   trap 'exit 2' TERM INT HUP
   if [ -n "${SWTOR_ON_MAC_BTM_LOG:-}" ]; then
     cat "$SWTOR_ON_MAC_BTM_LOG" </dev/null >"$BTM_OUT" 2>/dev/null &
@@ -1452,8 +1465,7 @@ cmd_btm_check() {
   BTM_QPID=$!
   while kill -0 "$BTM_QPID" 2>/dev/null; do
     if [ $((SECONDS - t0)) -ge "$limit" ]; then
-      kill "$BTM_QPID" 2>/dev/null || true; sleep 1; kill -KILL "$BTM_QPID" 2>/dev/null || true
-      wait "$BTM_QPID" 2>/dev/null || true; BTM_QPID=""
+      btm_stop
       echo "@error btm-check: the log query ran out of time ($limit s)"; exit 2
     fi
     sleep 0.2

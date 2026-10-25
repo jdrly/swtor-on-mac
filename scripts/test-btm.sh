@@ -82,6 +82,25 @@ check "only the scheduling line: none (status $rc), the end's own line counts" e
 t0=$SECONDS; SWTOR_ON_MAC_BTM_TIMEOUT=1 btm "$T/stalled" 1h; dt=$((SECONDS - t0))
 check "a query that doesn't answer: ended after its limit ($dt s), error (status $rc)" eval '[ "$rc" = 2 ] && grep -q "ran out of time (1 s)" "$T/out" && [ "$dt" -le 4 ]'
 check "...and nothing of it left running" eval '! pgrep -f "$T/stalled" >/dev/null'
+# a query that ignores TERM (a stand-in for cat on PATH runs a dummy for $T/resist): ended with
+# KILL at the limit, and also when som.sh itself is ended (TERM) while it waits
+printf '#include <signal.h>\n#include <stdio.h>\n#include <unistd.h>\nint main(int c, char **v) { FILE *f; signal(SIGTERM, SIG_IGN); f = fopen(v[1], "w"); fprintf(f, "%%d\\n", getpid()); fclose(f); for (;;) pause(); }\n' >"$T/ignore.c"
+clang -o "$T/ignore" "$T/ignore.c"
+mkdir -p "$T/shim"; : >"$T/resist"
+printf '#!/bin/bash\n[ "$1" = "%s/resist" ] && exec "%s/ignore" "%s/resist.pid"\nexec /bin/cat "$@"\n' "$T" "$T" "$T" >"$T/shim/cat"
+chmod +x "$T/shim/cat"
+rm -f "$T/resist.pid"
+PATH="$T/shim:$PATH" SWTOR_ON_MAC_BTM_TIMEOUT=1 btm "$T/resist" 1h
+check "a query that ignores TERM: KILLed at the limit (status $rc)" eval '[ "$rc" = 2 ] && [ -s "$T/resist.pid" ] && ! kill -0 "$(cat "$T/resist.pid")" 2>/dev/null'
+rm -f "$T/resist.pid"
+PATH="$T/shim:$PATH" SWTOR_ON_MAC_ROOT="$T" SWTOR_ON_MAC_BTM_LOG="$T/resist" SWTOR_ON_MAC_BTM_TIMEOUT=30 \
+  /bin/bash "$SOMSH" btm-check 1h >/dev/null 2>&1 & sp=$!
+wait_for 5 test -s "$T/resist.pid"
+qp=$(cat "$T/resist.pid" 2>/dev/null || echo 0)
+query_gone() { ! kill -0 "$qp" 2>/dev/null; }
+kill -TERM "$sp"; rc=0; wait "$sp" || rc=$?
+check "som.sh ended (TERM) while its query ignores TERM: exits 2 (status $rc), the query is gone" \
+  eval '[ "$rc" = 2 ] && [ "$qp" != 0 ] && wait_for 3 query_gone'
 btm "$T/missing.log"
 check "an unreadable log: error (status $rc)" eval '[ "$rc" = 2 ] && grep -q "^@error " "$T/out"'
 for w in 1x h 0h 24 1.5h -1h; do
