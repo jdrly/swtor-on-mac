@@ -161,11 +161,12 @@ if [ -n "$SWTOR_ENGINE" ]; then
         exec >/dev/null 2>"$LOG_DIR/wine.log"
         # what this session runs on (session-report.sh shows it)
         echo "SWTOR on Mac ${SWTOR_ON_MAC_VERSION:-?}: engine ${SWTOR_ENGINE_ID:-cx24} ${SWTOR_ENGINE_NAME:-${SWTOR_ENGINE##*/}}, d9mt ${SWTOR_D9MT:-?}, started $(date '+%Y-%m-%d %H:%M:%S')" >&2
-        echo "SWTOR on Mac game language: $game_lang, LANG=${LANG:-}" >&2
         # a development build's d9mt A/B switches (d9mt-ab.sh), if any
         [ -z "$SWTOR_D9MT_AB" ] || echo "SWTOR on Mac d9mt-ab: $SWTOR_D9MT_AB" >&2
         # the Frame Rate Limit, if one is set (d9mt's own "frame cap" line follows)
         [ -z "$fps_note" ] || echo "SWTOR on Mac frame rate limit: $fps_note" >&2
+        # the game's language and locale (after those: the A/B switches stay the second line)
+        echo "SWTOR on Mac game language: $game_lang, LANG=${LANG:-}" >&2
       else
         exec >/dev/null 2>/dev/null
       fi

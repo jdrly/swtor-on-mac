@@ -720,13 +720,18 @@ if command -v x86_64-w64-mingw32-gcc >/dev/null; then
     "$BS_WINE/bin/wine64-preloader" "$BS_WINE/bin/wine64" "$SANDBOX/probe-end/swtor.exe" -set username PROBEACCOUNT -set lang en-us "$1" </dev/null >/dev/null 2>&1 &
     pe_pid=$!
   }
-  # pe_game: the probe's pid once it runs from the Game Mode link (a winetemp path), its path after it
+  # pe_game: "<pid> <real path>" of the probe once it runs from the Game Mode link (the
+  # winetemp link, or the bundle's swtor.exe it resolves to) among the launcher child's
+  # descendants; the probe's parent in pe_ppid. Nothing found: the tree, for the log.
   pe_game() {
-    local i
+    local i kids
     for i in $(seq 100); do
-      "$HL_APP" --paths 2>/dev/null | awk -v p="$(pgrep -P "$pe_pid" | head -1)" '$1 == p && /\/winetemp-/' | grep . && return 0
+      kids=$(pgrep -P "$pe_pid" | tr '\n' ' '); for k in $kids; do kids="$kids $(pgrep -P "$k" | tr '\n' ' ')"; done
+      "$HL_APP" --paths 2>/dev/null | awk -v k=" $kids " -v b="$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe" \
+        'index(k, " " $1 " ") && (index($0, "/winetemp-") || index($0, b))' | head -1 | grep . && return 0
       sleep 0.1
     done
+    ps -o pid=,ppid=,comm= -g "$(ps -o pgid= -p "$pe_pid" | tr -d ' ')" 2>/dev/null | sed 's/^/  (tree) /' >&2
     return 1
   }
   pe_start 6000
@@ -734,7 +739,7 @@ if command -v x86_64-w64-mingw32-gcc >/dev/null; then
   # shellcheck disable=SC2034 # (used in check's eval strings)
   gpath=${g#* }
   echo "  game: $g"
-  check "game end: the game runs from the Game Mode link, as hold-launcher's child" eval '[ -n "$g" ] && [ "$(realpath "$gpath")" = "$(realpath "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe")" ] && [ "$(ps -o comm= -p "$pe_pid" | sed "s|.*/||")" = hold-launcher ]'
+  check "game end: the game runs from the Game Mode link, as hold-launcher's child" eval '[ -n "$g" ] && [ "$(realpath "$gpath")" = "$(realpath "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe")" ] && [ "$(ps -o comm= -p "$pe_pid" | sed "s|.*/||")" = hold-launcher ] && [ "$(ps -o ppid= -p "$gpid" | tr -d " ")" = "$pe_pid" ]'
   check "game end: gamemode.log names the link" eval 'tail -1 "$LOGS/gamemode.log" | piped -F -- "/wine -> $SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe (command: swtor.exe ...)"'
   st=0; wait "$pe_pid" || st=$?
   check "game end: the launcher's child ends with the game, with its exit code (7: $st)" eval '[ "$st" = 7 ] && { [ -z "$gpid" ] || ! alive "$gpid"; }'
