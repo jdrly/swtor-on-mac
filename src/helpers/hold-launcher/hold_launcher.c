@@ -25,8 +25,10 @@
 // in its own session with stdin/stdout on /dev/null, stderr appended to WINESERVER_LOG and every
 // other fd closed. If that started a new server (exit 0; 2 = one already runs), a bootstrap Wine
 // call (reg query, stdio on /dev/null, own session, nothing else open) brings up Wine's system
-// processes, so they inherit nothing either. Logs one line to stderr. Exit 0, or 1 if no
-// wineserver could be started (the wrapper then starts one itself).
+// processes, so they inherit nothing either. Logs one line to stderr. Exit 0, 3 if it ended
+// leftover Wine processes first (the wrapper then looks for why: macOS may have ended the last
+// session when the launcher quit, see som.sh btm-check), or 1 if no wineserver could be started
+// (the wrapper then starts one itself).
 //
 // --reap: ends leftover Wine processes of WINEPREFIX's session: processes of SWTOR_ENGINE that
 // belong to it (they map files from its server directory /tmp/.wine-<uid>/server-<dev>-<ino>,
@@ -214,66 +216,75 @@ static int in_session(pid_t pid, const struct session *s)
     return 0;
 }
 
-static void end_leftover(pid_t pid)
+// 1 if it ended PID
+static int end_leftover(pid_t pid)
 {
     char name[2 * MAXCOMLEN + 1] = "?";
     struct proc_bsdinfo bi;
     int ppid = bsdinfo(pid, &bi) ? (int)bi.pbi_ppid : -1;
     proc_name(pid, name, sizeof(name));
-    if (kill(pid, SIGKILL) == 0)
+    if (kill(pid, SIGKILL) == 0) {
         logf_("ended leftover Wine process %d (%s, parent %d)", pid, name, ppid);
-    else if (errno != ESRCH)
+        return 1;
+    }
+    if (errno != ESRCH)
         logf_("could not end leftover Wine process %d (%s): %s", pid, name, strerror(errno));
+    return 0;
 }
 
-// 0.1.1's rule, without a prefix: processes of the engine while no wineserver of it runs
-static void reap_engine(int quiet)
+// 0.1.1's rule, without a prefix: processes of the engine while no wineserver of it runs.
+// Returns how many it ended.
+static int reap_engine(int quiet)
 {
     pid_t server, again, pids[256];
     int n = engine_procs(&server, pids, 256);
     if (server) {
         if (!quiet) logf_("Wine session running (wineserver %d): leaving the engine's processes alone", server);
-        return;
+        return 0;
     }
     if (n == 0) {
         if (!quiet) logf_("no leftover Wine processes of the engine");
-        return;
+        return 0;
     }
     // once more right before: a new session (a game start) may have begun in between
     engine_procs(&again, NULL, 0);
-    if (again) return;
-    for (int i = 0; i < n; i++) end_leftover(pids[i]);
+    if (again) return 0;
+    int ended = 0;
+    for (int i = 0; i < n; i++) ended += end_leftover(pids[i]);
+    return ended;
 }
 
 // Leftovers of the prefix's session: its Wine processes while no wineserver of it runs.
 // Without a server there is no session they could belong to (every Wine start brings up its
 // server first), so they only tick on: e.g. system processes that wait (msync) forever after
 // their server was killed. All of them end (SIGKILL), each logged; with a server running, none.
-// QUIET: no log line when there is nothing to do.
-static void reap(int quiet)
+// QUIET: no log line when there is nothing to do. Returns how many it ended.
+static int reap(int quiet)
 {
     struct session s;
     const char *prefix = getenv("WINEPREFIX");
-    if (!prefix || !*prefix) { reap_engine(quiet); return; }
+    if (!prefix || !*prefix) return reap_engine(quiet);
     if (!session_of(prefix, &s)) {
         if (!quiet) logf_("no prefix at %s: nothing to end", prefix);
-        return;
+        return 0;
     }
     pid_t server = session_server(&s), dummy, pids[256], mine[256];
     if (server) {
         if (!quiet) logf_("Wine session running (wineserver %d): leaving its processes alone", server);
-        return;
+        return 0;
     }
     int n = engine_procs(&dummy, pids, 256), m = 0;
     for (int i = 0; i < n; i++)
         if (in_session(pids[i], &s)) mine[m++] = pids[i];
     if (m == 0) {
         if (!quiet) logf_("no leftover Wine processes of the prefix");
-        return;
+        return 0;
     }
     // once more right before: a new session (a game start) may have begun in between
-    if (session_server(&s)) return;
-    for (int i = 0; i < m; i++) end_leftover(mine[i]);
+    if (session_server(&s)) return 0;
+    int ended = 0;
+    for (int i = 0; i < m; i++) ended += end_leftover(mine[i]);
+    return ended;
 }
 
 // Runs PATH (ARGV) in its own session with stdin/stdout on /dev/null, stderr on ERRPATH
@@ -332,7 +343,7 @@ static int start_session(const char *wslog)
         alarm(0);
     }
 
-    reap(1);
+    int reaped = reap(1);
     char server[PATH_MAX], wine[PATH_MAX];
     snprintf(server, sizeof(server), "%s/bin/wineserver", engine);
     snprintf(wine, sizeof(wine), "%s/bin/wine", engine);
@@ -354,7 +365,7 @@ static int start_session(const char *wslog)
         ret = 1;
     }
     if (lfd >= 0) close(lfd);  // (releases the lock)
-    return ret;
+    return ret == 0 && reaped ? 3 : ret;
 }
 
 // --paths: every process's real executable, "<pid> <path>" lines

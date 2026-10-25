@@ -7,8 +7,9 @@
 # In the zip: SWTOR on Mac's logs (the end of large ones), its env, settings.conf, dxvk.conf,
 # install-manifest.json and d9mt-ab.env (a development build's A/B switches, if set), the app's VERSIONS, session-report.txt (the last game session in
 # short, scripts/session-report.sh), a fresh system-info.txt (macOS, chip,
-# memory, displays, versions, the state of the install, which crash reports are in the zip, the
-# GPU error count), gpu-errors.txt (the GPU errors of the game and Wine in macOS's unified log of
+# memory, displays, versions, the state of the install, which crash reports are in the zip, when
+# macOS ended the launcher's leftovers in the last 7 days because it is not allowed in the
+# background, the GPU error count), gpu-errors.txt (the GPU errors of the game and Wine in macOS's unified log of
 # the last 2 hours, see gpu_errors) and
 # crash-reports/: macOS's crash, hang and spin reports of the last 7 days for the game, Wine, the
 # official launcher and SWTOR on Mac (see crash_reports), so nobody has to look for them. Never
@@ -274,7 +275,30 @@ while IFS= read -r line; do
     "skip "*) echo "  left out: ${line#skip }" ;;
   esac
 done <"$work/crash-list" >"$work/crash-index"
+# Whether macOS ended what the launcher left running (the game's Wine) when it quit, because it
+# is not allowed in the background (Login Items & Extensions): som.sh btm-check over the last
+# BTM_DAYS days, next to the GPU query, at most BTM_TIMEOUT s from its start. In its own process
+# group (set -m), so running out of time ends its log query too. (In a sandbox it reads only a
+# test's SWTOR_ON_MAC_BTM_LOG, and SWTOR_ON_MAC_BTM_TIMEOUT can shorten the limit.)
+BTM_DAYS=7
+BTM_TIMEOUT=90
+[ -z "$ROOT" ] || BTM_TIMEOUT="${SWTOR_ON_MAC_BTM_TIMEOUT:-$BTM_TIMEOUT}"
+btm_t0=$SECONDS
+set -m; /bin/bash "$RES/som.sh" btm-check "${BTM_DAYS}d" </dev/null >"$work/btm" 2>/dev/null & btm_pid=$!; set +m
 gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
+while kill -0 "$btm_pid" 2>/dev/null && [ $((SECONDS - btm_t0)) -lt "$BTM_TIMEOUT" ]; do sleep 1; done
+btm_late=0
+if kill -0 "$btm_pid" 2>/dev/null; then
+  btm_late=1
+  kill -TERM -- "-$btm_pid" 2>/dev/null; sleep 1; kill -KILL -- "-$btm_pid" 2>/dev/null
+fi
+wait "$btm_pid" 2>/dev/null; btm_st=$?
+case "$btm_late:$btm_st" in
+  0:0) btm=$(paste -sd, "$work/btm" | sed 's/,/, /g') ;;
+  0:1) btm=none ;;
+  0:*) btm="not read" ;;
+  *) btm="not read (ran out of time)" ;;
+esac
 
 {
   echo "SWTOR on Mac logs, collected $(date '+%F %T %z')"
@@ -324,6 +348,8 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
   echo
   echo "Crash reports of the last 7 days (newest first; in crash-reports/):"
   if [ -s "$work/crash-index" ]; then cat "$work/crash-index"; else echo "  none"; fi
+  echo
+  echo "Launcher not allowed in the background, macOS ended what it left running (the last $BTM_DAYS days): $btm"
   echo
   echo "GPU errors of the last $GPU_HOURS hours (in gpu-errors.txt):"
   echo "  $(cat "$work/gpu-summary" 2>/dev/null || echo "not read")"

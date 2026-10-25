@@ -17,6 +17,9 @@
 #   som.sh end-leftovers  end leftover Wine processes of the engine (only if no launcher,
 #                      game or Wine session runs); install, uninstall and the settings in the
 #                      prefix's registry (retina, physkeys, rawmouse, mousespeed) do it too
+#   som.sh btm-check [window]  the times macOS ended what the launcher left running because it
+#                      is not allowed in the background (Login Items & Extensions), in the
+#                      last <window> (24h): exit 0 found, 1 none, 2 the log could not be read
 #
 # Environment:
 #   SWTOR_ON_MAC_ROOT=/abs/dir  sandbox for tests: the official install, the app's own files,
@@ -30,6 +33,8 @@
 #   SWTOR_ON_MAC_SETTLE=<s>     rehook: how long Broadsword's Wine/bin must have been quiet
 #                               before the wrapper is put back (default 20); changed more
 #                               recently, it is left alone (a launcher update may still write)
+#   SWTOR_ON_MAC_BTM_LOG=<file> btm-check: read this file (compact style, a test's fixture)
+#                               instead of macOS's unified log
 #
 # In a sandbox (SWTOR_ON_MAC_ROOT) notifications go to <logs>/notifications.log instead of
 # Notification Center.
@@ -1011,8 +1016,10 @@ DXVK_LOG_LEVEL=warn"
   # development builds: no update check from the game's start (Updates.swift: no automatic
   # Sparkle checks either; Check for Updates… still works)
   [ "$CHANNEL" = release ] || upd=0
-  # in a sandbox, the update check's notification goes to a file
-  [ -z "$ROOT" ] || notify_log="SWTOR_NOTIFY_LOG=\"$LOGS/notifications.log\""
+  # in a sandbox, the wrapper's notifications go to a file, and its btm-check never reads macOS's
+  # log
+  [ -z "$ROOT" ] || notify_log="SWTOR_NOTIFY_LOG=\"$LOGS/notifications.log\"
+SWTOR_ON_MAC_ROOT=\"$ROOT\""
   # Development builds: d9mt's A/B switches for the next game starts (Resources/d9mt-ab.sh) live
   # in a file of their own, so rewriting this one (Settings, Reinstall) keeps them. Release
   # builds never read it.
@@ -1071,6 +1078,11 @@ SWTOR_ON_MAC_VERSION=$VERSION
 SWTOR_APP_DIR="$SOM"
 SWTOR_UPDATE_FEED="$FEED_URL"
 SWTOR_UPDATE_CHECK=$upd
+
+# When the Wine session's start had to end leftover Wine processes: did macOS end the last
+# session because the launcher is not allowed in the background? (this app's som.sh btm-check;
+# a notification if so)
+SWTOR_SOM_SH="$RES/som.sh"
 $notify_log$ab
 EOF
 }
@@ -1400,6 +1412,45 @@ cmd_end_leftovers() {
   esac
 }
 
+# --- macOS's Background Task Management (BTM; System Settings > General > Login Items &
+# Extensions > Allow in the Background). When the launcher quits ~30 s after Play while it is
+# not allowed in the background, loginwindow ends what it left running: Broadsword's mac_wine
+# and SWTOR on Mac's Wine session with it, so the game hangs without a window. loginwindow says
+# so in macOS's unified log, a line like
+#   2026-10-25 18:04:57.723 I  loginwindow[458:4a665] [com.apple.launchservices:quitsupport]
+#   applicationDeath: app=0x0-0x11b11b "Star Wars - The Old Republic Launcher" was foreground,
+#   and still had subordinate processes, and is not allowed by BTM so terminating its subordinates.
+# btm-check [window]: the times of those ends in the last <window> (24h by default; the app when
+# it opens), one line per launcher run (its app=… id, the last of its lines), oldest first.
+# Exit 0: found, 1: none, 2: the log could not be read. Needs no root: 1h takes about a second,
+# 24h a few. SWTOR_ON_MAC_BTM_LOG=<file> reads that file instead (a test's fixture, compact
+# style); in a sandbox nothing else is read (not even a test's bin/log: that is Collect Logs'
+# GPU query's).
+BTM_PREDICATE='process == "loginwindow" AND eventMessage CONTAINS "not allowed by BTM" AND eventMessage CONTAINS "Old Republic Launcher"'
+cmd_btm_check() {
+  local window=${1:-24h} lines
+  case "$window" in [1-9]*[smhd]) ;; *) echo "@error btm-check: the window is a number and s, m, h or d (24h)"; exit 2 ;; esac
+  case "${window%?}" in *[!0-9]*) echo "@error btm-check: the window is a number and s, m, h or d (24h)"; exit 2 ;; esac
+  if [ -n "${SWTOR_ON_MAC_BTM_LOG:-}" ]; then
+    lines=$(cat "$SWTOR_ON_MAC_BTM_LOG" 2>/dev/null) || { echo "@error btm-check: cannot read $SWTOR_ON_MAC_BTM_LOG"; exit 2; }
+  elif [ -n "$ROOT" ]; then
+    echo "@error btm-check: macOS's log is not read in a sandbox (SWTOR_ON_MAC_BTM_LOG)"; exit 2
+  else
+    # (/usr/bin/log, never zsh's log builtin)
+    lines=$(/usr/bin/log show --last "$window" --style compact --info --predicate "$BTM_PREDICATE" </dev/null 2>/dev/null) ||
+      { echo "@error btm-check: log show failed"; exit 2; }
+  fi
+  # (the same test again, loginwindow by the process column: a fixture holds other lines too;
+  # without an app=… id, one per minute)
+  printf '%s\n' "$lines" | LC_ALL=C awk '
+    /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] / && $4 ~ /^loginwindow\[/ && /not allowed by BTM/ && /Old Republic Launcher/ {
+      id = match($0, / app=[^ ]+/) ? substr($0, RSTART + 1, RLENGTH - 1) : $1 " " substr($2, 1, 5)
+      if (!(id in t)) order[++n] = id
+      t[id] = $1 " " substr($2, 1, 8)
+    }
+    END { for (i = 1; i <= n; i++) print t[order[i]]; exit !n }' || exit 1
+}
+
 # --- Upgrade from SWTOR on Mac 0.0.x (its engine: Sikarugir's CrossOver 24.0.7, with its
 # libraries in $SOM/frameworks). An install over it puts this version's engine in place and
 # updates the existing prefix for it (wineboot -u; the game settings, key bindings, the d9mt
@@ -1650,5 +1701,6 @@ case "${1:-}" in
   rehook) cmd_rehook ;;
   end-leftovers) cmd_end_leftovers ;;
   fetch-engine) cmd_fetch_engine ;;
+  btm-check) cmd_btm_check "${2:-}" ;;
   *) sed -n '2,/^# Environment/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac

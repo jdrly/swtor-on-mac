@@ -521,6 +521,9 @@ struct ActionPanel: View {
           .foregroundStyle(Brand.warning)
           .fixedSize(horizontal: false, vertical: true)
       }
+      if installer.installed, installer.showBackgroundNote {
+        BackgroundNote(installer: installer)
+      }
       if case .succeeded = installer.phase {
         // done: the steps fold into one line of checkmarks
         CompactTimeline(count: installer.steps.count)
@@ -614,6 +617,48 @@ struct LeftoversNote: View {
       .disabled(installer.endingLeftovers)
       .pointerStyle(.link)
     }
+  }
+}
+
+// macOS ended what the launcher left running when it quit, the game's Wine with it, because the
+// launcher is not allowed in the background (Installer.checkBackground, when the app opens): say
+// so, with the setting to change and a button to it. Dismiss hides it until it happens again.
+struct BackgroundNote: View {
+  let installer: Installer
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Label("macOS ended the game's Wine when the SWTOR launcher quit (\(when)), so the game could not "
+            + "open its window. The launcher is not allowed to run in the background. In System Settings > "
+            + "General > Login Items & Extensions, under Allow in the Background, turn on Star Wars - The "
+            + "Old Republic (it may be listed as Broadsword), then press Play SWTOR again.",
+            systemImage: "exclamationmark.triangle.fill")
+        .font(.callout)
+        .foregroundStyle(Brand.warning)
+        .fixedSize(horizontal: false, vertical: true)
+      HStack(spacing: 10) {
+        Button { NSWorkspace.shared.open(Installer.loginItemsSettings) } label: {
+          Label("Open Login Items & Extensions", systemImage: "gearshape")
+        }
+        .buttonStyle(.glass)
+        .pointerStyle(.link)
+        Button("Dismiss") { installer.dismissBackgroundNote() }
+          .buttonStyle(.plain)
+          .foregroundStyle(Brand.fg2)
+          .pointerStyle(.link)
+      }
+    }
+  }
+
+  // "Oct 25, 2026 at 6:04 PM", or "3 times in the last 24 hours, last Oct 25, 2026 at 6:04 PM"
+  private var when: String {
+    let ends = installer.backgroundEnds
+    let parser = DateFormatter()
+    parser.locale = Locale(identifier: "en_US_POSIX")
+    parser.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    let last = ends.last.flatMap { parser.date(from: $0) }
+      .map { $0.formatted(date: .abbreviated, time: .shortened) } ?? ends.last ?? ""
+    return ends.count > 1 ? "\(ends.count) times in the last 24 hours, last \(last)" : last
   }
 }
 
