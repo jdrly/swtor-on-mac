@@ -63,6 +63,9 @@ LOG
   echo '2026-10-25 19:31:00.000 I  Console[999:1] quoting: loginwindow[1:1] "Star Wars - The Old Republic Launcher" is not allowed by BTM'
 } >"$T/two.log"
 : >"$T/empty.log"
+# loginwindow schedules the end a second before it ends them: that line alone is no end
+grep -F "so scheduling its subordinates' termination" "$T/not-allowed.log" >"$T/scheduled.log"
+mkfifo "$T/stalled"   # a log query that never answers
 
 echo "== som.sh btm-check"
 btm "$T/not-allowed.log" 1h
@@ -74,6 +77,11 @@ check "an empty log: none (status $rc)" test "$rc" = 1
 btm "$T/two.log" 24h
 check "two launcher runs: both, oldest first; not another app's, not another process's line ($(tr '\n' ' ' <"$T/out"))" \
   test "$(tr '\n' ' ' <"$T/out")" = "2026-10-25 18:04:57 2026-10-25 19:30:01 "
+btm "$T/scheduled.log"
+check "only the scheduling line: none (status $rc), the end's own line counts" eval '[ "$rc" = 1 ] && [ ! -s "$T/out" ]'
+t0=$SECONDS; SWTOR_ON_MAC_BTM_TIMEOUT=1 btm "$T/stalled" 1h; dt=$((SECONDS - t0))
+check "a query that doesn't answer: ended after its limit ($dt s), error (status $rc)" eval '[ "$rc" = 2 ] && grep -q "ran out of time (1 s)" "$T/out" && [ "$dt" -le 4 ]'
+check "...and nothing of it left running" eval '! pgrep -f "$T/stalled" >/dev/null'
 btm "$T/missing.log"
 check "an unreadable log: error (status $rc)" eval '[ "$rc" = 2 ] && grep -q "^@error " "$T/out"'
 for w in 1x h 0h 24 1.5h -1h; do
@@ -113,10 +121,10 @@ t0=$SECONDS; call; dt=$((SECONDS - t0))
 check "exit 3: the Wine call ran ($(tail -1 "$W/wine-args" 2>/dev/null))" eval 'tail -1 "$W/wine-args" | grep -qF "reg query HKCU\\Software\\Broadsword"'
 check "exit 3: it did not wait for the check ($dt s; the check is still waiting)" eval '[ "$dt" -le 1 ] && checks_running && [ "$(notes)" = 0 ]'
 # (the write waits for the check to open the FIFO: at most 5 s, so a wrapper without the check
-# fails here instead of hanging)
+# fails here instead of hanging; KILL: bash holds TERM back while it waits to open a FIFO)
 cat "$T/not-allowed.log" >"$W/fixture" & writer=$!
-check "exit 3: then a notification with the setting" wait_for 5 grep -q "Login Items & Extensions, turn on the launcher under Allow in the Background" "$W/notifications.log"
-kill "$writer" 2>/dev/null || true
+check "exit 3: then a notification with the setting" wait_for 5 grep -q "In System Settings > Login Items, turn on the launcher under App Background Activity" "$W/notifications.log"
+kill -KILL "$writer" 2>/dev/null || true
 wait "$writer" 2>/dev/null || true
 check "exit 3: hold.log says what happened" grep -q "macOS ended the last Wine session when the launcher quit" "$W/logs/hold.log"
 check "exit 3: nothing of the check left running" wait_for 3 eval '! checks_running'
@@ -132,6 +140,15 @@ echo 3 >"$W/hl-rc"; sed -i '' "s|^SWTOR_SOM_SH=.*|SWTOR_SOM_SH=\"$T/gone/som.sh\
 # shellcheck disable=SC2034 # (used in check's eval strings)
 calls=$(wc -l <"$W/wine-args"); call; sleep 1.5
 check "exit 3, the app moved (no som.sh there): the Wine call ran, no notification" eval '[ "$(wc -l <"$W/wine-args")" -gt "$calls" ] && [ "$(notes)" = "$n" ]'
+# a check whose query never answers (the FIFO is never written): it ends itself after its limit
+# (2 s here), with no notification and nothing left running
+rm -f "$W/fixture"; mkfifo "$W/fixture"; echo 3 >"$W/hl-rc"; echo 'SWTOR_ON_MAC_BTM_TIMEOUT=2' >>"$W/env"
+sed -i '' "s|^SWTOR_SOM_SH=.*|SWTOR_SOM_SH=\"$SOMSH\"|" "$W/env"
+call
+check "a stalled query: the check still waits at first" checks_running
+check "a stalled query: the check ends itself after its limit" wait_for 6 eval '! checks_running && ! pgrep -f "$W/fixture" >/dev/null'
+check "a stalled query: no notification" test "$(notes)" = "$n"
+rm -f "$W/fixture"
 check "the wrapper: nothing left running" eval '! pgrep -f "$W/" >/dev/null'
 
 echo "== hold-launcher --start-session: exit 3 when it ended leftover Wine processes (dummy programs)"
@@ -165,10 +182,10 @@ collect() { # <fixture or ""> [timeout]: system-info.txt's line in $T/line
   local zip
   rm -rf "$C/zip" && mkdir -p "$C/zip"
   zip=$(SWTOR_ON_MAC_ROOT="$C" SWTOR_ON_MAC_BTM_LOG="$1" SWTOR_ON_MAC_BTM_TIMEOUT="${2:-90}" /bin/bash "$RES/collect-logs.sh" "$C/zip" 2>/dev/null) || true
-  unzip -p "$zip" '*/system-info.txt' 2>/dev/null | grep '^Launcher not allowed in the background' >"$T/line" || true
+  unzip -p "$zip" '*/system-info.txt' 2>/dev/null | grep '^Launcher off in Login Items > App Background Activity' >"$T/line" || true
 }
 collect "$T/two.log"
-check "the times found ($(cat "$T/line"))" grep -qx "Launcher not allowed in the background, macOS ended what it left running (the last 7 days): 2026-10-25 18:04:57, 2026-10-25 19:30:01" "$T/line"
+check "the times found ($(cat "$T/line"))" grep -qx "Launcher off in Login Items > App Background Activity, macOS ended what it left running (the last 7 days): 2026-10-25 18:04:57, 2026-10-25 19:30:01" "$T/line"
 collect "$T/allowed.log"
 check "none ($(cat "$T/line"))" grep -q "(the last 7 days): none\$" "$T/line"
 collect ""
@@ -176,6 +193,16 @@ check "not read in a sandbox ($(cat "$T/line"))" grep -q "(the last 7 days): not
 mkfifo "$C/never"
 t0=$SECONDS; collect "$C/never" 2; dt=$((SECONDS - t0))
 check "a check that doesn't end: stopped after the limit ($dt s), said so ($(cat "$T/line"))" eval 'grep -q "not read (ran out of time)\$" "$T/line" && [ "$dt" -lt 30 ]'
+# a slow GPU query (6 s, the test's bin/log) and a check that would answer at 4 s with a 2 s
+# limit: the check's own limit counts, not the GPU query's end
+mkdir -p "$C/bin"
+printf '#!/bin/bash\nsleep 6\n' >"$C/bin/log"; chmod +x "$C/bin/log"
+rm -f "$C/late"; mkfifo "$C/late"
+( sleep 4; exec cat "$T/two.log" >"$C/late" ) & late_writer=$!
+collect "$C/late" 2
+kill -KILL "$late_writer" 2>/dev/null || true; wait "$late_writer" 2>/dev/null || true
+check "a slow GPU query: the check still stopped at its own limit ($(cat "$T/line"))" grep -q "not read (ran out of time)\$" "$T/line"
+rm -f "$C/bin/log"
 check "Collect Logs: nothing of the check left running" eval '! pgrep -f "$SOMSH btm-check" >/dev/null && ! pgrep -f "$C/never" >/dev/null'
 
 echo "== $pass passed, $fail failed"

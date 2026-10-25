@@ -18,7 +18,7 @@
 #                      game or Wine session runs); install, uninstall and the settings in the
 #                      prefix's registry (retina, physkeys, rawmouse, mousespeed) do it too
 #   som.sh btm-check [window]  the times macOS ended what the launcher left running because it
-#                      is not allowed in the background (Login Items & Extensions), in the
+#                      is off in Login Items > App Background Activity, in the
 #                      last <window> (24h): exit 0 found, 1 none, 2 the log could not be read
 #
 # Environment:
@@ -1412,8 +1412,8 @@ cmd_end_leftovers() {
   esac
 }
 
-# --- macOS's Background Task Management (BTM; System Settings > General > Login Items &
-# Extensions > Allow in the Background). When the launcher quits ~30 s after Play while it is
+# --- macOS's Background Task Management (BTM; System Settings > Login Items > App Background
+# Activity). When the launcher quits ~30 s after Play while it is
 # not allowed in the background, loginwindow ends what it left running: Broadsword's mac_wine
 # and SWTOR on Mac's Wine session with it, so the game hangs without a window. loginwindow says
 # so in macOS's unified log, a line like
@@ -1421,34 +1421,55 @@ cmd_end_leftovers() {
 #   applicationDeath: app=0x0-0x11b11b "Star Wars - The Old Republic Launcher" was foreground,
 #   and still had subordinate processes, and is not allowed by BTM so terminating its subordinates.
 # btm-check [window]: the times of those ends in the last <window> (24h by default; the app when
-# it opens), one line per launcher run (its app=… id, the last of its lines), oldest first.
-# Exit 0: found, 1: none, 2: the log could not be read. Needs no root: 1h takes about a second,
-# 24h a few. SWTOR_ON_MAC_BTM_LOG=<file> reads that file instead (a test's fixture, compact
-# style); in a sandbox nothing else is read (not even a test's bin/log: that is Collect Logs'
-# GPU query's).
-BTM_PREDICATE='process == "loginwindow" AND eventMessage CONTAINS "not allowed by BTM" AND eventMessage CONTAINS "Old Republic Launcher"'
+# it opens), one line per launcher run (its app=… id), oldest first. Only the line of the end
+# itself counts, not loginwindow's "scheduling its subordinates' termination" a second before
+# (which may not end in one): a dismissed time stays that event's. Exit 0: found, 1: none, 2:
+# the log could not be read, also when the query ran out of time. Needs no root: 1h takes about
+# a second, 24h a few. The query gets SWTOR_ON_MAC_BTM_TIMEOUT s (default 60) and is ended after
+# that (TERM, KILL a second later), so nothing of it outlives this script.
+# SWTOR_ON_MAC_BTM_LOG=<file> reads that file instead (a test's fixture, compact style); in a
+# sandbox nothing else is read (not even a test's bin/log: that is Collect Logs' GPU query's).
+BTM_LINE='not allowed by BTM so terminating its subordinates'
+BTM_PREDICATE="process == \"loginwindow\" AND eventMessage CONTAINS \"$BTM_LINE\" AND eventMessage CONTAINS \"Old Republic Launcher\""
 cmd_btm_check() {
-  local window=${1:-24h} lines
+  local window=${1:-24h} limit=${SWTOR_ON_MAC_BTM_TIMEOUT:-60} st=0 t0=$SECONDS
   case "$window" in [1-9]*[smhd]) ;; *) echo "@error btm-check: the window is a number and s, m, h or d (24h)"; exit 2 ;; esac
   case "${window%?}" in *[!0-9]*) echo "@error btm-check: the window is a number and s, m, h or d (24h)"; exit 2 ;; esac
-  if [ -n "${SWTOR_ON_MAC_BTM_LOG:-}" ]; then
-    lines=$(cat "$SWTOR_ON_MAC_BTM_LOG" 2>/dev/null) || { echo "@error btm-check: cannot read $SWTOR_ON_MAC_BTM_LOG"; exit 2; }
-  elif [ -n "$ROOT" ]; then
+  case "$limit" in ''|*[!0-9]*) limit=60 ;; esac
+  if [ -z "${SWTOR_ON_MAC_BTM_LOG:-}" ] && [ -n "$ROOT" ]; then
     echo "@error btm-check: macOS's log is not read in a sandbox (SWTOR_ON_MAC_BTM_LOG)"; exit 2
+  fi
+  # the query, a child of this script ($! is the query itself), ended with it in any case
+  BTM_OUT=$(mktemp "${TMPDIR:-/tmp}/som-btm.XXXXXX") BTM_QPID=""
+  trap '[ -z "$BTM_QPID" ] || kill "$BTM_QPID" 2>/dev/null; rm -f "$BTM_OUT"' EXIT
+  trap 'exit 2' TERM INT HUP
+  if [ -n "${SWTOR_ON_MAC_BTM_LOG:-}" ]; then
+    cat "$SWTOR_ON_MAC_BTM_LOG" </dev/null >"$BTM_OUT" 2>/dev/null &
   else
     # (/usr/bin/log, never zsh's log builtin)
-    lines=$(/usr/bin/log show --last "$window" --style compact --info --predicate "$BTM_PREDICATE" </dev/null 2>/dev/null) ||
-      { echo "@error btm-check: log show failed"; exit 2; }
+    /usr/bin/log show --last "$window" --style compact --info --predicate "$BTM_PREDICATE" </dev/null >"$BTM_OUT" 2>/dev/null &
   fi
+  BTM_QPID=$!
+  while kill -0 "$BTM_QPID" 2>/dev/null; do
+    if [ $((SECONDS - t0)) -ge "$limit" ]; then
+      kill "$BTM_QPID" 2>/dev/null || true; sleep 1; kill -KILL "$BTM_QPID" 2>/dev/null || true
+      wait "$BTM_QPID" 2>/dev/null || true; BTM_QPID=""
+      echo "@error btm-check: the log query ran out of time ($limit s)"; exit 2
+    fi
+    sleep 0.2
+  done
+  wait "$BTM_QPID" || st=$?
+  BTM_QPID=""
+  [ "$st" = 0 ] || { echo "@error btm-check: the log could not be read (status $st)"; exit 2; }
   # (the same test again, loginwindow by the process column: a fixture holds other lines too;
   # without an app=… id, one per minute)
-  printf '%s\n' "$lines" | LC_ALL=C awk '
-    /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] / && $4 ~ /^loginwindow\[/ && /not allowed by BTM/ && /Old Republic Launcher/ {
+  LC_ALL=C awk -v line="$BTM_LINE" '
+    /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] / && $4 ~ /^loginwindow\[/ && index($0, line) && /Old Republic Launcher/ {
       id = match($0, / app=[^ ]+/) ? substr($0, RSTART + 1, RLENGTH - 1) : $1 " " substr($2, 1, 5)
       if (!(id in t)) order[++n] = id
       t[id] = $1 " " substr($2, 1, 8)
     }
-    END { for (i = 1; i <= n; i++) print t[order[i]]; exit !n }' || exit 1
+    END { for (i = 1; i <= n; i++) print t[order[i]]; exit !n }' "$BTM_OUT" || exit 1
 }
 
 # --- Upgrade from SWTOR on Mac 0.0.x (its engine: Sikarugir's CrossOver 24.0.7, with its

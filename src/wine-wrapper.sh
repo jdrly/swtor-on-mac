@@ -58,13 +58,14 @@ notify() {
 
 # After the session's start ended leftover Wine processes (run detached, see below): did macOS
 # end the last session because the launcher is not allowed in the background? One look at the
-# last hour of macOS's log by the app's som.sh (btm-check, about a second; not if the app has
-# moved since env was written), and if it says so, a notification with the setting to change.
+# last hour of macOS's log by the app's som.sh (btm-check, about a second, ended after 20 s at
+# the latest; not if the app has moved since env was written), and if it says so, a notification
+# with the setting to change.
 btm_notice() {
   [ -f "$SWTOR_SOM_SH" ] || return 0
-  /bin/bash "$SWTOR_SOM_SH" btm-check 1h >/dev/null 2>&1 || return 0
+  SWTOR_ON_MAC_BTM_TIMEOUT="${SWTOR_ON_MAC_BTM_TIMEOUT:-20}" /bin/bash "$SWTOR_SOM_SH" btm-check 1h >/dev/null 2>&1 || return 0
   echo "$(date '+%Y-%m-%d %H:%M:%S') [wrapper $$] macOS ended the last Wine session when the launcher quit (not allowed in the background)" >>"$LOG_DIR/hold.log"
-  notify "macOS ended the game's Wine when the SWTOR launcher quit. In System Settings > General > Login Items & Extensions, turn on the launcher under Allow in the Background."
+  notify "macOS ended the game's Wine when the SWTOR launcher quit. In System Settings > Login Items, turn on the launcher under App Background Activity."
 }
 
 # Frame Rate Limit (Settings): the cap d9mt gets for the game, D9MT_FPS_CAP. With "Only on

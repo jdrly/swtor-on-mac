@@ -148,8 +148,8 @@ The Troubleshooting setting that makes d9mt and the Mac driver log in detail (`S
 account names, e-mail addresses and the user name replaced and without the game's command line
 (README, *Reporting problems*; `src/collect-logs.sh`).
 
-**Allow in the Background**
-macOS's setting for the launcher, in System Settings > General > Login Items & Extensions. When
+**App Background Activity**
+macOS's setting for the launcher, in System Settings > Login Items. When
 it is off, macOS ends what the launcher left running when it quits ~30 s after Play: the Wine
 session with it, so the game hangs without a window. `som.sh btm-check` finds that in macOS's log;
 the window, a notification at the next Play and Collect Logs say so (README, *Troubleshooting*,

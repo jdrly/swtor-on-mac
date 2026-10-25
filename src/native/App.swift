@@ -221,8 +221,8 @@ final class Installer {
 
   // When the app opens: did macOS end what the launcher left running when it quit (the game's
   // Wine with it), because the launcher is not allowed in the background (System Settings >
-  // General > Login Items & Extensions)? som.sh btm-check reads the last 24 hours of macOS's log
-  // (a few seconds, off the main thread). The window says so until the newest of those times
+  // Login Items > App Background Activity)? som.sh btm-check reads the last 24 hours of macOS's
+  // log (a few seconds, ended after 60 s at the latest; off the main thread). The window says so until the newest of those times
   // has been dismissed.
   func checkBackground() {
     let script = script

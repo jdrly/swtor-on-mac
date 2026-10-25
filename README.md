@@ -101,7 +101,7 @@ settings and SWTOR on Mac's settings.
   is built but off: [docs/warp-video-loop.md](docs/warp-video-loop.md)).
 - **When the game never showed up:** if macOS ended the game's Wine in the last 24 hours because
   the launcher is not allowed in the background, the window says so when it opens, with the
-  setting to change and **Open Login Items & Extensions**; **Dismiss** hides it until it happens
+  setting to change and **Open Login Items**; **Dismiss** hides it until it happens
   again (see [Troubleshooting](#troubleshooting)).
 - SWTOR on Mac does not need to be open to play: the official app starts the game on SWTOR on
   Mac's engine by itself.
@@ -389,8 +389,8 @@ game start, at some cost in performance, so turn it off again afterwards.
 - **The launcher closes after Play and the game never shows up.** macOS doesn't allow the
   launcher to run in the background, so when it quits ~30 s after Play, macOS ends what it left
   running, the game's Wine with it, and the game hangs without a window. Open System Settings >
-  General > Login Items & Extensions, and under *Allow in the Background* turn on Star Wars - The
-  Old Republic (it may be listed as Broadsword), then press Play again. SWTOR on Mac sees this in
+  Login Items, and under *App Background Activity* turn on Star Wars - The Old Republic (it may
+  be listed as Broadsword), then press Play again. SWTOR on Mac sees this in
   macOS's log (loginwindow's *not allowed by BTM so terminating its subordinates* for the
   launcher): its window says so when it opens (the last 24 hours), the next Play after it posts a
   notification, and Collect Logs lists the last 7 days.
@@ -510,13 +510,14 @@ runs), one start at a time:
 
 If it ended leftover Wine processes (`hold-launcher` exits 3), the last session ended without
 its server: macOS ends what the launcher left running when it quits while it is not allowed in
-the background (System Settings > General > Login Items & Extensions > *Allow in the
-Background*). The wrapper then runs the app's `som.sh btm-check 1h` (the path is `SWTOR_SOM_SH`
+the background (System Settings > Login Items > *App Background Activity*). The wrapper then runs the app's `som.sh btm-check 1h` (the path is `SWTOR_SOM_SH`
 in `env`) in a detached process, so the Wine call doesn't wait for it: one look at the last hour
-of macOS's unified log (`/usr/bin/log show`, loginwindow's *not allowed by BTM* lines for the
-launcher, about a second, no root). If it finds one, it posts a notification with the setting to
-change and logs it in `hold.log`; then it ends. The app runs the same check over the last 24
-hours when it opens, and Collect Logs over the last 7 days.
+of macOS's unified log (`/usr/bin/log show`, loginwindow's *not allowed by BTM so terminating
+its subordinates* line for the launcher, about a second, no root). If it finds one, it posts a
+notification with the setting to change and logs it in `hold.log`; then it ends. The app runs
+the same check over the last 24 hours when it opens, and Collect Logs over the last 7 days. The
+check ends its query after a time limit in every case (20 s from the wrapper, 60 s from the app,
+90 s in Collect Logs), so nothing of it keeps running.
 
 Nothing holds the launcher: it quits ~30 s after starting the game, as with Broadsword's own
 Wine, and macOS leaves the game (a foreground app) and the Wine session running. For the game
@@ -608,8 +609,9 @@ app's hook check repair. `scripts/test-btm.sh` (also run by `test-sandbox.sh`, a
 without the official app) tests `som.sh btm-check` on planted log text (the real lines of a field
 report, `SWTOR_ON_MAC_BTM_LOG`; a sandbox never reads macOS's log), the wrapper's notification
 after `hold-launcher` exit 3 (it doesn't hold up the Wine call, and nothing keeps running),
-`hold-launcher`'s exit 3 with dummy programs, and Collect Logs' line, also when the check runs out
-of time. `scripts/test-update.sh` tests app updates with two Developer ID builds and a
+`hold-launcher`'s exit 3 with dummy programs, and Collect Logs' line; also that loginwindow's
+*scheduling* line alone counts as no end, and that a query that never answers is ended at its
+limit (alone, from the wrapper, and in Collect Logs behind a slow GPU query). `scripts/test-update.sh` tests app updates with two Developer ID builds and a
 local feed, as in SWGL on Mac.
 
 ## Building

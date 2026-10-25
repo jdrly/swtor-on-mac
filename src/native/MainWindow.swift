@@ -630,15 +630,15 @@ struct BackgroundNote: View {
     VStack(alignment: .leading, spacing: 8) {
       Label("macOS ended the game's Wine when the SWTOR launcher quit (\(when)), so the game could not "
             + "open its window. The launcher is not allowed to run in the background. In System Settings > "
-            + "General > Login Items & Extensions, under Allow in the Background, turn on Star Wars - The "
-            + "Old Republic (it may be listed as Broadsword), then press Play SWTOR again.",
+            + "Login Items, under App Background Activity, turn on Star Wars - The Old Republic (it may be "
+            + "listed as Broadsword), then press Play SWTOR again.",
             systemImage: "exclamationmark.triangle.fill")
         .font(.callout)
         .foregroundStyle(Brand.warning)
         .fixedSize(horizontal: false, vertical: true)
       HStack(spacing: 10) {
         Button { NSWorkspace.shared.open(Installer.loginItemsSettings) } label: {
-          Label("Open Login Items & Extensions", systemImage: "gearshape")
+          Label("Open Login Items", systemImage: "gearshape")
         }
         .buttonStyle(.glass)
         .pointerStyle(.link)
