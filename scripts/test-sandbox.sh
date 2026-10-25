@@ -709,8 +709,9 @@ fi
 
 echo "== 4e. the game's end through the wrapper on the engine (a probe program as swtor.exe that waits)"
 if command -v x86_64-w64-mingw32-gcc >/dev/null; then
-  # (no update check: it would look at the real feed; Settings' defaults come back in 6)
-  som set updates off >/dev/null
+  # (no update check: it would look at the real feed; Settings' defaults come back in 6. Game
+  # Mode on for the probe: 4b turned it off)
+  som set updates off >/dev/null; som set gamemode on >/dev/null
   mkdir -p "$SANDBOX/probe-end"
   printf '#include <windows.h>\n#include <stdlib.h>\nint main(int c, char **v) { Sleep(atoi(v[c - 1])); return 7; }\n' >"$SANDBOX/probe-end/probe.c"
   x86_64-w64-mingw32-gcc -O2 -o "$SANDBOX/probe-end/swtor.exe" "$SANDBOX/probe-end/probe.c"
@@ -749,8 +750,9 @@ if command -v x86_64-w64-mingw32-gcc >/dev/null; then
   cleanup_wine
   check "game end: no Wine left running" test -z "$(sandbox_wine)"
   # the Game Mode link the wrapper made in this user's temporary folder (the sandbox engine's)
-  gm=$(sed -n 's|^game mode: \(.*/winetemp-[^/]*\)/wine -> .*|\1|p' "$LOGS/gamemode.log" | tail -1)
+  gm=$(sed -n 's|^game mode: \(.*/winetemp-[^/]*\)/wine -> .*|\1|p' "$LOGS/gamemode.log" 2>/dev/null | tail -1 || true)
   case "$gm" in "$(getconf DARWIN_USER_TEMP_DIR)"winetemp-*) rm -rf "$gm" ;; esac
+  som set gamemode off >/dev/null
 else
   echo "  (skipped: no x86_64-w64-mingw32-gcc for the probe program)"
 fi
