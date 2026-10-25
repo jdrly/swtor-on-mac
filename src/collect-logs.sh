@@ -507,12 +507,19 @@ cat >"$work/leak-patterns" <<'EOF'
 --session=REDACTED\\*["'][A-Za-z0-9]
 eyJ[A-Za-z0-9_-]{8}
 EOF
-# found <grep options>: a match, or grep failed (the check fails closed)
+# found <grep options>: a match, or grep failed (the check fails closed); found_name: the same
+# on the file without this script's own markers, also inside words (a name "Name" is not found
+# in NAME or app_NAME; redact replaces names in any case, so a marker hides none)
 found() { LC_ALL=C grep -q "$@"; [ $? != 1 ]; }
+found_name() {  # <file> <grep options>
+  local f=$1; shift
+  LC_ALL=C sed -E 's/NAME|ACCOUNT|USER|REDACTED|TOKEN|EMAIL|MAC-ADDRESS|IP6|IP//g' "$f" | LC_ALL=C grep -q "$@"
+  [ $? != 1 ]
+}
 ( cd "$out" && find . -type f ) | sed 's|^\./||' | while IFS= read -r rel; do
   f="$out/$rel"
-  if { [ -s "$literals" ] && found -i -F -f "$literals" "$f"; } ||
-     { [ -s "$literals_short" ] && found -i -w -F -f "$literals_short" "$f"; } ||
+  if { [ -s "$literals" ] && found_name "$f" -i -F -f "$literals"; } ||
+     { [ -s "$literals_short" ] && found_name "$f" -i -w -F -f "$literals_short"; } ||
      found -F -e "$HOME/" -e "$H/" -e "/Users/$(id -un)/" "$f" ||
      found -E -f "$work/leak-patterns" "$f"; then
     rm -f "$f"

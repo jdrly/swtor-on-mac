@@ -1333,6 +1333,12 @@ if [ -f "$zip" ]; then
   check "logs: the leak check left out only the launcher log with a cut-off token, and says so" eval '[ -e "$LZ/host.developer.log" ] && [ ! -e "$LZ/host.cut.log" ] && ! grep -rq eyJhbGciOiJIUzI1NiJ9 "$ZD" && [ "$(cat "$ZD/left-out.txt")" = "$(printf "Left out: a name, home folder or token the redaction missed was still in these files\n  launcher-logs/host.cut.log")" ]'
   check "logs: system info: the official app (version, bundle id, owner, signature, the half-written files)" eval 'grep -q "^  version .*, bundle id $(plutil -extract CFBundleIdentifier raw -o - "$BS_APP/Contents/Info.plist")\$" "$SI" && grep -q "^  owner you, group [a-z]" "$SI" && grep -q "^  signature (codesign --verify --deep --strict): " "$SI" && grep -qx "    Contents/Frameworks/Launcher.dylib.solidpartial" "$SI"'
   check "logs: system info: how each game start ended, the earlier start's wine.log in the zip" eval 'grep -q "^  .*game ended after 0:00:03 (lang=de-de torsets=main,de-de): exit code 5\$" "$SI" && grep -q "^  .*game ended after 2:05:10 (lang=en-us torsets=main,en-us): exit code 0\$" "$SI" && grep -q "lang=de-de" "$ZD/logs/wine.log.1"'
+  # a name that is also the redaction's marker ("Name"): no clean file is left out for it
+  printf 'Machine Name: Name\n2026-10-24 16:00:47 hello from Name\n' >"$LL/host.name.log"
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  zn=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-name" 2>>"$SANDBOX/collect.err" || true)
+  check "logs: a name like the marker (Name): only the cut-off token's log left out" eval 'unzip -l "$zn" | piped "launcher-logs/host.name.log" && [ "$(unzip -p "$zn" "*/left-out.txt" | sed 1d)" = "  launcher-logs/host.cut.log" ] && ! unzip -p "$zn" "*/launcher-logs/host.name.log" | piped -w Name'
+  rm -f "$LL/host.name.log"
   # shellcheck disable=SC2034 # (used in check's eval strings)
   CR=$(echo "$SANDBOX"/zip/*/crash-reports) SI=$(echo "$SANDBOX"/zip/*/system-info.txt)
   check "logs: crash reports: the newest 20 of the game, Wine and the app, within 3 MB each and 10 MB together, only the sandbox's" \
