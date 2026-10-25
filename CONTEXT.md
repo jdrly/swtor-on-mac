@@ -103,8 +103,10 @@ The prefix's wineserver and Wine's system processes. The wrapper brings it up th
 (README, *How it works*; `src/helpers/hold-launcher/hold_launcher.c`).
 
 **`hold-launcher`**
-The wrapper's session helper. Its name dates from 0.1.1, when it held the launcher open; it no
-longer does (`src/helpers/hold-launcher/hold_launcher.c`).
+The wrapper's session helper, and the game's parent: with `--run-game` it takes the wrapper's
+place, runs the game as its child and logs in `hold.log` how long it ran and how it ended. Its
+name dates from 0.1.1, when it held the launcher open; it no longer does
+(`src/helpers/hold-launcher/hold_launcher.c`).
 
 **Leftover Wine processes**
 Processes of the engine that belong to this prefix's session while no wineserver of it runs.
@@ -145,8 +147,9 @@ The Troubleshooting setting that makes d9mt and the Mac driver log in detail (`S
 
 **Collect Logs**
 *SWTOR on Mac > Collect Logs…*: a zip for bug reports, `SWTOR-on-Mac-logs-<date>.zip`, with
-account names, e-mail addresses and the user name replaced and without the game's command line
-(README, *Reporting problems*; `src/collect-logs.sh`).
+SWTOR on Mac's logs and the official launcher's, account names, e-mail addresses, the user name
+and the Mac's name replaced and without the game's command line; a leak check leaves out a file
+that still has one (README, *Reporting problems*; `src/collect-logs.sh`).
 
 **Session report**
 `session-report.sh`: a summary of the last game session from `wine.log` (frame rate, hitches,

@@ -4,7 +4,8 @@
 # logs folder if the Desktop cannot be written) and prints the zip's path.
 #   collect-logs.sh [folder]   write the zip into folder instead
 #
-# In the zip: SWTOR on Mac's logs (the end of large ones), its env, settings.conf, dxvk.conf,
+# In the zip: SWTOR on Mac's logs (the end of large ones; wine.log.1-4 are the game starts
+# before the last), its env, settings.conf, dxvk.conf,
 # install-manifest.json and d9mt-ab.env (a development build's A/B switches, if set), the app's VERSIONS, session-report.txt (the last game session in
 # short, scripts/session-report.sh), a fresh system-info.txt (macOS, chip,
 # memory, displays, versions, the state of the install, which crash reports are in the zip, the
@@ -13,10 +14,15 @@
 # crash-reports/: macOS's crash, hang and spin reports of the last 7 days for the game, Wine, the
 # official launcher and SWTOR on Mac (see crash_reports), so nobody has to look for them. Never
 # the game's command line (the launcher passes the account name and session on it), nor
-# anything from the Wine prefixes.
+# anything from the Wine prefixes. launcher-logs/: the official launcher's own logs (the end of
+# large ones), with the game's command line, its account names, session tokens and ids, the
+# Mac's name, IP and MAC addresses and home folders taken out as well (see launcher_rules).
 # Every file is redacted on the way in: home folder → ~, user and full name → USER and NAME,
 # account names (from the game's <account>_Account.ini names) → ACCOUNT, e-mail addresses → EMAIL, "-set <key> <value>" arguments and password/user name/token
-# settings → REDACTED, serial numbers and device identifiers left out.
+# settings → REDACTED, serial numbers and device identifiers left out, the Mac's names and the
+# launcher's account names → NAME. Then a leak check: a file that still has one of those names,
+# a home folder path or an account name or token on a command line is left out of the zip
+# (named in left-out.txt).
 #
 # SWTOR_ON_MAC_ROOT=/abs/dir: a sandbox (as for som.sh); the zip then goes to its Desktop.
 set -u
@@ -32,6 +38,9 @@ BS_WINE="$H/Library/Application Support/com.broadsword.swtor/Star Wars - The Old
 # engine's processes, under their bundle id
 if [ -n "$ROOT" ]; then USER_CACHE="$ROOT/usercache/"; else USER_CACHE="$(getconf DARWIN_USER_CACHE_DIR)"; fi
 METAL_CACHE="${USER_CACHE}com.codeweavers.CrossOver.wineloader"
+LAUNCHER_LOGS="$H/Library/Logs/Star Wars - The Old Republic Launcher"
+BS_APP="${ROOT:+$ROOT/Applications}"
+BS_APP="${BS_APP:-/Applications}/Star Wars - The Old Republic.app"
 
 name="SWTOR-on-Mac-logs-$(date +%Y-%m-%d-%H%M)"
 dest="${1:-$H/Desktop}"
@@ -44,10 +53,31 @@ mkdir -p "$out/logs" "$out/crash-reports"
 # both Wine prefixes; only the names are read).
 accounts="$(find "$BS_WINE/drive_c/users" "$SOM/prefix/drive_c/users" -path '*/AppData/Local/SWTOR/swtor/settings/*' \
   -maxdepth 7 -name '*_Account*.ini' 2>/dev/null | sed 's|.*/||; s/_Account.*\.ini$//' | sort -u)"
+# ...and the ones the launcher logged: "-set username \<name>" on the game's command line (also
+# JSON-escaped, "\\<name>")
+launcher_accounts="$(LC_ALL=C grep -h -o -E -- "-set username [^ '\"]+" "$LAUNCHER_LOGS"/*.log 2>/dev/null |
+  sed -E 's/^-set username \\*//; s/\\+$//' | sort -u)"
+accounts="$(printf '%s\n%s\n' "$accounts" "$launcher_accounts" | sed '/^$/d' | sort -u)"
+# Names to replace wherever they are, in any case (NAME), and to look for in the leak check:
+# the Mac's names, the launcher's account names and the "Machine Name: ..." it logged; those of
+# 2 or 3 characters only as whole words ($literals_short: "Rex", not the "rex" in "Index").
+# Not a model's own name ("MacBook Pro", "iMac.local": the model has to stay readable) or a
+# common word (as for the user name in redact); the longest first.
+literals="$work/literals" literals_short="$work/literals-short"
+{ scutil --get ComputerName; scutil --get LocalHostName; scutil --get HostName; hostname -s; hostname
+  printf '%s\n' "$launcher_accounts"
+  LC_ALL=C grep -h -o -E 'Machine Name: .+$' "$LAUNCHER_LOGS"/*.log | sed 's/^Machine Name: //'
+} 2>/dev/null | tr -d '\r' | LC_ALL=C awk '
+  { l = tolower($0); sub(/\.local$/, "", l); gsub(/-/, " ", l) }
+  length($0) >= 2 && l !~ /^(mac|imac|macbook|macbook air|macbook pro|mac mini|mac studio|mac pro|localhost)( [0-9]+)?$/ &&
+  l !~ /^(admin|user|users|test|game|wine|guest|root|home|apple|swtor|shared|crossover)$/ {
+    print length($0) "\t" $0 }' | sort -rn | cut -f2- | uniq >"$work/names"
+awk 'length($0) >= 4' "$work/names" >"$literals"
+awk 'length($0) < 4' "$work/names" >"$literals_short"
 
-redact() {  # stdin → stdout
+redact() {  # [launcher] stdin → stdout (launcher: also launcher_rules)
   SOM_HOME_PATH="$HOME" SOM_ROOT_HOME="$H" SOM_USER="$(id -un)" SOM_NAME="$(id -F 2>/dev/null)" SOM_ACCOUNTS="$accounts" \
-  LC_ALL=C awk '
+  LC_ALL=C awk -v litfile="$literals" -v shortfile="$literals_short" -v launcher="${1:+1}" '
     # Replace w with r in s, ignoring case; only where w is a whole word if whole is set.
     function rep(s, w, r, whole,    ls, lw, res, p, n, before, after, last) {
       if (w == "") return s
@@ -87,6 +117,50 @@ redact() {  # stdin → stdout
       }
       return res s
     }
+    # IPv4 addresses, except 127.0.0.1 and version numbers ("Version: 7.2.207.0", "v1.2.3.4")
+    function ipv4(s,    out, pre, m) {
+      out = ""
+      while (match(s, /[0-9][0-9]?[0-9]?\.[0-9][0-9]?[0-9]?\.[0-9][0-9]?[0-9]?\.[0-9][0-9]?[0-9]?/)) {
+        pre = substr(s, 1, RSTART - 1); m = substr(s, RSTART, RLENGTH)
+        if (m == "127.0.0.1" || tolower(" " pre) ~ /[^a-z](version|ver|v)[:= ]*$/ || pre ~ /[0-9.]$/) out = out pre m
+        else out = out pre "IP"
+        s = substr(s, RSTART + RLENGTH)
+      }
+      return out s
+    }
+    # IPv6 addresses: a run of hex digits and colons, not part of a word, with "::" (fe80::1,
+    # 2001:db8::1) or 4 colons or more (the full form; MAC addresses are taken before)
+    function ipv6(s,    out, pre, m, rest, nc, t) {
+      out = ""
+      while (match(s, /[0-9A-Fa-f:]*:[0-9A-Fa-f:]*/)) {
+        pre = substr(s, 1, RSTART - 1); m = substr(s, RSTART, RLENGTH); rest = substr(s, RSTART + RLENGTH)
+        t = m; nc = gsub(/:/, ":", t)
+        if ((index(m, "::") || nc >= 4) && m ~ /[0-9A-Fa-f]/ && pre !~ /[A-Za-z0-9_.]$/ && rest !~ /^[A-Za-z0-9_]/) out = out pre "IP6"
+        else out = out pre m
+        s = rest
+      }
+      return out s
+    }
+    # The official launcher logs the game'"'"'s command line (account name, session token), its
+    # session and machine ids, the Mac'"'"'s name, its addresses and home folders, also of other
+    # users and in Wine'"'"'s user folders.
+    function launcher_rules(s) {
+      # (the game'"'"'s command line from its account name on: never in the zip, redacted or not;
+      # the wrapper logs the game'"'"'s language itself)
+      sub(/-set[ \t]+username.*/, "[SWTOR on Mac: the rest of the game'"'"'s command line, from its account name on, left out]", s)
+      gsub("Session Id: .*", "Session Id: REDACTED", s)
+      gsub("Machine Id: .*", "Machine Id: REDACTED", s)
+      gsub("Machine Name: .*", "Machine Name: NAME", s)
+      gsub("User Home: .*", "User Home: ~", s)
+      gsub("Intranet IP: .*", "Intranet IP: IP", s)
+      gsub("/Users/[^/ \"\047:]+", "/Users/USER", s)
+      gsub("drive_c/users/[^/ \"\047:]+", "drive_c/users/USER", s)
+      gsub("[Cc]:\\\\+[Uu]sers\\\\+[^\\\\ \"\047:]+", "C:\\users\\USER", s)
+      gsub(/[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]/, "MAC-ADDRESS", s)
+      s = ipv4(s)
+      s = ipv6(s)
+      return s
+    }
     BEGIN {
       secret_key = "(password|passwd|pwd|username|user_name|accountname|account|email|token|ticket|session|" \
         "crashreporterkey|deviceidentifierforvendor|bootsessionuuid|sleepwakeuuid)[\"\047]?[ \t]*[:=][ \t]*[\"\047]?"
@@ -97,6 +171,8 @@ redact() {  # stdin → stdout
       split("admin user users mac test game wine guest root home apple swtor shared crossover", w, " ")
       for (i in w) common[w[i]] = 1
       n = split(ENVIRON["SOM_ACCOUNTS"], accounts, "\n")
+      nl = 0; while ((getline l < litfile) > 0) lit[++nl] = l
+      ns = 0; while ((getline l < shortfile) > 0) short[++ns] = l
     }
     {
       line = tolower($0)
@@ -109,6 +185,18 @@ redact() {  # stdin → stdout
       if (length(user) >= 2 && !(tolower(user) in common)) s = rep(s, user, "USER", 1)
       if (length(fullname) >= 3) s = rep(s, fullname, "NAME", 1)
       for (i = 1; i <= n; i++) if (length(accounts[i]) >= 2) s = rep(s, accounts[i], "ACCOUNT", 1)
+      if (launcher) s = launcher_rules(s)
+      for (i = 1; i <= nl; i++) s = rep(s, lit[i], "NAME", 0)
+      for (i = 1; i <= ns; i++) s = rep(s, short[i], "NAME", 1)
+      # the launcher'"'"'s session token (its registry calls) and session, JWT-style tokens
+      # (a value in quotes, also JSON-escaped ones, \"...\", is one value with its spaces)
+      gsub("--registry-token[ \t]+-t[ \t]+\\\\*\"[^\"]*\"", "--registry-token -t TOKEN", s)
+      gsub("--registry-token[ \t]+-t[ \t]+\\\\*\047[^\047]*\047", "--registry-token -t TOKEN", s)
+      gsub("--registry-token[ \t]+-t[ \t]+[^ \t\"\047\\\\]+", "--registry-token -t TOKEN", s)
+      gsub("--session=\\\\*\"[^\"]*\"", "--session=REDACTED", s)
+      gsub("--session=\\\\*\047[^\047]*\047", "--session=REDACTED", s)
+      gsub("--session=[^ \t\"\047\\\\]+", "--session=REDACTED", s)
+      gsub(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)?/, "TOKEN", s)
       s = setargs(s)
       s = secrets(s)
       gsub(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z][A-Za-z]+/, "EMAIL", s)
@@ -120,15 +208,16 @@ add() {  # file [name in the zip]
   [ -f "$1" ] && redact <"$1" >"$out/${2:-${1##*/}}"
 }
 
-add_log() {  # file max-bytes: the end of a log
-  local f=$1 size
+add_log() {  # file max-bytes [folder in the zip [launcher]]: the end of a log
+  local f=$1 size dir="$out/${3:-logs}"
   [ -f "$f" ] || return 0
+  mkdir -p "$dir"
   size=$(stat -f %z "$f")
   if [ "$size" -gt "$2" ]; then
     { echo "[SWTOR on Mac: only the last $(($2 / 1000000)) MB of ${f##*/}]"
-      tail -c "$2" "$f" | awk 'NR > 1'; } | redact >"$out/logs/${f##*/}"
+      tail -c "$2" "$f" | awk 'NR > 1'; } | redact ${4:+"$4"} >"$dir/${f##*/}"
   else
-    redact <"$f" >"$out/logs/${f##*/}"
+    redact ${4:+"$4"} <"$f" >"$dir/${f##*/}"
   fi
 }
 
@@ -256,8 +345,16 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
 }
 
 for f in "$LOGS"/*; do
-  case "$f" in *.zip) continue ;; esac
-  [ -f "$f" ] && add_log "$f" 20000000
+  case "$f" in
+    *.zip) continue ;;
+    # (the game starts before the last: what matters is how they ended)
+    */wine.log.[0-9]) add_log "$f" 5000000 ;;
+    *) [ -f "$f" ] && add_log "$f" 20000000 ;;
+  esac
+done
+# the official launcher's own logs, with launcher_rules
+for f in "$LAUNCHER_LOGS"/*.log; do
+  [ -f "$f" ] && add_log "$f" 5000000 launcher-logs launcher
 done
 for f in env settings.conf dxvk.conf install-manifest.json d9mt-ab.env; do add "$SOM/$f"; done
 add "$RES/VERSIONS"
@@ -321,7 +418,39 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
   done
   # (0.1.3 and older set up a launchd job for launcher updates; since 0.1.4 the app checks the
   # hook when it opens, and Install removes the job)
+  echo
+  # the official launcher app: a self-update that did not finish leaves *.solidpartial files
+  # in it, and a launcher that won't open
+  echo "Official launcher app:"
+  if [ -d "$BS_APP" ]; then
+    plist="$BS_APP/Contents/Info.plist"
+    echo "  version $(plutil -extract CFBundleShortVersionString raw -o - "$plist" 2>/dev/null || echo ?)" \
+      "($(plutil -extract CFBundleVersion raw -o - "$plist" 2>/dev/null || echo ?))," \
+      "bundle id $(plutil -extract CFBundleIdentifier raw -o - "$plist" 2>/dev/null || echo ?)"
+    # (the owner as root, you or another user: another user's name is theirs)
+    o=$(stat -f '%Su' "$BS_APP"); g=$(stat -f '%Sg' "$BS_APP")
+    case "$o" in root) ;; "$(id -un)") o="you" ;; *) o="another user" ;; esac
+    case "$g" in wheel|admin|staff) ;; *) g="another group" ;; esac
+    echo "  owner $o, group $g, $(stat -f '%Sp' "$BS_APP"), changed $(stat -f '%Sm' -t '%F %R' "$BS_APP")"
+    partial=$(find "$BS_APP" -name '*.solidpartial' 2>/dev/null | sed "s|^$BS_APP/||")
+    if [ -n "$partial" ]; then
+      echo "  half-written files of a self-update that did not finish (*.solidpartial):"
+      printf '%s\n' "$partial" | head -20 | sed 's/^/    /'
+    else
+      echo "  half-written files (*.solidpartial): none"
+    fi
+    if cs=$(codesign --verify --deep --strict "$BS_APP" 2>&1); then echo "  signature (codesign --verify --deep --strict): valid"
+    else echo "  signature (codesign --verify --deep --strict): not valid: $(printf '%s\n' "$cs" | head -5 | tr '\n' ' ')"; fi
+  else
+    echo "  not found at $BS_APP"
+  fi
+  echo "  its logs: $(ls "$LAUNCHER_LOGS"/*.log 2>/dev/null | wc -l | tr -d ' ') (in launcher-logs/)"
   echo "Launcher-update launchd job of an older version: $([ -f "$H/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist" ] && echo "still there (Reinstall removes it)" || echo "none")"
+  echo
+  # (the wrapper's hold-launcher logs a line when the game ends: wine.log, wine.log.1-4 are
+  # those starts' logs, the newest first)
+  echo "Game starts, the last 10 (in logs/hold.log; how long each ran and how it ended):"
+  grep 'game ended after' "$LOGS/hold.log" 2>/dev/null | tail -10 | sed 's/^/  /' | grep . || echo "  none recorded"
   echo
   echo "Crash reports of the last 7 days (newest first; in crash-reports/):"
   if [ -s "$work/crash-index" ]; then cat "$work/crash-index"; else echo "  none"; fi
@@ -365,6 +494,42 @@ gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
   echo
   system_profiler SPHardwareDataType 2>/dev/null | grep -v -i -E 'serial|uuid|udid|activation lock'
 } 2>&1 | redact >"$out/system-info.txt"
+
+# The leak check: a file that still has one of the names above, a home folder's path or an
+# account name, session or token on a command line is left out (left-out.txt names it). (A
+# redacted value may end a quoted string, REDACTED" or REDACTED\", not go on after one; a token
+# that begins as a JWT's header, eyJ..., is one even when cut off.)
+cat >"$work/leak-patterns" <<'EOF'
+-set[[:space:]]+username[[:space:]]+[^R[:space:]]
+--registry-token[[:space:]]+-t[[:space:]]+[^T]
+--session=[^R]
+--session=REDACTED[^[:space:],;)}"'\\]
+--session=REDACTED\\*["'][A-Za-z0-9]
+eyJ[A-Za-z0-9_-]{8}
+EOF
+# found <grep options>: a match, or grep failed (the check fails closed); found_name: the same
+# on the file without this script's own markers, also inside words (a name "Name" is not found
+# in NAME or app_NAME; redact replaces names in any case, so a marker hides none)
+found() { LC_ALL=C grep -q "$@"; [ $? != 1 ]; }
+found_name() {  # <file> <grep options>
+  local f=$1; shift
+  LC_ALL=C sed -E 's/NAME|ACCOUNT|USER|REDACTED|TOKEN|EMAIL|MAC-ADDRESS|IP6|IP//g' "$f" | LC_ALL=C grep -q "$@"
+  [ $? != 1 ]
+}
+( cd "$out" && find . -type f ) | sed 's|^\./||' | while IFS= read -r rel; do
+  f="$out/$rel"
+  if { [ -s "$literals" ] && found_name "$f" -i -F -f "$literals"; } ||
+     { [ -s "$literals_short" ] && found_name "$f" -i -w -F -f "$literals_short"; } ||
+     found -F -e "$HOME/" -e "$H/" -e "/Users/$(id -un)/" "$f" ||
+     found -E -f "$work/leak-patterns" "$f"; then
+    rm -f "$f"
+    echo "$rel"
+  fi
+done >"$work/leaks"
+if [ -s "$work/leaks" ]; then
+  { echo "Left out: a name, home folder or token the redaction missed was still in these files"
+    sed 's/^/  /' "$work/leaks"; } >"$out/left-out.txt"
+fi
 
 mkdir -p "$dest" 2>/dev/null
 zip="$dest/$name.zip"

@@ -1,4 +1,5 @@
 // hold-launcher --start-session WINESERVER_LOG
+// hold-launcher --run-game HOLD_LOG NOTE PROGRAM [ARGS...]
 // hold-launcher --reap
 // hold-launcher --paths
 // hold-launcher GAME_PID   (0.1.1's wrappers: nothing to do any more)
@@ -28,6 +29,16 @@
 // processes, so they inherit nothing either. Logs one line to stderr. Exit 0, or 1 if no
 // wineserver could be started (the wrapper then starts one itself).
 //
+// --run-game: runs the game, PROGRAM ARGS (the engine's wine with the launcher's command), as
+// this process's child with everything of this process (its stdio and other fds, its process
+// group, its environment) and keeps none of those fds itself (stdio on /dev/null, the rest
+// closed: what the game closes is closed), passes TERM, INT, HUP and QUIT on to it, and when it ends appends
+// one line to HOLD_LOG: how long it ran and how it ended (exit code or signal), with NOTE (the
+// game's language). Then this process ends as the game did (its exit code; TERM, INT, HUP and
+// KILL raised again, other signals as exit 128 + signal: no crash report of its own), so the
+// launcher sees what it would have seen. It ends with the game: nothing of it stays. The
+// wrapper execs it in its own place, so the launcher's child is this process for the session.
+//
 // --reap: ends leftover Wine processes of WINEPREFIX's session: processes of SWTOR_ENGINE that
 // belong to it (they map files from its server directory /tmp/.wine-<uid>/server-<dev>-<ino>,
 // or their working directory is in the prefix's drive_c) while no wineserver of it runs (none
@@ -44,6 +55,7 @@
 // mid-cleanup).
 //
 // build: clang -O2 -arch x86_64 -arch arm64 -o hold-launcher hold_launcher.c
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libproc.h>
@@ -60,18 +72,31 @@
 #include <time.h>
 #include <unistd.h>
 
-// log lines go to stderr; the wrapper points it at ~/Library/Logs/SWTOR on Mac/hold.log
-static void logf_(const char *fmt, ...)
+static void vlogf_(FILE *f, const char *fmt, va_list ap)
 {
     char ts[32];
     time_t now = time(NULL);
     strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", localtime(&now));
-    fprintf(stderr, "%s [%d] ", ts, getpid());
+    fprintf(f, "%s [%d] ", ts, getpid());
+    vfprintf(f, fmt, ap);
+    fputc('\n', f);
+}
+
+// log lines go to stderr; the wrapper points it at ~/Library/Logs/SWTOR on Mac/hold.log
+static void logf_(const char *fmt, ...)
+{
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    vlogf_(stderr, fmt, ap);
     va_end(ap);
-    fputc('\n', stderr);
+}
+
+static void logf_to(FILE *f, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vlogf_(f, fmt, ap);
+    va_end(ap);
 }
 
 static long long now_ms(void)
@@ -357,6 +382,78 @@ static int start_session(const char *wslog)
     return ret;
 }
 
+static const int game_signals[] = { SIGTERM, SIGINT, SIGHUP, SIGQUIT };
+static volatile pid_t game_pid;
+
+static void pass_on(int sig)
+{
+    if (game_pid > 0) kill(game_pid, sig);
+}
+
+static int run_game(const char *holdlog, const char *note, char **argv)
+{
+    sigset_t block, old;
+    sigemptyset(&block);
+    for (size_t i = 0; i < sizeof(game_signals) / sizeof(*game_signals); i++) sigaddset(&block, game_signals[i]);
+    // (blocked until the handlers know the game's pid: none is lost in between)
+    sigprocmask(SIG_BLOCK, &block, &old);
+    long long t0 = now_ms();
+    pid_t pid = fork();
+    if (pid == 0) {
+        sigprocmask(SIG_SETMASK, &old, NULL);
+        execv(argv[0], argv);
+        _exit(127);
+    }
+    if (pid < 0) {
+        // (no child: the game in this process, as the wrapper ran it before, without the line)
+        sigprocmask(SIG_SETMASK, &old, NULL);
+        execv(argv[0], argv);
+        return 127;
+    }
+    game_pid = pid;
+    // While it waits, this process holds nothing of the caller's: a pipe or socket the game
+    // closes ends for its other side as if the game were the launcher's child itself.
+    close_inherited_fds(-1);
+    int null = open("/dev/null", O_RDWR);
+    for (int fd = 0; fd <= 2 && null >= 0; fd++) dup2(null, fd);
+    if (null > 2) close(null);
+    struct sigaction sa = { .sa_handler = pass_on, .sa_flags = SA_RESTART };
+    sigemptyset(&sa.sa_mask);
+    for (size_t i = 0; i < sizeof(game_signals) / sizeof(*game_signals); i++) sigaction(game_signals[i], &sa, NULL);
+    sigprocmask(SIG_SETMASK, &old, NULL);
+    int st = 0;
+    while (waitpid(pid, &st, 0) < 0)
+        if (errno != EINTR) { st = -1; break; }
+    long long s = (now_ms() - t0) / 1000;
+    char how[64], name[16] = "?";
+    if (st == -1) snprintf(how, sizeof(how), "end unknown (%s)", strerror(errno));
+    else if (WIFSIGNALED(st)) {
+        // (sys_signame is lower case: "term")
+        if (WTERMSIG(st) < NSIG)
+            for (int i = 0; sys_signame[WTERMSIG(st)][i] && i < (int)sizeof(name) - 1; i++)
+                name[i] = (char)toupper((unsigned char)sys_signame[WTERMSIG(st)][i]), name[i + 1] = 0;
+        snprintf(how, sizeof(how), "signal %d (SIG%s)%s", WTERMSIG(st), name, WCOREDUMP(st) ? ", core dumped" : "");
+    } else snprintf(how, sizeof(how), "exit code %d", WEXITSTATUS(st));
+    FILE *f = fopen(holdlog, "a");
+    if (f) {
+        logf_to(f, "game ended after %lld:%02lld:%02lld (%s): %s", s / 3600, s / 60 % 60, s % 60, note, how);
+        fclose(f);
+    }
+    if (st != -1 && WIFSIGNALED(st)) {
+        int sig = WTERMSIG(st);
+        if (sig == SIGTERM || sig == SIGINT || sig == SIGHUP || sig == SIGKILL) {
+            signal(sig, SIG_DFL);
+            sigset_t one;
+            sigemptyset(&one);
+            sigaddset(&one, sig);
+            sigprocmask(SIG_UNBLOCK, &one, NULL);
+            raise(sig);
+        }
+        return 128 + sig;
+    }
+    return st == -1 ? 1 : WEXITSTATUS(st);
+}
+
 // --paths: every process's real executable, "<pid> <path>" lines
 static void print_paths(void)
 {
@@ -375,6 +472,7 @@ static void print_paths(void)
 int main(int argc, char **argv)
 {
     if (argc == 3 && !strcmp(argv[1], "--start-session")) return start_session(argv[2]);
+    if (argc >= 5 && !strcmp(argv[1], "--run-game")) return run_game(argv[2], argv[3], argv + 4);
     // --reap: end leftover processes of the prefix's session (none if its wineserver runs), at once
     if (argc == 2 && !strcmp(argv[1], "--reap")) {
         reap(1);
@@ -388,6 +486,6 @@ int main(int argc, char **argv)
         logf_("game %s: not holding the launcher (no longer needed)", argv[1]);
         return 0;
     }
-    fprintf(stderr, "usage: hold-launcher --start-session WINESERVER_LOG | --reap | --paths\n");
+    fprintf(stderr, "usage: hold-launcher --start-session WINESERVER_LOG | --run-game HOLD_LOG NOTE PROGRAM [ARGS...] | --reap | --paths\n");
     return 2;
 }

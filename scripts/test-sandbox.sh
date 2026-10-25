@@ -707,6 +707,61 @@ else
   echo "  (skipped: no x86_64-w64-mingw32-gcc for the probe program)"
 fi
 
+echo "== 4e. the game's end through the wrapper on the engine (a probe program as swtor.exe that waits)"
+if command -v x86_64-w64-mingw32-gcc >/dev/null; then
+  # (no update check: it would look at the real feed; Settings' defaults come back in 6. Game
+  # Mode on for the probe: 4b turned it off)
+  som set updates off >/dev/null; som set gamemode on >/dev/null
+  mkdir -p "$SANDBOX/probe-end"
+  printf '#include <windows.h>\n#include <stdlib.h>\nint main(int c, char **v) { Sleep(atoi(v[c - 1])); return 7; }\n' >"$SANDBOX/probe-end/probe.c"
+  x86_64-w64-mingw32-gcc -O2 -o "$SANDBOX/probe-end/swtor.exe" "$SANDBOX/probe-end/probe.c"
+  # pe_start <ms>: the probe as the launcher starts the game (the pid of the launcher's child in pe_pid)
+  pe_start() {
+    "$BS_WINE/bin/wine64-preloader" "$BS_WINE/bin/wine64" "$SANDBOX/probe-end/swtor.exe" -set username PROBEACCOUNT -set lang en-us "$1" </dev/null >/dev/null 2>&1 &
+    pe_pid=$!
+  }
+  # pe_game: "<pid> <real path>" of the probe once it runs from the Game Mode link (the
+  # winetemp link, or the bundle's swtor.exe it resolves to) among the launcher child's
+  # descendants; the probe's parent in pe_ppid. Nothing found: the tree, for the log.
+  pe_game() {
+    local i kids
+    for i in $(seq 100); do
+      kids=$(pgrep -P "$pe_pid" | tr '\n' ' '); for k in $kids; do kids="$kids $(pgrep -P "$k" | tr '\n' ' ')"; done
+      "$HL_APP" --paths 2>/dev/null | awk -v k=" $kids " -v b="$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe" \
+        'index(k, " " $1 " ") && (index($0, "/winetemp-") || index($0, b))' | head -1 | grep . && return 0
+      sleep 0.1
+    done
+    ps -o pid=,ppid=,comm= -g "$(ps -o pgid= -p "$pe_pid" | tr -d ' ')" 2>/dev/null | sed 's/^/  (tree) /' >&2
+    return 1
+  }
+  pe_start 6000
+  g=$(pe_game || true); gpid=${g%% *}
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  gpath=${g#* }
+  echo "  game: $g"
+  check "game end: the game runs from the Game Mode link, as hold-launcher's child" eval '[ -n "$g" ] && [ "$(realpath "$gpath")" = "$(realpath "$SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe")" ] && [ "$(ps -o comm= -p "$pe_pid" | sed "s|.*/||")" = hold-launcher ] && [ "$(ps -o ppid= -p "$gpid" | tr -d " ")" = "$pe_pid" ]'
+  check "game end: gamemode.log names the link" eval 'tail -1 "$LOGS/gamemode.log" | piped -F -- "/wine -> $SOM/gamemode/SWTOR.app/Contents/MacOS/swtor.exe (command: swtor.exe ...)"'
+  st=0; wait "$pe_pid" || st=$?
+  check "game end: the launcher's child ends with the game, with its exit code (7: $st)" eval '[ "$st" = 7 ] && { [ -z "$gpid" ] || ! alive "$gpid"; }'
+  check "game end: hold.log: run time, language, exit code" eval 'grep "game ended" "$LOGS/hold.log" | tail -1 | piped -E "game ended after 0:00:0[5-9] \(lang=en-us\): exit code 7\$"'
+  # TERM to the launcher's child: the game gets it and ends, nothing of it stays
+  pe_start 60000
+  g=$(pe_game || true); gpid=${g%% *}
+  kill -TERM "$pe_pid" 2>/dev/null || true
+  for i in $(seq 100); do alive "$pe_pid" || break; sleep 0.1; done
+  check "game end: TERM to the launcher's child ends the game, nothing left ($g)" eval '[ -n "$gpid" ] && ! alive "$pe_pid" && ! alive "$gpid" && grep "game ended" "$LOGS/hold.log" | tail -1 | piped "(lang=en-us): "'
+  kill -KILL "$pe_pid" "$gpid" 2>/dev/null || true; wait "$pe_pid" 2>/dev/null || true
+  check "game end: no account name in the logs" eval '! grep -rq PROBEACCOUNT "$LOGS"'
+  cleanup_wine
+  check "game end: no Wine left running" test -z "$(sandbox_wine)"
+  # the Game Mode link the wrapper made in this user's temporary folder (the sandbox engine's)
+  gm=$(sed -n 's|^game mode: \(.*/winetemp-[^/]*\)/wine -> .*|\1|p' "$LOGS/gamemode.log" 2>/dev/null | tail -1 || true)
+  case "$gm" in "$(getconf DARWIN_USER_TEMP_DIR)"winetemp-*) rm -rf "$gm" ;; esac
+  som set gamemode off >/dev/null
+else
+  echo "  (skipped: no x86_64-w64-mingw32-gcc for the probe program)"
+fi
+
 if [ "$CHANNEL" = dev ]; then
   echo "== 4d. d9mt A/B switches (d9mt-ab.sh, development builds)"
   AB="$APP/Contents/Resources/d9mt-ab.sh"
@@ -769,7 +824,20 @@ echo "== 6b. the wrapper's daily update check (stub engine; the game is never st
 U="$SANDBOX/update-check"
 mkdir -p "$U/bin" "$U/bin-real" "$U/engine/bin" "$U/app" "$U/prefix"
 cp "$BS_WINE/bin-real/setsid-exec" "$BS_WINE/bin-real/hold-launcher" "$U/bin-real/"
-printf '#!/bin/bash\necho "$@" >>"%s/wine-args"\n' "$U" >"$U/engine/bin/wine"
+# (the game, swtor.exe: its pid and parent in game-pids; game-exit: it ends with that code,
+# game-signal: of that signal, game-sleep: it runs that many seconds)
+cat >"$U/engine/bin/wine" <<STUB
+#!/bin/bash
+echo "\$@" >>"$U/wine-args"
+case " \$* " in
+  *swtor.exe*)
+    echo "\$\$ \$PPID" >"$U/game-pids"
+    [ ! -f "$U/game-closefd" ] || { exec 3>&-; exec /bin/sleep 3; }
+    [ ! -f "$U/game-sleep" ] || exec /bin/sleep "\$(cat "$U/game-sleep")"
+    [ ! -f "$U/game-signal" ] || kill -s "\$(cat "$U/game-signal")" \$\$
+    [ ! -f "$U/game-exit" ] || exit "\$(cat "$U/game-exit")" ;;
+esac
+STUB
 printf '#!/bin/bash\necho "$@" >>"%s/ws-args"\nexit 0\n' "$U" >"$U/engine/bin/wineserver"
 chmod +x "$U/engine/bin/wine" "$U/engine/bin/wineserver"
 feed() { # <version>: an appcast like generate_appcast's
@@ -864,6 +932,50 @@ check "wrapper: only on battery, no answer from pmset: no cap, said so" eval '[ 
 sed -i '' 's/^SWTOR_FPS_LIMIT=30$/SWTOR_FPS_LIMIT=0/' "$U/env"; game
 check "wrapper: limit off: no D9MT_FPS_CAP, no line" eval '[ -z "$(fx)" ] && ! grep -q "frame rate limit" "$U/logs/wine.log"'
 check "wrapper: other Wine starts get no cap" eval '! grep -q D9MT_FPS_CAP "$U/logs/hold.log"'
+# The game's end: one hold.log line (run time, exit code or signal, its language), the
+# launcher sees the game's status, and the last starts' wine.log are kept (a start that failed,
+# then one that works)
+rm -f "$U"/logs/wine.log*
+start_game() { LANG=de_DE.UTF-8 LC_TIME=de_DE.UTF-8 "$U/bin/wine64-preloader" "$U/bin/wine64" 'C:\swtor\retailclient\swtor.exe' \
+  -set username TESTACCOUNT -set password SECRETTOKEN -set lang de-de -set torsets main,de-de >/dev/null 2>&1; }
+echo 5 >"$U/game-exit"; st=0; start_game || st=$?
+check "wrapper: the launcher sees the game's exit code (5: $st)" test "$st" = 5
+check "wrapper: hold.log: the game's run time, language and exit code" eval 'tail -1 "$U/logs/hold.log" | piped -E "game ended after 0:00:0[0-3] \(lang=de-de torsets=main,de-de\): exit code 5\$"'
+check "wrapper: the game's parent wrote that line (hold-launcher, in the wrapper's place)" eval 'grep -q "\[$(cut -d" " -f2 "$U/game-pids")\] game ended" "$U/logs/hold.log"'
+check "wrapper: effective-env.txt: the locale and the game's language" eval 'grep -qx LANG=de_DE.UTF-8 "$U/logs/effective-env.txt" && grep -qx LC_TIME=de_DE.UTF-8 "$U/logs/effective-env.txt" && grep -qx "game language (from the launcher): lang=de-de torsets=main,de-de" "$U/logs/effective-env.txt"'
+rm -f "$U/game-exit"; game
+check "wrapper: the failed start's wine.log kept as wine.log.1, the new one in wine.log" eval 'grep -qx "SWTOR on Mac game language: lang=de-de torsets=main,de-de, LANG=de_DE.UTF-8" "$U/logs/wine.log.1" && grep -q "^SWTOR on Mac game language: not given, " "$U/logs/wine.log"'
+check "wrapper: hold.log: the working start's exit code 0" eval 'tail -1 "$U/logs/hold.log" | piped -E "game ended after 0:00:0[0-3] \(not given\): exit code 0\$"'
+echo USR1 >"$U/game-signal"; st=0; start_game || st=$?; rm -f "$U/game-signal"
+check "wrapper: a game ended by a signal: logged, and the launcher sees it (158: $st)" eval '[ "$st" = 158 ] && tail -1 "$U/logs/hold.log" | piped -E "\): signal 30 \(SIGUSR1\)\$"'
+for i in 1 2 3 4; do game; done
+check "wrapper: the last 4 starts before this one kept, no more" eval '[ "$(cd "$U/logs" && ls wine.log*)" = "$(printf "wine.log\nwine.log.1\nwine.log.2\nwine.log.3\nwine.log.4")" ] && grep -q "lang=de-de" "$U/logs/wine.log.4" && ! grep -q "lang=de-de" "$U/logs/wine.log.3"'
+check "wrapper: no account name or token in the logs" eval '! grep -rq -e TESTACCOUNT -e SECRETTOKEN "$U/logs"'
+# TERM, INT, HUP and QUIT for the launcher's child (hold-launcher) go on to the game; killed by
+# TERM, it ends and leaves nothing behind
+echo 30 >"$U/game-sleep"; rm -f "$U/game-pids"
+# (the wrapper itself in the background, not a function: $! is then the launcher's child)
+"$U/bin/wine64-preloader" "$U/bin/wine64" 'C:\swtor\retailclient\swtor.exe' -set username TESTACCOUNT >/dev/null 2>&1 & wp=$!
+for i in $(seq 50); do [ -s "$U/game-pids" ] && break; sleep 0.1; done
+# shellcheck disable=SC2034 # (used in check's eval strings)
+gp=$(cut -d" " -f1 "$U/game-pids" 2>/dev/null || true)
+check "wrapper: the launcher's child is hold-launcher, the game its child" eval '[ "$(ps -o comm= -p "$wp" | sed "s|.*/||")" = hold-launcher ] && [ "$(cut -d" " -f2 "$U/game-pids")" = "$wp" ]'
+kill -TERM "$wp"; st=0; wait "$wp" || st=$?; sleep 0.2
+check "wrapper: TERM to the launcher's child ends the game, nothing is left (status $st)" eval '[ "$st" = 143 ] && [ -n "$gp" ] && ! alive "$gp" && tail -1 "$U/logs/hold.log" | piped -E "\): signal 15 \(SIGTERM\)\$"'
+rm -f "$U/game-sleep"
+# a pipe the game closes ends for its other side while the game still runs: hold-launcher
+# keeps no copy of the caller's fds (as when the game was the launcher's child itself)
+touch "$U/game-closefd"; rm -f "$U/eof"
+( "$U/bin/wine64-preloader" "$U/bin/wine64" 'C:\swtor\retailclient\swtor.exe' 3>&1 >/dev/null 2>&1 | { cat >/dev/null; : >"$U/eof"; } ) & pp=$!
+sleep 1.5
+check "wrapper: a pipe the game closes ends while the game runs (no copy left in hold-launcher)" test -e "$U/eof"
+wait "$pp" || true; rm -f "$U/game-closefd"
+# an older hold-launcher (no --run-game): the game in the wrapper's process, as before, no line
+cp "$U/bin-real/hold-launcher" "$U/hold-launcher.new"
+printf '#!/bin/bash\nexit 1\n' >"$U/bin-real/hold-launcher"
+n=$(grep -c "game ended" "$U/logs/hold.log"); echo 6 >"$U/game-exit"; st=0; start_game || st=$?; rm -f "$U/game-exit"
+check "wrapper: with an older hold-launcher the game still starts, in the wrapper's place ($st)" eval '[ "$st" = 6 ] && [ "$(grep -c "game ended" "$U/logs/hold.log")" = "$n" ]'
+mv -f "$U/hold-launcher.new" "$U/bin-real/hold-launcher"
 check "pmset -g ps names the power source as the wrapper reads it" eval '/usr/bin/pmset -g ps | sed -n 1p | piped -E "^Now drawing from '"'"'(AC|Battery|UPS) Power'"'"'"'
 
 echo "== 6f. session-report.sh: the lines of d9mt 6fa5df7 (a sample log)"
@@ -1174,7 +1286,45 @@ chmod +x "$SANDBOX/bin/log"
 # folders of 1 MB each, no com.apple.metal (so no archive usage index; a full one comes later)
 GA="$SANDBOX/usercache/com.codeweavers.CrossOver.wineloader/com.apple.gpuarchiver"
 mkdir -p "$GA/a" "$GA/b" && dd if=/dev/zero of="$GA/a/x" bs=1024 count=1024 2>/dev/null && cp "$GA/a/x" "$GA/b/x"
+# The official launcher's own logs, with what they hold of the player: the account name and
+# session token on the game's command line, the Mac's name (a planted one, and this Mac's own),
+# its addresses, the launcher's machine and session ids, the home folder. None of it may reach
+# the zip. A token in quotes, which the redaction doesn't take, is for the leak check: that log
+# is left out.
+LL="$H/Library/Logs/Star Wars - The Old Republic Launcher"
+mkdir -p "$LL"
+ACCT=PlantedAcct77 JWT=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwbGFudGVkIn0.c2lnbmF0dXJlNzc REGTOKEN=PLANTEDREGTOKEN77
+MACNAME=PlantedMac77 THISMAC=$(scutil --get ComputerName 2>/dev/null || true)
+# (a model's own name, "MacBook Pro", stays: it says nothing about the player)
+case "$(printf '%s' "$THISMAC" | tr '[:upper:]' '[:lower:]')" in mac|imac|macbook|"macbook air"|"macbook pro"|"mac mini"|"mac studio"|"mac pro") THISMAC="" ;; esac
+cat >"$LL/host.developer.log" <<EOF
+2026-10-24 16:00:40 Launcher 7.2.207 starting. Version: 7.2.207.0
+Machine Name: $MACNAME
+Machine Id: 0f1e2d3c-4b5a-6978-machine
+Session Id: 9a8b7c6d-5e4f-session
+User Home: $HOME
+Intranet IP: 192.168.77.23
+2026-10-24 16:00:41 Bonjour name: $THISMAC, host $MACNAME.local
+2026-10-24 16:00:41 Launching game: '"C:\swtor\retailclient\swtor.exe" -set username \\$ACCT -set password $JWT -set lang de-de -set torsets main,de-de @swtor_dual.icb'
+2026-10-24 16:00:41 mac_wine: reg add HKCU\Software\Broadsword --registry-token -t $REGTOKEN --session="ab cd"
+2026-10-24 16:00:42 connected to 10.11.12.13:443 (en0 aa:bb:cc:dd:ee:77, fe80::1c2b:3a4d:5e6f:7a77)
+2026-10-24 16:00:43 user $ACCT logged in, files in $HOME/Library/Caches and /Users/SomeoneElse77/x
+2026-10-24 16:00:44 {"cmd": "mac_wine --registry-token -t \\"QUOTEDTOKEN77\\" --session=\\"PLANTEDSESSION77\\"", "arg": "--session='PLANTEDSESSION78'"}
+2026-10-24 16:00:45 connected to server 192.168.77.24:443 and 2001:db8::77, fe80::1%en0; std::string, 16:00:45
+Machine Name: Rex
+2026-10-24 16:00:46 running on Rex (Index 3)
+EOF
+# (a JWT's header, cut off: the redaction doesn't know it as a token, the leak check does)
+printf '2026-10-24 16:00:41 auth eyJhbGciOiJIUzI1NiJ9 (cut off)\n' >"$LL/host.cut.log"
+# two game starts in SWTOR on Mac's logs: one that ended after 3 s, then one that ran
+printf '2026-10-24 16:00:45 [4711] game ended after 0:00:03 (lang=de-de torsets=main,de-de): exit code 5\n2026-10-24 18:10:00 [4800] game ended after 2:05:10 (lang=en-us torsets=main,en-us): exit code 0\n' >>"$LOGS/hold.log"
+echo "SWTOR on Mac game language: lang=de-de torsets=main,de-de, LANG=de_DE.UTF-8" >"$LOGS/wine.log.1"
+# a self-update of the launcher that did not finish (taken out again below: it breaks the
+# stand-in's seal)
+mkdir -p "$BS_APP/Contents/Frameworks" && echo x >"$BS_APP/Contents/Frameworks/Launcher.dylib.solidpartial"
 zip=$("$APP/Contents/Resources/collect-logs.sh" 2>"$SANDBOX/collect.err" || true)
+rm -rf "$BS_APP/Contents/Frameworks"
+check "logs: the stand-in official app's signature valid again" codesign --verify --strict "$BS_APP"
 check "logs: zip on the sandbox Desktop" test -f "$zip" -a "${zip#"$H/Desktop/"}" != "$zip"
 if [ -f "$zip" ]; then
   mkdir -p "$SANDBOX/zip" && unzip -q -o "$zip" -d "$SANDBOX/zip"
@@ -1182,6 +1332,20 @@ if [ -f "$zip" ]; then
   check "logs: no -set values" eval '! grep -rq -e SECRETACCOUNT -e hunter2 "$SANDBOX/zip"'
   check "logs: no user name in paths" eval '! grep -rq "/Users/$(id -un)/" "$SANDBOX/zip"'
   check "logs: system info has the Mac" grep -q '^Mac: ' "$SANDBOX"/zip/*/system-info.txt
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  LZ=$(echo "$SANDBOX"/zip/*/launcher-logs) ZD=$(echo "$SANDBOX"/zip/*) SI=$(echo "$SANDBOX"/zip/*/system-info.txt)
+  check "logs: the launcher's logs, redacted (the version kept, the game's command line left out)" eval 'grep -q "Version: 7.2.207.0" "$LZ/host.developer.log" && grep -qx "Machine Name: NAME" "$LZ/host.developer.log" && grep -q -- "swtor.exe\" \[SWTOR on Mac: the rest of the game.s command line, from its account name on, left out\]\$" "$LZ/host.developer.log" && ! grep -q -- "-set password" "$LZ/host.developer.log"'
+  check "logs: no planted account name, token, session, Mac name (also a short one), IP or id anywhere in the zip; the rest of the line kept" eval '! LC_ALL=C grep -r -i -q -F -e "$ACCT" -e "$JWT" -e "$REGTOKEN" -e "$MACNAME" -e 192.168.77.23 -e 192.168.77.24 -e 10.11.12.13 -e aa:bb:cc:dd:ee:77 -e fe80::1 -e 2001:db8 -e 0f1e2d3c -e 9a8b7c6d -e SomeoneElse77 -e QUOTEDTOKEN77 -e PLANTEDSESSION77 -e PLANTEDSESSION78 -e "$HOME" "$ZD" && ! LC_ALL=C grep -r -w -q -F Rex "$ZD" && grep -q "running on NAME (Index 3)" "$LZ/host.developer.log" && grep -q "std::string, 16:00:45" "$LZ/host.developer.log"'
+  check "logs: this Mac's own name not in the zip" eval '[ ${#THISMAC} -lt 4 ] || ! LC_ALL=C grep -r -i -q -F -e "$THISMAC" "$ZD"'
+  check "logs: the leak check left out only the launcher log with a cut-off token, and says so" eval '[ -e "$LZ/host.developer.log" ] && [ ! -e "$LZ/host.cut.log" ] && ! grep -rq eyJhbGciOiJIUzI1NiJ9 "$ZD" && [ "$(cat "$ZD/left-out.txt")" = "$(printf "Left out: a name, home folder or token the redaction missed was still in these files\n  launcher-logs/host.cut.log")" ]'
+  check "logs: system info: the official app (version, bundle id, owner, signature, the half-written files)" eval 'grep -q "^  version .*, bundle id $(plutil -extract CFBundleIdentifier raw -o - "$BS_APP/Contents/Info.plist")\$" "$SI" && grep -q "^  owner you, group [a-z]" "$SI" && grep -q "^  signature (codesign --verify --deep --strict): " "$SI" && grep -qx "    Contents/Frameworks/Launcher.dylib.solidpartial" "$SI"'
+  check "logs: system info: how each game start ended, the earlier start's wine.log in the zip" eval 'grep -q "^  .*game ended after 0:00:03 (lang=de-de torsets=main,de-de): exit code 5\$" "$SI" && grep -q "^  .*game ended after 2:05:10 (lang=en-us torsets=main,en-us): exit code 0\$" "$SI" && grep -q "lang=de-de" "$ZD/logs/wine.log.1"'
+  # a name that is also the redaction's marker ("Name"): no clean file is left out for it
+  printf 'Machine Name: Name\n2026-10-24 16:00:47 hello from Name\n' >"$LL/host.name.log"
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  zn=$("$APP/Contents/Resources/collect-logs.sh" "$SANDBOX/zip-name" 2>>"$SANDBOX/collect.err" || true)
+  check "logs: a name like the marker (Name): only the cut-off token's log left out" eval 'unzip -l "$zn" | piped "launcher-logs/host.name.log" && [ "$(unzip -p "$zn" "*/left-out.txt" | sed 1d)" = "  launcher-logs/host.cut.log" ] && ! unzip -p "$zn" "*/launcher-logs/host.name.log" | piped -w Name'
+  rm -f "$LL/host.name.log"
   # shellcheck disable=SC2034 # (used in check's eval strings)
   CR=$(echo "$SANDBOX"/zip/*/crash-reports) SI=$(echo "$SANDBOX"/zip/*/system-info.txt)
   check "logs: crash reports: the newest 20 of the game, Wine and the app, within 3 MB each and 10 MB together, only the sandbox's" \

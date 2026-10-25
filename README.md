@@ -258,7 +258,8 @@ performance. A setting you choose is kept through updates and Reinstall.
   game then found prewarmed (`hits`), still building (`late`) or not in it (`misses`);
   StretchRect and ColorFill by path from the `XFER` lines.
 
-`wine.log` starts afresh at every game start, so `--keep` saves a copy to `sessions/`.
+`wine.log` starts afresh at every game start (the wrapper keeps the 4 before it as
+`wine.log.1` to `wine.log.4`, the newest first), so `--keep` saves a copy to `sessions/`.
 `--compare A.log B.log` puts two sessions side by side. `--skip <s>` leaves out the first
 seconds (loading). Collect Logs adds the report as `session-report.txt`. Logs from 0.0.5 have
 no `STATS` lines: hitches, compile waits and memory still compare.
@@ -316,9 +317,18 @@ the newest 20, up to 10 MB together; `system-info.txt` lists which are in the zi
 left out. `gpu-errors.txt` has the GPU errors of the game and Wine from macOS's unified log
 of the last 2 hours (`IOGPUMetalError` counted per process, the last fault lines, the GPU
 driver's events by time and kind, Metal's other errors), since `wine.log` starts anew with every
-game start; other apps' errors are only counted, never named. Your home folder, user name, account
+game start; other apps' errors are only counted, never named. `wine.log.1` to `wine.log.4` are
+the game starts before the last, and `system-info.txt` lists the last 10 starts from `hold.log`:
+how long each ran and how it ended (exit code or signal), with the game's language. With them
+come the official launcher's own logs (`launcher-logs/`, from `~/Library/Logs/Star Wars - The
+Old Republic Launcher`) and, in `system-info.txt`, a check of the launcher app: its version,
+bundle id, owner, signature (`codesign --verify --deep --strict`) and any `*.solidpartial`
+files, which a launcher self-update that did not finish leaves behind. Your home folder, user name, account
 names and e-mail addresses are replaced, serial numbers and device identifiers are left out,
-and the game's command line (the launcher passes the account on it) is never included. Turn on
+and the game's command line (the launcher passes the account on it) is never included. Your
+Mac's name is replaced too, and in the launcher's logs its IP and MAC addresses, the launcher's
+machine and session ids and session tokens. Last, a leak check: a file that still holds one of
+those names, a home folder or a token is left out of the zip, and `left-out.txt` names it. Turn on
 **Settings > Debug Logging** only when asked: it makes the logs much more detailed for the next
 game start, at some cost in performance, so turn it off again afterwards.
 
@@ -442,8 +452,10 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
   `d9mt-ab.sh cold=<name>` runs (a release's Reinstall removes them and `d9mt-ab.env`)
 - `~/Library/Logs/SWTOR on Mac/` – `install.log`, `rehook.log` (the hook check when the app
   opens), and per game start `wine.log`
-  (d9mt warnings), `hold.log` (also a line per Wine start that is not the game: its time,
-  the command's first word and who started it), `launch-env.txt`, `effective-env.txt`
+  (d9mt warnings; the 4 starts before it as `wine.log.1` to `wine.log.4`), `hold.log`
+  (also a line per Wine start that is not the game: its time, the command's first word and who
+  started it; and a line when the game ends: how long it ran, its exit code or signal, its
+  language), `launch-env.txt`, `effective-env.txt`
 
 ### Removing it by hand
 
@@ -499,6 +511,13 @@ Nothing holds the launcher: it quits ~30 s after starting the game, as with Broa
 Wine, and macOS leaves the game (a foreground app) and the Wine session running. For the game
 (`swtor.exe`) the wrapper also:
 
+- runs it as the child of `hold-launcher --run-game`, which takes the wrapper's place: it passes
+  `TERM`, `INT`, `HUP` and `QUIT` on to the game, and when the game ends it writes one line to
+  `hold.log` (how long it ran, its exit code or signal, and its language: the `-set lang` and
+  `-set torsets` values of its command line, nothing else of it), then ends the way the game
+  did. It ends with the game: nothing of SWTOR on Mac stays after it ([ADR 0005](docs/adr/0005-no-background-helper.md));
+- records the game's language and the locale it gets (`LANG`, `LC_*`) in `effective-env.txt`
+  and `wine.log`;
 - sends the game's output to `wine.log` instead of the launcher's pipe, which closes when the
   launcher quits;
 - links the name CrossOver's ntdll starts the game from to `gamemode/SWTOR.app`, a bundle

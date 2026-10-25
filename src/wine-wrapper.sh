@@ -10,7 +10,8 @@
 # runs Broadsword's real preloader unchanged, so the official setup keeps working. (It still
 # runs an install of 0.0.x, CrossOver 24.0.7 with SWTOR_FRAMEWORKS, the same way: a failed
 # upgrade puts that back.)
-# Runs once per process start; nothing stays behind.
+# Runs once per process start; nothing stays behind (for the game, hold-launcher waits for it
+# and ends with it).
 #
 # The line below is filled in by SWTOR on Mac's installer (src/som.sh).
 CONF="@CONF@"
@@ -72,6 +73,35 @@ fps_limit() {
   export D9MT_FPS_CAP="$SWTOR_FPS_LIMIT"
 }
 
+# The game's language, from its command line: the values of "-set lang" and "-set torsets"
+# only, their letters, digits and , . _ - (the line also holds the account name and session
+# token, which are never read). Sets game_lang ("lang=de-de torsets=..." or "not given").
+game_lang() {
+  local key="" prev="" a
+  game_lang=""
+  for a in "$@"; do
+    if [ "$prev" = -set ]; then key=$a
+    elif [ -n "$key" ]; then
+      case "$key" in lang|torsets) game_lang="$game_lang $key=$(printf '%s' "$a" | tr -cd 'A-Za-z0-9,._-' | cut -c1-40)" ;; esac
+      key=""
+    fi
+    prev=$a
+  done
+  game_lang=${game_lang# }
+  game_lang=${game_lang:-not given}
+}
+
+# wine.log is written anew at every game start: keep the last 4 sessions' as wine.log.1 (the
+# one before) to wine.log.4, so a failed start isn't lost to the next one.
+rotate_wine_log() {
+  local i
+  [ -f "$LOG_DIR/wine.log" ] || return 0
+  for i in 3 2 1; do
+    [ ! -f "$LOG_DIR/wine.log.$i" ] || mv -f "$LOG_DIR/wine.log.$i" "$LOG_DIR/wine.log.$((i + 1))"
+  done
+  mv -f "$LOG_DIR/wine.log" "$LOG_DIR/wine.log.1"
+}
+
 case " $* " in
   *swtor.exe*)
     mkdir -p "$LOG_DIR"
@@ -114,7 +144,10 @@ if [ -n "$SWTOR_ENGINE" ]; then
       # Debug Logging: Wine debug channels for the game only (RAWMOUSE, THREADCPU lines)
       [ -z "$SWTOR_GAME_WINEDEBUG" ] || export WINEDEBUG="$SWTOR_GAME_WINEDEBUG"
       fps_limit
-      { date; env | grep -E '^(WINE|DYLD_|SWTOR_|DXVK_|MTL_|D9MT_)' | sort; } > "$LOG_DIR/effective-env.txt"
+      game_lang "$@"
+      # (and the locale the game gets: a German one once failed where English worked)
+      { date; env | grep -E '^(WINE|DYLD_|SWTOR_|DXVK_|MTL_|D9MT_|LANG=|LC_)' | sort
+        echo "game language (from the launcher): $game_lang"; } > "$LOG_DIR/effective-env.txt"
       # Is there a newer SWTOR on Mac? At most once a day, in a detached process (the game
       # does not wait for it; offline it just fails).
       if [ "$SWTOR_UPDATE_CHECK" = 1 ] && [ -n "$SWTOR_UPDATE_FEED" ] && [ -d "$SWTOR_APP_DIR" ]; then
@@ -124,6 +157,7 @@ if [ -n "$SWTOR_ENGINE" ]; then
       # the launcher quits (~30 s after starting the game).
       # SWTOR_LOG_FILTER set: keep the game's Wine/d9mt output in wine.log.
       if [ -n "$SWTOR_LOG_FILTER" ]; then
+        rotate_wine_log
         exec >/dev/null 2>"$LOG_DIR/wine.log"
         # what this session runs on (session-report.sh shows it)
         echo "SWTOR on Mac ${SWTOR_ON_MAC_VERSION:-?}: engine ${SWTOR_ENGINE_ID:-cx24} ${SWTOR_ENGINE_NAME:-${SWTOR_ENGINE##*/}}, d9mt ${SWTOR_D9MT:-?}, started $(date '+%Y-%m-%d %H:%M:%S')" >&2
@@ -131,6 +165,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
         [ -z "$SWTOR_D9MT_AB" ] || echo "SWTOR on Mac d9mt-ab: $SWTOR_D9MT_AB" >&2
         # the Frame Rate Limit, if one is set (d9mt's own "frame cap" line follows)
         [ -z "$fps_note" ] || echo "SWTOR on Mac frame rate limit: $fps_note" >&2
+        # the game's language and locale (after those: the A/B switches stay the second line)
+        echo "SWTOR on Mac game language: $game_lang, LANG=${LANG:-}" >&2
       else
         exec >/dev/null 2>/dev/null
       fi
@@ -172,6 +208,14 @@ if [ -n "$SWTOR_ENGINE" ]; then
       elif [ -n "$SWTOR_GAMEMODE_APP" ]; then
         { date; echo "game mode skipped: $gm_exe missing or differs from $gm_pre"; } >>"$LOG_DIR/gamemode.log"
       fi
+      # The game runs as hold-launcher's child, which takes this process's place: when it
+      # ends, one line in hold.log (how long it ran, its exit code or signal, its language),
+      # then hold-launcher ends the same way. It passes TERM, INT, HUP and QUIT on to the game.
+      # (an older hold-launcher without --run-game: the game in this process, no line)
+      hl="$(dirname "$REAL")/hold-launcher"
+      if grep -q -a -F -e '--run-game' "$hl" 2>/dev/null; then
+        exec "$hl" --run-game "$LOG_DIR/hold.log" "$game_lang" "$SWTOR_ENGINE/bin/wine" "$@"
+      fi
       exec "$SWTOR_ENGINE/bin/wine" "$@"
       ;;
   esac
@@ -182,6 +226,7 @@ case " $* " in
   *swtor.exe*)
     { date; env | grep -E '^(WINE|DYLD_|SWTOR_)' | sort; } > "$LOG_DIR/effective-env.txt"
     if [ -n "$SWTOR_LOG_FILTER" ]; then
+      rotate_wine_log
       exec "$REAL" "$@" 2> >(grep --line-buffered -E "$SWTOR_LOG_FILTER" > "$LOG_DIR/wine.log")
     fi
     ;;
