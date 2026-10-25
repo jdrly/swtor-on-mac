@@ -44,13 +44,28 @@ update_check() {
     for (i = 1; i <= n; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 }
     exit !(pb && !pa) }' || return 0
   echo "$latest" >"$SWTOR_APP_DIR/update-available"
-  msg="SWTOR on Mac update available ($latest) — open the app to update."
+  notify "SWTOR on Mac update available ($latest) — open the app to update."
+}
+
+notify() {
   if [ -n "$SWTOR_NOTIFY_LOG" ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') $msg" >>"$SWTOR_NOTIFY_LOG"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >>"$SWTOR_NOTIFY_LOG"
   else
     /usr/bin/osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "SWTOR on Mac"' \
-      -e 'end run' "$msg"
+      -e 'end run' "$1"
   fi
+}
+
+# After the session's start ended leftover Wine processes (run detached, see below): did macOS
+# end the last session because the launcher is not allowed in the background? One look at the
+# last hour of macOS's log by the app's som.sh (btm-check, about a second, ended after 20 s at
+# the latest; not if the app has moved since env was written), and if it says so, a notification
+# with the setting to change.
+btm_notice() {
+  [ -f "$SWTOR_SOM_SH" ] || return 0
+  SWTOR_ON_MAC_BTM_TIMEOUT="${SWTOR_ON_MAC_BTM_TIMEOUT:-20}" /bin/bash "$SWTOR_SOM_SH" btm-check 1h >/dev/null 2>&1 || return 0
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [wrapper $$] macOS ended the last Wine session when the launcher quit (not allowed in the background)" >>"$LOG_DIR/hold.log"
+  notify "macOS ended the game's Wine when the SWTOR launcher quit. In System Settings > Login Items, turn on the launcher under App Background Activity."
 }
 
 # Frame Rate Limit (Settings): the cap d9mt gets for the game, D9MT_FPS_CAP. With "Only on
@@ -105,10 +120,16 @@ if [ -n "$SWTOR_ENGINE" ]; then
   # call starts Wine's system processes, so they don't inherit this command's stdout/stderr
   # (mac_wine reads its Wine calls' output to EOF) or the launcher's files. A no-op if the
   # session runs. Each step is logged in hold.log.
-  if ! "$(dirname "$REAL")/hold-launcher" --start-session "$LOG_DIR/wineserver.log" </dev/null >/dev/null 2>>"$LOG_DIR/hold.log"; then
+  hl=0
+  "$(dirname "$REAL")/hold-launcher" --start-session "$LOG_DIR/wineserver.log" </dev/null >/dev/null 2>>"$LOG_DIR/hold.log" || hl=$?
+  case $hl in
+    0) ;;
+    # it ended leftover Wine processes first: was the last session ended by macOS when the
+    # launcher quit? (in a detached process: this Wine call doesn't wait for it)
+    3) ( btm_notice & ) </dev/null >/dev/null 2>&1 ;;
     # (no or an older hold-launcher: the server alone; setsid-exec closes the inherited fds)
-    ( exec "$(dirname "$REAL")/setsid-exec" "$SWTOR_ENGINE/bin/wineserver" -p10 ) </dev/null >/dev/null 2>>"$LOG_DIR/wineserver.log"
-  fi
+    *) ( exec "$(dirname "$REAL")/setsid-exec" "$SWTOR_ENGINE/bin/wineserver" -p10 ) </dev/null >/dev/null 2>>"$LOG_DIR/wineserver.log" ;;
+  esac
   case " $* " in
     *swtor.exe*)
       # Debug Logging: Wine debug channels for the game only (RAWMOUSE, THREADCPU lines)

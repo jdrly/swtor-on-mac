@@ -866,6 +866,10 @@ check "wrapper: limit off: no D9MT_FPS_CAP, no line" eval '[ -z "$(fx)" ] && ! g
 check "wrapper: other Wine starts get no cap" eval '! grep -q D9MT_FPS_CAP "$U/logs/hold.log"'
 check "pmset -g ps names the power source as the wrapper reads it" eval '/usr/bin/pmset -g ps | sed -n 1p | piped -E "^Now drawing from '"'"'(AC|Battery|UPS) Power'"'"'"'
 
+echo "== 6g. the launcher not allowed in the background: som.sh btm-check, the wrapper's notification, Collect Logs (scripts/test-btm.sh, planted log text)"
+check "install: env names this app's som.sh for the wrapper's btm-check" test "$(envv SWTOR_SOM_SH)" = "$SOMSH"
+check "test-btm.sh passes (its output: $SANDBOX/test-btm.txt)" eval 'scripts/test-btm.sh "$APP" >"$SANDBOX/test-btm.txt" 2>&1'
+
 echo "== 6f. session-report.sh: the lines of d9mt 6fa5df7 (a sample log)"
 R="$SANDBOX/report"
 mkdir -p "$R"
@@ -1623,7 +1627,8 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   envnorm() {
     sed -e "s/$PREVV/V/g; s/$APPV/V/g" -e 's/^SWTOR_D9MT=.*/SWTOR_D9MT=H/' "$1" |
       { if [ "$CHANNEL" = dev ]; then sed 's/^SWTOR_UPDATE_CHECK=.*/SWTOR_UPDATE_CHECK=X/'; else cat; fi; } |
-      grep -v -e '^#' -e '^$' -e '^D9MT_STATE_CACHE=' -e 'd9mt-ab\.env' -e '^SWTOR_FPS_LIMIT=' -e '^SWTOR_FPS_LIMIT_BATTERY='
+      grep -v -e '^#' -e '^$' -e '^D9MT_STATE_CACHE=' -e 'd9mt-ab\.env' -e '^SWTOR_FPS_LIMIT=' -e '^SWTOR_FPS_LIMIT_BATTERY=' \
+        -e '^SWTOR_SOM_SH=' -e '^SWTOR_ON_MAC_ROOT='
   }
   prefix_snap >"$SANDBOX/prev-prefix.txt"
   snap "$SOM/engine" >"$SANDBOX/prev-engine.txt"
@@ -1651,7 +1656,7 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   # (settings.conf: this version writes every setting it knows, so the ones $PREVV does not know,
   # hudpos, fpslimit and fpsbattery, come in with their defaults)
   check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter, fpslimit=off, fpsbattery=off), dxvk.conf unchanged" eval 'diff <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/prev-settings.conf") <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && grep -qx fpslimit=off "$SOM/settings.conf" && grep -qx fpsbattery=off "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
-  check "over $PREVV: env: the state cache line, the Frame Rate Limit lines (off)$([ "$CHANNEL" = dev ] && echo " and the A/B include") added, the rest as before (versions aside)" eval 'diff <(envnorm "$SANDBOX/prev-env") <(envnorm "$SOM/env") >"$SANDBOX/prev-env.diff" && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && [ "$(envv SWTOR_FPS_LIMIT)/$(envv SWTOR_FPS_LIMIT_BATTERY)" = 0/0 ]'
+  check "over $PREVV: env: the state cache line, the Frame Rate Limit lines (off), the btm-check lines$([ "$CHANNEL" = dev ] && echo " and the A/B include") added, the rest as before (versions aside)" eval 'diff <(envnorm "$SANDBOX/prev-env") <(envnorm "$SOM/env") >"$SANDBOX/prev-env.diff" && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && [ "$(envv SWTOR_FPS_LIMIT)/$(envv SWTOR_FPS_LIMIT_BATTERY)" = 0/0 ] && [ "$(envv SWTOR_SOM_SH)/$(envv SWTOR_ON_MAC_ROOT)" = "$SOMSH/$SANDBOX" ]'
   check "over $PREVV: no Wine left running" test -z "$(sandbox_wine)"
   [ "$CHANNEL" != dev ] || "$APP/Contents/Resources/d9mt-ab.sh" pfv >/dev/null
 
