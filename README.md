@@ -610,7 +610,12 @@ file in `scripts/fixtures/`), the suite's end under a job runner on planted sand
 suite's `orphan_as`. That helper starts a stand-in with a rewritten argv[0], as Wine 11 shows its
 processes. The argv[0] reaches the rewriting shell in the environment, never on its command line:
 a game path there (section 2c's) makes that shell look like the game to `swtor-running.sh` and
-the job runner, which then stops the suite's job. For the same reason section 2b's call by
+the job runner, which then stops the suite's job. Both `orphan` and `orphan_as` return only once
+the stand-in runs its program (`orphan_ready`, up to 5 s; a fixed delay sometimes still saw the
+shell before its exec), and section 6d waits until its stand-in maps the server file that
+`--reap` looks for (`orphan_maps`, an mmap, not an open file). A stand-in that isn't ready fails
+the checks after it without running them, while it still runs something else and once after it
+ended, so a check (a negative one above all) can't pass without its process. For the same reason section 2b's call by
 executable names the launcher's file name outside any app's `Contents/MacOS` (the app checks only
 the name): the launcher's own path there would make the call look like the running launcher, the
 one process that stops the suite's job (group `is-launcher`). Stand-ins

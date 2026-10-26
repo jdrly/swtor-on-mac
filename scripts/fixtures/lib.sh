@@ -4,7 +4,27 @@
 
 ok() { echo "  ok   $*"; pass=$((pass + 1)); }
 bad() { echo "  FAIL $*"; fail=$((fail + 1)); }
-check() { local what=$1; shift; if "$@"; then ok "$what"; else bad "$what"; fi; }
+check() {
+  local what=$1 why; shift
+  if why=$(stand_in_not_ready); then bad "$what (not checked: $why)"; return; fi
+  if "$@"; then ok "$what"; else bad "$what"; fi
+}
+# stand_in_not_ready: the stand-ins that scripts/fixtures/orphan.sh noted as not ready
+# ($SANDBOX/orphan.notready, "<pid> <what>" lines), and false if there are none. A check would
+# test nothing without its stand-in, so every check fails while one still runs something else,
+# and the first one after it ended; then its note goes
+stand_in_not_ready() {
+  local f=${SANDBOX:-}/orphan.notready pid what s keep="" why=""
+  [ -s "$f" ] || return 1
+  while read -r pid what; do
+    why="$why${why:+; }$what"
+    s=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')
+    [ -z "$s" ] || [ "${s#Z}" != "$s" ] || keep="$keep$pid $what
+"
+  done <"$f"
+  printf '%s' "$keep" >"$f"
+  echo "$why"
+}
 # piped <grep options and patterns>: grep -q for a pipe's end. It reads all of its input: grep -q
 # would stop at the first match, and the writer then dies of SIGPIPE, which under pipefail fails
 # the pipe (a check that should pass fails at random) or, after a !, passes it (one that should
