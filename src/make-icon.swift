@@ -1,8 +1,9 @@
 // The app icon: an Icon Composer document (src/AppIcon.icon) that macOS 26 and later draws as a
 // Liquid Glass icon (glass rim, specular highlights, shadow; Default, Dark, Tinted and Clear).
-// The design: a blue and a red blade crossed over a starfield, with an "SWTOR / ON MAC" wordmark
-// in the system font (original artwork: no Star Wars or SWTOR logo). The layers carry no tile, rim
-// or shadow: the system draws those, and icon.json holds the background gradient and each group's
+// The design: a blue and a red blade crossed at the centre (a symbol, no text, so it reads down to
+// 16 px), over the main window's jump point (Warp.swift): a red glow, sonar rings, a crosshair and
+// warp streaks. Original artwork: no Star Wars or SWTOR logo. The layers carry no tile, rim or
+// shadow: the system draws those, and icon.json holds the background gradient and each group's
 // glass settings (fine-tune them in Xcode's Icon Composer).
 //
 //   swift src/make-icon.swift layers src/AppIcon.icon
@@ -14,7 +15,6 @@
 // build.sh compiles the document with actool into Assets.car and a fallback AppIcon.icns.
 import AppKit
 import CoreImage
-import CoreText
 
 let args = CommandLine.arguments
 guard args.count >= 3, (args[1] == "layers" && args.count == 3) || (args[1] == "preview" && (4...5).contains(args.count)) else {
@@ -44,15 +44,17 @@ struct Saber {
   var blade: CGFloat
   func at(_ d: CGFloat) -> CGPoint { CGPoint(x: pommel.x + cos(angle) * d, y: pommel.y + sin(angle) * d) }
 }
-let a: CGFloat = 0.84
-let k: CGFloat = 1.05  // the old 824-unit design, scaled into the shape's safe area
-let wk: CGFloat = 1.12  // the wordmark a little larger than the sabers' scale
-func map(_ p: CGPoint) -> CGPoint { CGPoint(x: 512 + (p.x - 512) * k, y: 512 + (p.y - 512) * k) }
+let k: CGFloat = 1.35  // scale of the blades' and hilts' widths and lengths (the old 824-unit grid)
 let blue = (bloom: rgb(0.10, 0.50, 1.0), edge: rgb(0.247, 0.663, 1.0))
 let red = (bloom: rgb(1.0, 0.10, 0.06), edge: rgb(1.0, 0.231, 0.188))
+// The blades cross at the centre at 45 degrees, blue from the lower left, red from the lower
+// right, the hilts kept clear of the shape's corners.
+let reach: CGFloat = 470  // pommel to centre
 let sabers = [
-  Saber(pommel: map(CGPoint(x: 186, y: 166)), angle: a, bloom: blue.bloom, edge: blue.edge, hilt: 196 * k, blade: 560 * k),
-  Saber(pommel: map(CGPoint(x: 838, y: 166)), angle: .pi - a, bloom: red.bloom, edge: red.edge, hilt: 196 * k, blade: 560 * k),
+  Saber(pommel: CGPoint(x: 512 - reach * cos(.pi / 4), y: 512 - reach * sin(.pi / 4)), angle: .pi / 4,
+        bloom: blue.bloom, edge: blue.edge, hilt: 196 * k, blade: 480 * k),
+  Saber(pommel: CGPoint(x: 512 + reach * cos(.pi / 4), y: 512 - reach * sin(.pi / 4)), angle: 3 * .pi / 4,
+        bloom: red.bloom, edge: red.edge, hilt: 196 * k, blade: 480 * k),
 ]
 func crossing() -> CGPoint {
   let p = sabers[0].pommel, r = CGVector(dx: cos(sabers[0].angle), dy: sin(sabers[0].angle))
@@ -69,16 +71,34 @@ func svg(_ body: String, defs: String = "") -> String {
   """
 }
 
-// --- stars: fixed positions, so every build shows the same sky
-var seed: UInt64 = 0x5357_544F_5221
-func rnd() -> CGFloat {
-  seed = seed &* 6364136223846793005 &+ 1442695040888963407
-  return CGFloat(seed >> 33) / CGFloat(1 << 31)
-}
-let starsSVG = svg((0..<70).map { _ -> String in
-  let x = 60 + rnd() * 904, y = 60 + rnd() * 904, r = 1.3 + rnd() * rnd() * 3.4, op = 0.25 + rnd() * 0.6
-  return "<circle cx=\"\(f(x))\" cy=\"\(f(y))\" r=\"\(f(r))\" fill=\"#D9EBFF\" fill-opacity=\"\(f(op))\"/>"
-}.joined())
+// --- space: the app window's jump point (Warp.swift) as the background: red glow, sonar rings, crosshair,
+// warp streaks (ink, red, cyan) streaming out of the centre, still stars
+let spaceSVG: String = {
+  var b = "<circle cx=\"512\" cy=\"512\" r=\"470\" fill=\"url(#jump)\"/>"
+  for r in [62.0, 140, 238, 360, 500, 660] as [CGFloat] {
+    b += "<circle cx=\"512\" cy=\"512\" r=\"\(f(r))\" fill=\"none\" stroke=\"#2C3345\" stroke-opacity=\"0.85\" stroke-width=\"3\"/>"
+  }
+  b += "<path d=\"M0 512 L1024 512 M512 0 L512 1024\" stroke=\"#2C3345\" stroke-opacity=\"0.6\" stroke-width=\"3\"/>"
+  var sd: UInt64 = 0x5717_0E0F_2026
+  func rn() -> CGFloat { sd = sd &* 6364136223846793005 &+ 1442695040888963407; return CGFloat(sd >> 33) / CGFloat(1 << 31) }
+  let tints = ["#EEF1F6", "#FF3D2E", "#2FD5FF"]
+  for _ in 0..<64 {
+    let ang = rn() * 2 * .pi, r0 = 110 + rn() * 420, len = (18 + rn() * 70) * (0.4 + r0 / 530)
+    let t = rn() < 0.7 ? 0 : (rn() < 0.5 ? 1 : 2), op = 0.25 + rn() * 0.55, w = 2 + rn() * 2.5
+    let a = CGPoint(x: 512 + cos(ang) * r0, y: 512 + sin(ang) * r0)
+    let m = CGPoint(x: 512 + cos(ang) * (r0 + len / 2), y: 512 + sin(ang) * (r0 + len / 2))
+    let e = CGPoint(x: 512 + cos(ang) * (r0 + len), y: 512 + sin(ang) * (r0 + len))
+    b += "<path d=\"M\(f(a.x)) \(f(a.y)) L\(f(m.x)) \(f(m.y))\" stroke=\"\(tints[t])\" stroke-opacity=\"\(f(op * 0.3))\" stroke-width=\"\(f(w))\" stroke-linecap=\"round\"/>"
+    b += "<path d=\"M\(f(m.x)) \(f(m.y)) L\(f(e.x)) \(f(e.y))\" stroke=\"\(tints[t])\" stroke-opacity=\"\(f(op))\" stroke-width=\"\(f(w))\" stroke-linecap=\"round\"/>"
+  }
+  for _ in 0..<70 {
+    let x = 40 + rn() * 944, y = 40 + rn() * 944, r = 1.2 + rn() * rn() * 3
+    b += "<circle cx=\"\(f(x))\" cy=\"\(f(y))\" r=\"\(f(r))\" fill=\"#EEF1F6\" fill-opacity=\"\(f(0.25 + rn() * 0.55))\"/>"
+  }
+  let defs = "<radialGradient id=\"jump\" gradientUnits=\"userSpaceOnUse\" cx=\"512\" cy=\"512\" r=\"470\">" +
+    "<stop offset=\"0\" stop-color=\"#FF3D2E\" stop-opacity=\"0.22\"/><stop offset=\"1\" stop-color=\"#FF3D2E\" stop-opacity=\"0\"/></radialGradient>"
+  return svg(b, defs: defs)
+}()
 
 // --- blades: coloured rim, a paler band, a white-hot core
 func bladeLine(_ s: Saber, width: CGFloat, color: String, opacity: CGFloat = 1) -> String {
@@ -115,59 +135,6 @@ func hilt(_ s: Saber) -> String {
   return b + "</g>"
 }
 let hiltsSVG = svg(sabers.map(hilt).joined(), defs: hiltDefs)
-
-// --- wordmark: "SWTOR" and "ON MAC" as outlines of the system font, centred on the crossing
-func textPath(_ s: String, size: CGFloat, weight: NSFont.Weight, width: NSFont.Width, kern: CGFloat) -> CGPath {
-  let font = NSFont.systemFont(ofSize: size, weight: weight, width: width)
-  let line = CTLineCreateWithAttributedString(NSAttributedString(string: s, attributes: [.font: font, .kern: kern]))
-  let path = CGMutablePath()
-  for run in CTLineGetGlyphRuns(line) as! [CTRun] {
-    let runFont = (CTRunGetAttributes(run) as NSDictionary)[kCTFontAttributeName] as! CTFont
-    let n = CTRunGetGlyphCount(run)
-    var glyphs = [CGGlyph](repeating: 0, count: n), pos = [CGPoint](repeating: .zero, count: n)
-    CTRunGetGlyphs(run, CFRange(location: 0, length: n), &glyphs)
-    CTRunGetPositions(run, CFRange(location: 0, length: n), &pos)
-    for i in 0..<n {
-      if let g = CTFontCreatePathForGlyph(runFont, glyphs[i], nil) {
-        path.addPath(g, transform: CGAffineTransform(translationX: pos[i].x, y: pos[i].y))
-      }
-    }
-  }
-  return path
-}
-func fitted(_ path: CGPath, width w: CGFloat, cx: CGFloat, cy: CGFloat) -> CGPath {
-  let bb = path.boundingBoxOfPath, s = w / bb.width
-  var t = CGAffineTransform(translationX: cx - bb.midX * s, y: cy - bb.midY * s).scaledBy(x: s, y: s)
-  return path.copy(using: &t)!
-}
-func d(_ p: CGPath) -> String {
-  var out = ""
-  p.applyWithBlock { e in
-    let pt = e.pointee.points
-    switch e.pointee.type {
-    case .moveToPoint: out += "M\(f(pt[0].x)) \(f(pt[0].y))"
-    case .addLineToPoint: out += "L\(f(pt[0].x)) \(f(pt[0].y))"
-    case .addQuadCurveToPoint: out += "Q\(f(pt[0].x)) \(f(pt[0].y)) \(f(pt[1].x)) \(f(pt[1].y))"
-    case .addCurveToPoint: out += "C\(f(pt[0].x)) \(f(pt[0].y)) \(f(pt[1].x)) \(f(pt[1].y)) \(f(pt[2].x)) \(f(pt[2].y))"
-    case .closeSubpath: out += "Z"
-    @unknown default: break
-    }
-  }
-  return out
-}
-var mark = fitted(textPath("SWTOR", size: 200, weight: .black, width: .expanded, kern: -2), width: 664 * wk, cx: 512, cy: 0)
-var sub = fitted(textPath("ON MAC", size: 100, weight: .bold, width: .expanded, kern: 34), width: 250 * wk, cx: 512,
-                 cy: mark.boundingBoxOfPath.minY - 66 * wk)
-let blockMid = (mark.boundingBoxOfPath.maxY + sub.boundingBoxOfPath.minY) / 2
-var centre = CGAffineTransform(translationX: 0, y: crossing().y - blockMid)
-mark = mark.copy(using: &centre)!
-sub = sub.copy(using: &centre)!
-let mb = mark.boundingBoxOfPath
-// brushed silver, bright at the top (gradient in user space: y up inside the flipped group)
-let wordDefs = "<linearGradient id=\"silver\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"\(f(mb.minY))\" x2=\"0\" y2=\"\(f(mb.maxY))\">" +
-  "<stop offset=\"0\" stop-color=\"#B3BAC9\"/><stop offset=\"0.44\" stop-color=\"#CCD4E0\"/>" +
-  "<stop offset=\"0.47\" stop-color=\"#EDF2FA\"/><stop offset=\"1\" stop-color=\"#FFFFFF\"/></linearGradient>"
-let wordSVG = svg("<path d=\"\(d(mark))\" fill=\"url(#silver)\"/><path d=\"\(d(sub))\" fill=\"#DBE3F0\"/>", defs: wordDefs)
 
 // --- glow: the blades' bloom and the flare where they cross, blurred for real (PNG)
 func glowPNG() -> Data {
@@ -214,11 +181,10 @@ func glowPNG() -> Data {
 if args[1] == "layers" {
   let assets = doc.appendingPathComponent("Assets")
   try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
-  try starsSVG.write(to: assets.appendingPathComponent("stars.svg"), atomically: true, encoding: .utf8)
+  try spaceSVG.write(to: assets.appendingPathComponent("space.svg"), atomically: true, encoding: .utf8)
   try glowPNG().write(to: assets.appendingPathComponent("glow.png"))
   try bladesSVG.write(to: assets.appendingPathComponent("blades.svg"), atomically: true, encoding: .utf8)
   try hiltsSVG.write(to: assets.appendingPathComponent("hilts.svg"), atomically: true, encoding: .utf8)
-  try wordSVG.write(to: assets.appendingPathComponent("wordmark.svg"), atomically: true, encoding: .utf8)
   print("layers written to \(assets.path)")
   exit(0)
 }

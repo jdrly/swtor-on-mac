@@ -1,29 +1,11 @@
 {
   "fill": {
     "linear-gradient": [
-      "display-p3:0.09000,0.13000,0.30000,1.00000",
-      "display-p3:0.01000,0.02000,0.06000,1.00000"
+      "srgb:0.07000,0.05000,0.07000,1.00000",
+      "srgb:0.02000,0.02350,0.03900,1.00000"
     ]
   },
   "groups": [
-    {
-      "name": "wordmark",
-      "layers": [
-        {
-          "image-name": "wordmark.svg",
-          "name": "wordmark"
-        }
-      ],
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 1.0
-      },
-      "specular": true,
-      "translucency": {
-        "enabled": false,
-        "value": 0
-      }
-    },
     {
       "name": "sabers",
       "layers": [
@@ -61,11 +43,11 @@
       }
     },
     {
-      "name": "stars",
+      "name": "space",
       "layers": [
         {
-          "image-name": "stars.svg",
-          "name": "stars"
+          "image-name": "space.svg",
+          "name": "space"
         }
       ],
       "specular": false,
