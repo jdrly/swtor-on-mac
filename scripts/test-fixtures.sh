@@ -7,7 +7,8 @@
 #   scripts/test-fixtures.sh [path/to/SWTOR on Mac.app] [group...]
 #
 # Groups (default: all): session-report (the suite's section 6f: the packaged session-report.sh on
-# a sample log); self (this script's own promises, each on a run of its own: a wrong session
+# a sample log); job-sandbox (the suite's end under a job runner, on planted sandboxes, with copies
+# that fail; only here, so the suite's counts stay); self (this script's own promises, each on a run of its own: a wrong session
 # report fails the checks, a check that starts Wine or the app fails the run, the cleanup removes
 # the root and nothing beside it).
 # Env: FIXTURE_ROOT (default: a new folder in $TMPDIR; it must not exist yet; under a job runner
@@ -25,13 +26,15 @@ REPO="$PWD"
 pass=0 fail=0
 # shellcheck source=scripts/fixtures/session-report.sh
 . scripts/fixtures/session-report.sh
+# shellcheck source=scripts/fixtures/job-sandbox.sh
+. scripts/fixtures/job-sandbox.sh
 # shellcheck source=scripts/fixtures/self.sh
 . scripts/fixtures/self.sh
 APP="dist/SWTOR on Mac.app"
 if [ $# -gt 0 ] && [ -d "$1" ]; then APP=$1; shift; fi
 APP="$(cd "$APP" 2>/dev/null && pwd)" || { echo "no app at $APP; run ./build.sh" >&2; exit 1; }
 [ -x "$APP/Contents/Resources/session-report.sh" ] || { echo "no session-report.sh in $APP" >&2; exit 1; }
-FX_ALL="session-report self"
+FX_ALL="session-report job-sandbox self"
 FX_GROUPS="${*:-$FX_ALL}"
 for g in $FX_GROUPS; do
   case " $FX_ALL " in *" $g "*) ;; *) echo "unknown group $g (groups: $FX_ALL)" >&2; exit 2 ;; esac
@@ -61,6 +64,7 @@ for g in $FX_GROUPS; do
   echo "== $g"
   case $g in
     session-report) fx_session_report "$APP/Contents/Resources/session-report.sh" "$ROOT/session-report" ;;
+    job-sandbox) fx_job_sandbox "$ROOT/job-sandbox" ;;
     self) fx_self "$REPO/scripts/test-fixtures.sh" "$APP" "$ROOT/self" ;;
   esac
 done
@@ -69,5 +73,5 @@ echo "== the end"
 [ ! -s "$ROOT/started.txt" ] || sed 's/^/  started: /' "$ROOT/started.txt"
 check "end: no check started Wine or the app" test ! -s "$ROOT/started.txt"
 echo "== $pass passed, $fail failed"
-if [ -z "${KEEP:-}" ] && [ "$fail" = 0 ]; then rm -rf "$ROOT"; else echo "(the root stays: $ROOT)"; fi
+if [ -z "${KEEP:-}" ] && [ "$fail" = 0 ]; then chmod -R u+w "$ROOT"; rm -rf "$ROOT"; else echo "(the root stays: $ROOT)"; fi
 [ "$fail" = 0 ]

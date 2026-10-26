@@ -21,11 +21,12 @@
 #      PREV_APP (default release/0.1.0/SWTOR on Mac.app; missing: section 15 is skipped),
 #      DEV_APP (default release/0.1.1-dev.1/SWTOR on Mac.app; release builds only, missing:
 #      section 16 is skipped)
-# Under a job runner (JOB_ID and JOB_ROOT set) the sandbox is the job's: SANDBOX must name a folder
-# in the job's run directory (a temporary folder or the default is refused, exit 64), and at the
-# end the text output stays there whatever the result: after a failure with the reproducer set in
-# repro/ (keep_repro), while the heavy children (home/, prev-engine/, dev-engine/) go. KEEP has no
-# effect there: the job's manifest decides what stays.
+# Under a job runner (JOB_ID and JOB_ROOT set) the sandbox is the job's: SANDBOX must be named and
+# lie outside the temporary folders (else exit 64; the job's adapter puts it in the job's run
+# directory), and at the end the text output stays there whatever the result: after a failure
+# with the reproducer set in repro/ (keep_repro; home/ itself if that copy fails), while the heavy
+# children (home/, prev-engine/, dev-engine/) go. KEEP has no effect there: the job's manifest
+# decides what stays.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # ok, bad, check, piped and the job runner's rules (owned_path)
@@ -43,8 +44,7 @@ PREV_APP="${PREV_APP:-release/0.1.0/SWTOR on Mac.app}"
 DEV_APP="${DEV_APP:-release/0.1.1-dev.1/SWTOR on Mac.app}"
 [ ! -d "$DEV_APP" ] || DEV_APP="$(cd "$DEV_APP" && pwd)"
 REPO="$PWD"
-# Under a job runner the sandbox is the job's: SANDBOX names a folder in its run directory, never
-# a temporary one, the default included
+# Under a job runner the sandbox is the job's: SANDBOX is named, and never a temporary folder
 JOB_SANDBOX=""
 if under_job_runner; then owned_path SANDBOX "${SANDBOX:-}" || exit 64; JOB_SANDBOX=1; fi
 SANDBOX="${SANDBOX:-/tmp/som-sandbox}"
@@ -138,27 +138,10 @@ cleanup_wine() {
   sleep 1
   sandbox_wine | awk '{ print $1 }' | xargs kill -9 2>/dev/null || true
 }
-# Under a job runner (JOB_SANDBOX): the reproducer set after a failure, in repro/ (small; the
-# heavy children go after it): the run's inputs (inputs.txt), SWTOR on Mac's files with the
-# prefix's registry, its logs, Broadsword's bin/ and bin-real/, and the sizes of what home/ held
-keep_repro() {
-  local r="$SANDBOX/repro"
-  mkdir -p "$r/SWTOR on Mac/prefix" || return 0
-  cp -p "$SANDBOX/inputs.txt" "$r/" 2>/dev/null || true
-  [ ! -d "$SOM" ] || find "$SOM" -maxdepth 1 -type f -exec cp -p {} "$r/SWTOR on Mac/" \; 2>/dev/null || true
-  cp -p "$SOM/prefix/"*.reg "$r/SWTOR on Mac/prefix/" 2>/dev/null || true
-  [ ! -d "$LOGS" ] || cp -R -p "$LOGS" "$r/Logs" 2>/dev/null || true
-  ls -la "$BS_WINE/bin" "$BS_WINE/bin-real" >"$r/broadsword-wine-bin.txt" 2>&1 || true
-  du -k -d 5 "$H" >"$r/home-du.txt" 2>/dev/null || true
-}
-# job_sandbox_end <exit code>: the end of a job's sandbox, normal or not (see the top)
+# Under a job runner (JOB_SANDBOX): keep_repro and job_sandbox_end, the end of the job's sandbox
+# shellcheck source=scripts/fixtures/job-sandbox.sh
+. scripts/fixtures/job-sandbox.sh
 SANDBOX_MADE="" SANDBOX_ENDED=""
-job_sandbox_end() {
-  SANDBOX_ENDED=1
-  if [ "$1" != 0 ] || [ "$fail" != 0 ]; then keep_repro; fi
-  chmod -R u+w "$H" "$SANDBOX/prev-engine" "$SANDBOX/dev-engine" 2>/dev/null || true
-  rm -rf "$H" "$SANDBOX/prev-engine" "$SANDBOX/dev-engine" || true
-}
 # (a run that ends before its end, by an error or a signal, is a failure)
 on_exit() {
   set +e

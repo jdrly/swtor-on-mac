@@ -604,16 +604,18 @@ app's hook check repair. `scripts/test-update.sh` tests app updates with two Dev
 local feed, as in SWGL on Mac.
 
 `scripts/test-fixtures.sh [app] [group...]` runs the checks that need neither the official app nor
-Wine, so far the session report on a sample log (the suite's section 6f), in a folder of their own
-(`FIXTURE_ROOT`) with an empty home and an empty sandbox. Stand-ins for `wine`, `wineserver`, `open`
-and the like fail the run if a check starts one. `test-sandbox.sh` runs the same checks, from
-`scripts/fixtures/`. Under a job runner (`JOB_ID` and `JOB_ROOT` set) both refuse a temporary
-output folder (in `/tmp` or `$TMPDIR`, or the suite's default): `SANDBOX` and `FIXTURE_ROOT` must name
-a folder in the job's run directory. The suite then keeps its text output there whatever the
-result, and removes the sandbox's heavy children (`home/`, `prev-engine/`, `dev-engine/`). After a
-failure it first keeps a reproducer set in `repro/`: the run's inputs (`inputs.txt`: the apps'
-versions and CDHashes, the official app's version, the scripts' commit, macOS), SWTOR on Mac's
-files with the prefix's registry, and its logs.
+Wine, in a folder of their own (`FIXTURE_ROOT`) with an empty home and an empty sandbox: the
+session report on a sample log (the suite's section 6f, which `test-sandbox.sh` runs from the same
+file in `scripts/fixtures/`), and the suite's end under a job runner on planted sandboxes. Stand-ins
+for `wine`, `wineserver`, `open` and the like fail the run if a check starts one. Under a job
+runner (`JOB_ID` and `JOB_ROOT` set) both scripts refuse an output folder that isn't named (the
+suite's default is `/tmp/som-sandbox`) or lies in `/tmp` or `$TMPDIR`; the job's adapter puts it
+in the job's run directory. The suite then keeps its text output whatever the result, and removes
+the sandbox's heavy children (`home/`, `prev-engine/`, `dev-engine/`). After a failure it first
+keeps a reproducer set in `repro/`: the run's inputs (`inputs.txt`: the apps' versions and
+CDHashes, the official app's version, the scripts' commit, macOS), SWTOR on Mac's files with the
+prefix's registry, and its logs. If that copy fails (a full disk), `home/` itself is kept, moved
+to `repro/home`.
 
 ## Building
 
