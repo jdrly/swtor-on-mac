@@ -363,8 +363,9 @@ int main(int argc, char **argv)
 }
 C
 clang -o "$SANDBOX/fake" "$SANDBOX/fake.c"
-# orphan <program> [args]: runs it detached (parent launchd, like Wine's orphans); prints its pid
-orphan() { ( "$@" </dev/null >/dev/null 2>&1 & echo $! >"$SANDBOX/orphan.pid" ); cat "$SANDBOX/orphan.pid"; }
+# orphan and orphan_as: detached stand-ins (argv[0] rewritten for the second); they print the pid
+# shellcheck source=scripts/fixtures/orphan.sh
+. scripts/fixtures/orphan.sh
 # alive <pid>: running (not gone, not a zombie)
 alive() { local s; s=$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' '); [ -n "$s" ] && [ "${s#Z}" = "$s" ]; }
 all_alive() { local p; for p; do alive "$p" || return 1; done; }
@@ -378,9 +379,6 @@ cp "$SANDBOX/fake" "$EB/wineserver"
 # CrossOver's start names: hard links of the loader in winetemp-<inode>-<size>-...
 WT="$SANDBOX/usertmp/winetemp-$(stat -f '%i-%z' "$EL")-1-2"
 mkdir -p "$WT" && ln "$EL" "$WT/winedevice.exe"
-# orphan_as <argv0> <program> [args]: like orphan, with argv[0] rewritten as Wine 11 does (ps
-# then shows C:\windows\...)
-orphan_as() { ( bash -c 'exec -a "$0" "$@"' "$@" </dev/null >/dev/null 2>&1 & echo $! >"$SANDBOX/orphan.pid" ); cat "$SANDBOX/orphan.pid"; }
 # decoys: the same program elsewhere (another file, also in a winetemp-like folder)
 mkdir -p "$SANDBOX/decoy/winetemp-1-2-3-4"
 cp "$SANDBOX/fake" "$SANDBOX/decoy/wine-preloader"
