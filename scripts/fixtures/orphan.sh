@@ -26,15 +26,20 @@ fx_orphan_as() {
   printf '#!/bin/bash\nprintf "%%s\\n" "$@" >>%q\nexec /bin/bash "$@"\n' "$SANDBOX/bash-argv.txt" >"$SANDBOX/bin/bash"
   chmod 755 "$SANDBOX/bin/bash"
   pid=$(PATH="$SANDBOX/bin:$PATH" orphan_as "$a0" /bin/sleep 30)
-  sleep 0.3
-  cmd=$(ps -o command= -p "$pid" 2>/dev/null || true)
+  # ready once the rewriting shell has exec'd the program (up to 5 s): a fixed delay sometimes
+  # still sees the shell on a busy Mac
+  for _ in $(seq 1 50); do
+    cmd=$(ps -o command= -p "$pid" 2>/dev/null || true)
+    [ "$cmd" != "$a0 30" ] || break
+    sleep 0.1
+  done
   check "orphan-as: the program runs with argv[0] rewritten ($cmd)" test "$cmd" = "$a0 30"
   check "orphan-as: the rewriting shell ran (the stand-in bash recorded it)" test -s "$SANDBOX/bash-argv.txt"
   check "orphan-as: argv[0] never on the shell's command line" eval '! grep -F -x -q -- "$a0" "$SANDBOX/bash-argv.txt"'
   kill "$pid" 2>/dev/null || true
   # the program's environment, as it writes it itself (ps -E shows none on current macOS)
   PATH="$SANDBOX/bin:$PATH" orphan_as "$a0" /bin/bash -c 'env >"$1.new" && mv "$1.new" "$1"' env "$SANDBOX/env.txt" >/dev/null
-  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$SANDBOX/env.txt" ] && break; sleep 0.2; done
+  for _ in $(seq 1 50); do [ -s "$SANDBOX/env.txt" ] && break; sleep 0.1; done
   check "orphan-as: the program's environment was written" grep -q '^PATH=' "$SANDBOX/env.txt"
   check "orphan-as: ORPHAN_ARGV0 doesn't reach the program" eval '! grep -q "^ORPHAN_ARGV0=" "$SANDBOX/env.txt"'
 }
