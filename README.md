@@ -610,7 +610,10 @@ file in `scripts/fixtures/`), the suite's end under a job runner on planted sand
 suite's `orphan_as`. That helper starts a stand-in with a rewritten argv[0], as Wine 11 shows its
 processes. The argv[0] reaches the rewriting shell in the environment, never on its command line:
 a game path there (section 2c's) makes that shell look like the game to `swtor-running.sh` and
-the job runner, which then stops the suite's job. Stand-ins
+the job runner, which then stops the suite's job. For the same reason section 2b's call by
+executable names the launcher's file name outside any app's `Contents/MacOS` (the app checks only
+the name): the launcher's own path there would make the call look like the running launcher, the
+one process that stops the suite's job (group `is-launcher`). Stand-ins
 for `wine`, `wineserver`, `open` and the like fail the run if a check starts one. Under a job
 runner (`JOB_ID` and `JOB_ROOT` set) both scripts refuse an output folder that isn't named (the
 suite's default is `/tmp/som-sandbox`) or lies in `/tmp` or `$TMPDIR`; the job's adapter puts it

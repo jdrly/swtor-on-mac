@@ -457,10 +457,12 @@ rm -f "$EB/wineserver" "$EB/ws.pid"
 
 echo "== 2b. what the app takes for the official launcher (by bundle id, else its executable)"
 # (launcher 7.2.207 changed the bundle id from Solid State Networks' to BioWare's)
-is_launcher() { "$APP/Contents/MacOS/SWTORonMac" --is-launcher "$@" 2>/dev/null; }
+# is_launcher, and LAUNCHER_EXE: the launcher's file name outside any app's Contents/MacOS
+# shellcheck source=scripts/fixtures/launcher.sh
+. scripts/fixtures/launcher.sh
 check "launcher: BioWare's bundle id (7.2.207 and later)" test "$(is_launcher com.bioware.starwars-theoldrepubliclauncher /x/y)" = launcher
 check "launcher: Solid State Networks' bundle id (before 7.2.207)" test "$(is_launcher com.solidstatenetworks.host /x/y)" = launcher
-check "launcher: by its executable, whatever the id" test "$(is_launcher org.example.other "/Applications/Star Wars - The Old Republic.app/Contents/MacOS/Star Wars - The Old Republic Launcher")" = launcher
+check "launcher: by its executable, whatever the id" test "$(is_launcher org.example.other "$LAUNCHER_EXE")" = launcher
 check "launcher: not another app" test "$(is_launcher com.apple.Safari /Applications/Safari.app/Contents/MacOS/Safari)" = "not launcher"
 check "launcher: the stand-in official app's id is one of them ($(plutil -extract CFBundleIdentifier raw -o - "$BS_APP/Contents/Info.plist" 2>/dev/null))" \
   test "$(is_launcher "$(plutil -extract CFBundleIdentifier raw -o - "$BS_APP/Contents/Info.plist" 2>/dev/null)" /x/y)" = launcher
