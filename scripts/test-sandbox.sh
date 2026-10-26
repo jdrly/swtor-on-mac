@@ -392,7 +392,7 @@ l2=$(orphan_as 'C:\windows\system32\services.exe' "$EL")
 p3=$!
 sleep 0.5
 l3=$(cat "$SANDBOX/child.pid")
-orphan_ready "$l3" "$EL" || true
+stand_in "(the loader's child)" orphan_ready "$l3" "$EL"
 check "leftovers: status busy=leftovers" test "$(st busy)" = leftovers
 check "leftovers: not counted as running" test "$(st running)" = no
 check "leftovers: names ($(st busy_detail))" eval 'st busy_detail | piped winedevice.exe'
@@ -1067,7 +1067,7 @@ kill "$(cat "$TE/ws.pid")"; sleep 0.5
 # prefix's are not touched, and nothing while the session's wineserver runs
 l1=$(cd "$P1/drive_c/windows" && orphan_as 'C:\windows\system32\winedevice.exe' "$TL")
 l2=$(FAKE_MAP="$(sd "$P1")/tmpmap-test" orphan_as 'C:\windows\system32\svchost.exe' "$TL")
-orphan_maps "$l2" "$(sd "$P1")/tmpmap-test" || true   # (what --reap finds it by)
+stand_in "(mapping its server file, what --reap finds it by)" orphan_maps "$l2" "$(sd "$P1")/tmpmap-test"
 o1=$(cd "$P2/drive_c/windows" && orphan_as 'C:\windows\system32\winedevice.exe' "$TL")
 cp "$SANDBOX/fake" "$T/decoy-wine"
 dd=$(cd "$P1/drive_c/windows" && orphan "$T/decoy-wine")
