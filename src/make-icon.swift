@@ -142,8 +142,10 @@ let hiltsSVG = svg(sabers.map(hilt).joined(), defs: hiltDefs)
 // --- wordmark: "SWTOR" heavy, a red rule and "ON MAC" in Unbounded, as the window's wordmark
 // (Brand.swift), a little heavier and larger below so it reads at icon size
 func unboundedPath(_ s: String, weight: CGFloat, size: CGFloat = 200, kern: CGFloat = -8) -> CGPath {
-  // the app's own copy of Unbounded (src/fonts, SIL OFL 1.1); the SVG carries the outlines
-  let url = doc.deletingLastPathComponent().appendingPathComponent("fonts/Unbounded-Variable.ttf") as CFURL
+  // the app's own copy of Unbounded (src/fonts next to this script, SIL OFL 1.1); the SVG carries
+  // the outlines, so only `layers` needs the font
+  let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    .appendingPathComponent("fonts/Unbounded-Variable.ttf") as CFURL
   let desc = (CTFontManagerCreateFontDescriptorsFromURL(url) as! [CTFontDescriptor])[0]
   let wght = 0x77676874 as NSNumber
   let d2 = CTFontDescriptorCreateCopyWithAttributes(desc, [kCTFontVariationAttribute: [wght: weight]] as CFDictionary)
@@ -175,7 +177,7 @@ func pathD(_ p: CGPath) -> String {
   }
   return out
 }
-let wordSVG: String = {
+func wordSVG() -> String {
   // as Brand.swift's Wordmark at size 200: "SWTOR" heavy, tracking -0.04; under it, 0.1 apart, a
   // red rule (0.66 x 0.05) and "ON MAC" light at a third of the size, tracking 0.117, 0.2 apart
   let S: CGFloat = 200
@@ -196,7 +198,7 @@ let wordSVG: String = {
   return svg("<path d=\"\(pathD(m))\" fill=\"#EEF1F6\"/>" +
              "<rect x=\"\(f(r.minX))\" y=\"\(f(r.minY))\" width=\"\(f(r.width))\" height=\"\(f(r.height))\" fill=\"#FF3D2E\"/>" +
              "<path d=\"\(pathD(sp))\" fill=\"#FF3D2E\"/>")
-}()
+}
 
 // --- glow: the blades' bloom and the flare where they cross, blurred for real (PNG)
 func glowPNG() -> Data {
@@ -247,7 +249,7 @@ if args[1] == "layers" {
   try glowPNG().write(to: assets.appendingPathComponent("glow.png"))
   try bladesSVG.write(to: assets.appendingPathComponent("blades.svg"), atomically: true, encoding: .utf8)
   try hiltsSVG.write(to: assets.appendingPathComponent("hilts.svg"), atomically: true, encoding: .utf8)
-  try wordSVG.write(to: assets.appendingPathComponent("wordmark.svg"), atomically: true, encoding: .utf8)
+  try wordSVG().write(to: assets.appendingPathComponent("wordmark.svg"), atomically: true, encoding: .utf8)
   print("layers written to \(assets.path)")
   exit(0)
 }
