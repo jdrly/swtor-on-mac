@@ -24,7 +24,8 @@ keep_repro() {
 # job_sandbox_end <exit code>: the end of a job's sandbox, normal or not (see test-sandbox.sh's
 # top). When the reproducer set couldn't be copied, home/ itself is kept in its place in repro/
 # (a rename, which needs no space): the job keeps repro/ after a failure and removes home/, so
-# the sources stay. Only if even the rename fails does home/ stay where it is, said so.
+# the sources stay. Only if even the rename fails does home/ stay where it is, said so; the job's
+# manifest then keeps home/ too (the adapter's failpin), whole.
 job_sandbox_end() {
   local c kept=""
   # shellcheck disable=SC2034 # (the suite's on_exit reads it)
@@ -34,7 +35,7 @@ job_sandbox_end() {
       kept=1
       echo "== the reproducer set could not be copied: home/ is kept as repro/home instead"
       if [ -d "$SANDBOX/repro" ]; then mv "$H" "$SANDBOX/repro/home"; else mv "$H" "$SANDBOX/repro"; fi ||
-        echo "== home/ could not be moved either: it stays in the sandbox (the job may still remove it)"
+        echo "== home/ could not be moved either: it stays in the sandbox, where the job keeps it after a failure"
     fi
   fi
   for c in "$H" "$SANDBOX/prev-engine" "$SANDBOX/dev-engine"; do
@@ -81,5 +82,5 @@ fx_job_sandbox() {
     eval '[ ! -e "$D/nomkdir/home" ] && [ "$(cat "$D/nomkdir/repro/Library/Logs/SWTOR on Mac/install.log")" = log ] && [ ! -e "$D/nomkdir/dev-engine" ]'
   fx_end nomv 1 mv
   check "job sandbox: copies and the rename that fail leave home/ in place, said so" \
-    eval '[ "$(cat "$D/nomv/home/Library/Application Support/SWTOR on Mac/env")" = env ] && [ ! -e "$D/nomv/prev-engine" ] && grep -qx "== home/ could not be moved either: it stays in the sandbox (the job may still remove it)" "$D/nomv.out"'
+    eval '[ "$(cat "$D/nomv/home/Library/Application Support/SWTOR on Mac/env")" = env ] && [ ! -e "$D/nomv/prev-engine" ] && grep -qx "== home/ could not be moved either: it stays in the sandbox, where the job keeps it after a failure" "$D/nomv.out"'
 }
