@@ -1,0 +1,83 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "display-p3:0.09000,0.13000,0.30000,1.00000",
+      "display-p3:0.01000,0.02000,0.06000,1.00000"
+    ]
+  },
+  "groups": [
+    {
+      "name": "wordmark",
+      "layers": [
+        {
+          "image-name": "wordmark.svg",
+          "name": "wordmark"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 1.0
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    },
+    {
+      "name": "sabers",
+      "layers": [
+        {
+          "image-name": "blades.svg",
+          "name": "blades"
+        },
+        {
+          "image-name": "hilts.svg",
+          "name": "hilts"
+        }
+      ],
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.6
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    },
+    {
+      "name": "glow",
+      "layers": [
+        {
+          "image-name": "glow.png",
+          "name": "glow"
+        }
+      ],
+      "specular": false,
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    },
+    {
+      "name": "stars",
+      "layers": [
+        {
+          "image-name": "stars.svg",
+          "name": "stars"
+        }
+      ],
+      "specular": false,
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "macOS"
+    ]
+  }
+}

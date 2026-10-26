@@ -255,10 +255,16 @@ printf 'app %s\nd9mt %s\nengine %s\nwinemac %s\nntdll %s\nsparkle %s\nsdk %s\n' 
   "${NTDLL_PATCH#ntdll-} $(shasum -a 256 "patches/$NTDLL_PATCH.patch" | cut -c1-12)" \
   "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
 
-iconset="$CACHE/AppIcon.iconset"
-rm -rf "$iconset"
-swift src/make-icon.swift "$iconset"
-iconutil -c icns "$iconset" -o "$R/AppIcon.icns"
+# The Liquid Glass icon from Icon Composer's document (Assets.car, CFBundleIconName), plus the
+# .icns actool makes from it (CFBundleIconFile). actool needs absolute paths.
+icon="$CACHE/AppIcon"
+rm -rf "$icon"
+mkdir -p "$icon"
+xcrun actool "$ROOT/src/AppIcon.icon" --compile "$icon" --platform macosx \
+  --minimum-deployment-target "$(plutil -extract LSMinimumSystemVersion raw src/Info.plist)" \
+  --app-icon AppIcon --output-partial-info-plist "$icon/partial.plist" >"$icon/actool.txt"
+[ -f "$icon/Assets.car" ] && [ -f "$icon/AppIcon.icns" ] || { cat "$icon/actool.txt" >&2; exit 1; }
+cp "$icon/Assets.car" "$icon/AppIcon.icns" "$R/"
 
 xattr -cr "$APP"
 # Ad-hoc signatures (Developer ID: scripts/release.sh). The helpers keep their own signature
