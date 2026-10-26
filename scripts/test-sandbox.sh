@@ -1804,12 +1804,18 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   prevsom install >"$SANDBOX/prev-reinstall.txt" 2>&1 || { tail -20 "$SANDBOX/prev-reinstall.txt"; bad "$PREVV reinstall exit"; }
   check "$PREVV: installed" eval 'grep -q "^@done" "$SANDBOX/prev-reinstall.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$PREVV" ]'
   # env without comments, versions, the lines this version adds and (development builds) the
-  # update check, which they turn off
+  # update check, which they turn off. The longer version goes first: one that extends the other
+  # (0.1.5.1 over 0.1.5) would otherwise be left as V.1
   envnorm() {
-    sed -e "s/$PREVV/V/g; s/$APPV/V/g" -e 's/^SWTOR_D9MT=.*/SWTOR_D9MT=H/' "$1" |
+    local a=$PREVV b=$APPV
+    [ ${#a} -ge ${#b} ] || { a=$APPV; b=$PREVV; }
+    sed -e "s/$a/V/g; s/$b/V/g" -e 's/^SWTOR_D9MT=.*/SWTOR_D9MT=H/' "$1" |
       { if [ "$CHANNEL" = dev ]; then sed 's/^SWTOR_UPDATE_CHECK=.*/SWTOR_UPDATE_CHECK=X/'; else cat; fi; } |
       grep -v -e '^#' -e '^$' -e '^D9MT_STATE_CACHE=' -e 'd9mt-ab\.env' -e '^SWTOR_FPS_LIMIT=' -e '^SWTOR_FPS_LIMIT_BATTERY='
   }
+  echo SWTOR_ON_MAC_VERSION=0.1.5 >"$SANDBOX/envnorm-short"; echo SWTOR_ON_MAC_VERSION=0.1.5.1 >"$SANDBOX/envnorm-long"
+  check "env comparison: 0.1.5 and 0.1.5.1 come out alike, either one as this version" eval '( PREVV=0.1.5 APPV=0.1.5.1; diff <(envnorm "$SANDBOX/envnorm-short") <(envnorm "$SANDBOX/envnorm-long") ) >/dev/null && ( PREVV=0.1.5.1 APPV=0.1.5; diff <(envnorm "$SANDBOX/envnorm-short") <(envnorm "$SANDBOX/envnorm-long") ) >/dev/null'
+  rm -f "$SANDBOX/envnorm-short" "$SANDBOX/envnorm-long"
   prefix_snap >"$SANDBOX/prev-prefix.txt"
   snap "$SOM/engine" >"$SANDBOX/prev-engine.txt"
   rm -rf "$SANDBOX/prev-engine" && cp -c -R -p "$SOM/engine" "$SANDBOX/prev-engine"
