@@ -1,8 +1,9 @@
 // The app icon: an Icon Composer document (src/AppIcon.icon) that macOS 26 and later draws as a
 // Liquid Glass icon (glass rim, specular highlights, shadow; Default, Dark, Tinted and Clear).
-// The design: a blue and a red blade crossed at the centre (a symbol, no text, so it reads down to
-// 16 px), over the main window's jump point (Warp.swift): a red glow, sonar rings, a crosshair and
-// warp streaks. Original artwork: no Star Wars or SWTOR logo. The layers carry no tile, rim or
+// The design: a blue and a red blade crossed at the centre, the window's "SWTOR / ON MAC" wordmark
+// across them (Unbounded, as Brand.swift's Wordmark), over the main window's jump point
+// (Warp.swift): a red glow, sonar rings, a crosshair and warp streaks. Original artwork: no Star
+// Wars or SWTOR logo. The layers carry no tile, rim or
 // shadow: the system draws those, and icon.json holds the background gradient and each group's
 // glass settings (fine-tune them in Xcode's Icon Composer).
 //
@@ -15,6 +16,7 @@
 // build.sh compiles the document with actool into Assets.car and a fallback AppIcon.icns.
 import AppKit
 import CoreImage
+import CoreText
 
 let args = CommandLine.arguments
 guard args.count >= 3, (args[1] == "layers" && args.count == 3) || (args[1] == "preview" && (4...5).contains(args.count)) else {
@@ -136,6 +138,66 @@ func hilt(_ s: Saber) -> String {
 }
 let hiltsSVG = svg(sabers.map(hilt).joined(), defs: hiltDefs)
 
+
+// --- wordmark: "SWTOR" heavy, a red rule and "ON MAC" in Unbounded, as the window's wordmark
+// (Brand.swift), a little heavier and larger below so it reads at icon size
+func unboundedPath(_ s: String, weight: CGFloat, size: CGFloat = 200, kern: CGFloat = -8) -> CGPath {
+  // the app's own copy of Unbounded (src/fonts, SIL OFL 1.1); the SVG carries the outlines
+  let url = doc.deletingLastPathComponent().appendingPathComponent("fonts/Unbounded-Variable.ttf") as CFURL
+  let desc = (CTFontManagerCreateFontDescriptorsFromURL(url) as! [CTFontDescriptor])[0]
+  let wght = 0x77676874 as NSNumber
+  let d2 = CTFontDescriptorCreateCopyWithAttributes(desc, [kCTFontVariationAttribute: [wght: weight]] as CFDictionary)
+  let font = CTFontCreateWithFontDescriptor(d2, size, nil)
+  let line = CTLineCreateWithAttributedString(NSAttributedString(string: s, attributes: [.font: font, .kern: kern]))
+  let path = CGMutablePath()
+  for run in CTLineGetGlyphRuns(line) as! [CTRun] {
+    let n = CTRunGetGlyphCount(run)
+    var glyphs = [CGGlyph](repeating: 0, count: n), pos = [CGPoint](repeating: .zero, count: n)
+    CTRunGetGlyphs(run, CFRange(location: 0, length: n), &glyphs)
+    CTRunGetPositions(run, CFRange(location: 0, length: n), &pos)
+    let rf = (CTRunGetAttributes(run) as NSDictionary)[kCTFontAttributeName] as! CTFont
+    for i in 0..<n { if let g = CTFontCreatePathForGlyph(rf, glyphs[i], nil) { path.addPath(g, transform: CGAffineTransform(translationX: pos[i].x, y: pos[i].y)) } }
+  }
+  return path
+}
+func pathD(_ p: CGPath) -> String {
+  var out = ""
+  p.applyWithBlock { e in
+    let pt = e.pointee.points
+    switch e.pointee.type {
+    case .moveToPoint: out += "M\(f(pt[0].x)) \(f(pt[0].y))"
+    case .addLineToPoint: out += "L\(f(pt[0].x)) \(f(pt[0].y))"
+    case .addQuadCurveToPoint: out += "Q\(f(pt[0].x)) \(f(pt[0].y)) \(f(pt[1].x)) \(f(pt[1].y))"
+    case .addCurveToPoint: out += "C\(f(pt[0].x)) \(f(pt[0].y)) \(f(pt[1].x)) \(f(pt[1].y)) \(f(pt[2].x)) \(f(pt[2].y))"
+    case .closeSubpath: out += "Z"
+    @unknown default: break
+    }
+  }
+  return out
+}
+let wordSVG: String = {
+  // as Brand.swift's Wordmark at size 200: "SWTOR" heavy, tracking -0.04; under it, 0.1 apart, a
+  // red rule (0.66 x 0.05) and "ON MAC" light at a third of the size, tracking 0.117, 0.2 apart
+  let S: CGFloat = 200
+  let mark = unboundedPath("SWTOR", weight: 800, size: S, kern: -S * 0.04)
+  var sub = unboundedPath("ON MAC", weight: 560, size: S / 2.6, kern: S * 0.10)
+  let mb = mark.boundingBoxOfPath, sb0 = sub.boundingBoxOfPath
+  let ruleW = S * 0.66, ruleH = S * 0.05, gap = S * 0.2
+  let lineW = ruleW + gap + sb0.width
+  let lineY = mb.minY - S * 0.1 - sb0.height  // bottom of the second line
+  var ts = CGAffineTransform(translationX: mb.midX - lineW / 2 + ruleW + gap - sb0.minX, y: lineY - sb0.minY)
+  sub = sub.copy(using: &ts)!
+  let rule = CGRect(x: mb.midX - lineW / 2, y: lineY + sb0.height / 2 - ruleH / 2, width: ruleW, height: ruleH)
+  // the block, scaled so "SWTOR" is 700 wide, centred on the crossing
+  let top = mb.maxY, bottom = lineY
+  let sc: CGFloat = 700 / mb.width
+  var t = CGAffineTransform(translationX: 512 - mb.midX * sc, y: 512 - (top + bottom) / 2 * sc).scaledBy(x: sc, y: sc)
+  let m = mark.copy(using: &t)!, sp = sub.copy(using: &t)!, r = rule.applying(t)
+  return svg("<path d=\"\(pathD(m))\" fill=\"#EEF1F6\"/>" +
+             "<rect x=\"\(f(r.minX))\" y=\"\(f(r.minY))\" width=\"\(f(r.width))\" height=\"\(f(r.height))\" fill=\"#FF3D2E\"/>" +
+             "<path d=\"\(pathD(sp))\" fill=\"#FF3D2E\"/>")
+}()
+
 // --- glow: the blades' bloom and the flare where they cross, blurred for real (PNG)
 func glowPNG() -> Data {
   let px = 1024
@@ -185,6 +247,7 @@ if args[1] == "layers" {
   try glowPNG().write(to: assets.appendingPathComponent("glow.png"))
   try bladesSVG.write(to: assets.appendingPathComponent("blades.svg"), atomically: true, encoding: .utf8)
   try hiltsSVG.write(to: assets.appendingPathComponent("hilts.svg"), atomically: true, encoding: .utf8)
+  try wordSVG.write(to: assets.appendingPathComponent("wordmark.svg"), atomically: true, encoding: .utf8)
   print("layers written to \(assets.path)")
   exit(0)
 }
