@@ -21,8 +21,17 @@
 #      PREV_APP (default release/0.1.0/SWTOR on Mac.app; missing: section 15 is skipped),
 #      DEV_APP (default release/0.1.1-dev.1/SWTOR on Mac.app; release builds only, missing:
 #      section 16 is skipped)
+# Under a job runner (JOB_ID and JOB_ROOT set) the sandbox is the job's: SANDBOX must name a folder
+# in the job's run directory (a temporary folder or the default is refused, exit 64), and at the
+# end the text output stays there whatever the result: after a failure with the reproducer set in
+# repro/ (keep_repro), while the heavy children (home/, prev-engine/, dev-engine/) go. KEEP has no
+# effect there: the job's manifest decides what stays.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# ok, bad, check, piped and the job runner's rules (owned_path)
+# shellcheck source=scripts/fixtures/lib.sh
+. scripts/fixtures/lib.sh
+pass=0 fail=0
 APP="$(cd "${1:-dist/SWTOR on Mac.app}" && pwd)"
 SOMSH="$APP/Contents/Resources/som.sh"
 [ -x "$SOMSH" ] || { echo "no $SOMSH; run ./build.sh" >&2; exit 1; }
@@ -34,6 +43,10 @@ PREV_APP="${PREV_APP:-release/0.1.0/SWTOR on Mac.app}"
 DEV_APP="${DEV_APP:-release/0.1.1-dev.1/SWTOR on Mac.app}"
 [ ! -d "$DEV_APP" ] || DEV_APP="$(cd "$DEV_APP" && pwd)"
 REPO="$PWD"
+# Under a job runner the sandbox is the job's: SANDBOX names a folder in its run directory, never
+# a temporary one, the default included
+JOB_SANDBOX=""
+if under_job_runner; then owned_path SANDBOX "${SANDBOX:-}" || exit 64; JOB_SANDBOX=1; fi
 SANDBOX="${SANDBOX:-/tmp/som-sandbox}"
 REAL_APP="/Applications/Star Wars - The Old Republic.app"
 REAL_WINE="$HOME/Library/Application Support/com.broadsword.swtor/Star Wars - The Old Republic/swtor-precompiled/Libraries/Wine"
@@ -45,21 +58,12 @@ LOGS="$H/Library/Logs/SWTOR on Mac"
 export SWTOR_ON_MAC_ROOT="$SANDBOX"
 unset SWTOR_ON_MAC_DRY_RUN SWTOR_ON_MAC_FORCE
 
-pass=0 fail=0
-ok() { echo "  ok   $*"; pass=$((pass + 1)); }
-bad() { echo "  FAIL $*"; fail=$((fail + 1)); }
-check() { local what=$1; shift; if "$@"; then ok "$what"; else bad "$what"; fi; }
 som() { "$SOMSH" "$@"; }
 st() { som status | sed -n "s/^$1=//p"; }
 # what the window's Play button would do (the app's own resolution; nothing is opened)
 play_target() { "$APP/Contents/MacOS/SWTORonMac" --play-target 2>/dev/null; }
 # what a press would do: the hook check first (som.sh rehook), then the fresh status
 play_check() { "$APP/Contents/MacOS/SWTORonMac" --play-check 2>/dev/null; }
-# piped <grep options and patterns>: grep -q for a pipe's end. It reads all of its input: grep -q
-# would stop at the first match, and the writer then dies of SIGPIPE, which under pipefail fails
-# the pipe (a check that should pass fails at random) or, after a !, passes it (one that should
-# fail passes)
-piped() { grep "$@" >/dev/null; }
 is_macho() { file -b "$1" | piped '^Mach-O'; }
 # reg_has <key as in user.reg, with \\> <value line>: the value is set under that key
 reg_has() {
@@ -134,7 +138,34 @@ cleanup_wine() {
   sleep 1
   sandbox_wine | awk '{ print $1 }' | xargs kill -9 2>/dev/null || true
 }
-trap cleanup_wine EXIT
+# Under a job runner (JOB_SANDBOX): the reproducer set after a failure, in repro/ (small; the
+# heavy children go after it): the run's inputs (inputs.txt), SWTOR on Mac's files with the
+# prefix's registry, its logs, Broadsword's bin/ and bin-real/, and the sizes of what home/ held
+keep_repro() {
+  local r="$SANDBOX/repro"
+  mkdir -p "$r/SWTOR on Mac/prefix" || return 0
+  cp -p "$SANDBOX/inputs.txt" "$r/" 2>/dev/null || true
+  [ ! -d "$SOM" ] || find "$SOM" -maxdepth 1 -type f -exec cp -p {} "$r/SWTOR on Mac/" \; 2>/dev/null || true
+  cp -p "$SOM/prefix/"*.reg "$r/SWTOR on Mac/prefix/" 2>/dev/null || true
+  [ ! -d "$LOGS" ] || cp -R -p "$LOGS" "$r/Logs" 2>/dev/null || true
+  ls -la "$BS_WINE/bin" "$BS_WINE/bin-real" >"$r/broadsword-wine-bin.txt" 2>&1 || true
+  du -k -d 5 "$H" >"$r/home-du.txt" 2>/dev/null || true
+}
+# job_sandbox_end <exit code>: the end of a job's sandbox, normal or not (see the top)
+SANDBOX_MADE="" SANDBOX_ENDED=""
+job_sandbox_end() {
+  SANDBOX_ENDED=1
+  if [ "$1" != 0 ] || [ "$fail" != 0 ]; then keep_repro; fi
+  chmod -R u+w "$H" "$SANDBOX/prev-engine" "$SANDBOX/dev-engine" 2>/dev/null || true
+  rm -rf "$H" "$SANDBOX/prev-engine" "$SANDBOX/dev-engine" || true
+}
+# (a run that ends before its end, by an error or a signal, is a failure)
+on_exit() {
+  set +e
+  cleanup_wine
+  [ -z "$JOB_SANDBOX" ] || [ -z "$SANDBOX_MADE" ] || [ -n "$SANDBOX_ENDED" ] || job_sandbox_end 1
+}
+trap on_exit EXIT
 
 echo "== sandbox $SANDBOX"
 [ -d "$REAL_APP" ] && [ -d "$REAL_WINE" ] || { echo "official SWTOR install not found" >&2; exit 1; }
@@ -149,6 +180,19 @@ SOM="$H/Library/Application Support/SWTOR on Mac"
 LOGS="$H/Library/Logs/SWTOR on Mac"
 AGENT_PLIST="$H/Library/LaunchAgents/cz.jandrly.swtoronmac.watch.plist"
 export SWTOR_ON_MAC_ROOT="$SANDBOX"
+SANDBOX_MADE=1
+# the run's inputs, to repeat it: the apps (version, CDHash), the official app's version, the
+# commit of these scripts, macOS
+app_line() { # <name> <app>
+  if [ -d "$2" ]; then
+    echo "$1 $2 version=$(sed -n 's/^version=//p' "$2/Contents/Resources/app.properties") cdhash=$(codesign -dvvv "$2" 2>&1 | sed -n 's/^CDHash=//p')"
+  else echo "$1 $2 (missing)"; fi
+}
+{ app_line app "$APP"; app_line old "$OLD_APP"; app_line prev "$PREV_APP"; app_line dev "$DEV_APP"
+  echo "official $(plutil -extract CFBundleShortVersionString raw -o - "$REAL_APP/Contents/Info.plist")"
+  echo "scripts $(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo unknown)$([ -z "$(git -C "$REPO" status --porcelain 2>/dev/null)" ] || echo " (with changes)")"
+  echo "macos $(sw_vers -productVersion) $(uname -m)"
+} >"$SANDBOX/inputs.txt"
 mkdir -p "$SANDBOX/Applications" "$(dirname "$BS_WINE")" "$SANDBOX/usertmp"
 # The sandbox's official app: a bundle of its own with the real one's Info.plist (its bundle id,
 # by which the window finds the launcher running), not a copy. The tests run stand-ins for the
@@ -979,51 +1023,10 @@ mv -f "$U/hold-launcher.new" "$U/bin-real/hold-launcher"
 check "pmset -g ps names the power source as the wrapper reads it" eval '/usr/bin/pmset -g ps | sed -n 1p | piped -E "^Now drawing from '"'"'(AC|Battery|UPS) Power'"'"'"'
 
 echo "== 6f. session-report.sh: the lines of d9mt 6fa5df7 (a sample log)"
-R="$SANDBOX/report"
-mkdir -p "$R"
-cat >"$R/wine.log" <<'LOG'
-SWTOR on Mac 0.1.1-dev.1: engine cx26 cx-26.3.0-8, d9mt 6fa5df7, started 2026-10-18 20:00:00
-SWTOR on Mac d9mt-ab: pfv vsync-off
-SWTOR on Mac frame rate limit: 30 fps (only on battery: on battery)
-warn:  D9MT: 20:00:01.100 frame cap 30 fps: timer, cadence 33.33 ms (vsync off)
-info:  Found config env: d3d9.presentInterval=0
-info:  D9MT: PixelFormatView on every texture (D9MT_TEX_PFV=1): no lossless compression
-info:  D9MT: end-of-pass barrier before Fragment|Blit|Dispatch, vertex fences for vertex textures
-info:  D9MT: a clear that ends a pass skips the pass's store of what it clears
-warn:  D3D9 SM3 hazard: ps_1a2b PS crs-partial-mask:r2.yz
-warn:  D3D9 SM3 hazard: vs_3c4d VS packed-io:o1.xy=texcoord0+o1.zw=texcoord1 crs-partial-mask:r1.y
-info:  STATECACHE load path=/x/d9mt/state/swtor.exe.d9mtstate status=ok entries=40 session=2 prewarmable=39 readyAtLoad=0 corrupt=0 truncated=0 invalid=1 (first: layout stride) capped=0 max=1024 guard=tripped threads=2 ms=3.8
-warn:  STATECACHE the last session ended while prewarm builds were running (crash, kill, or exit without releasing the device; 1 in a row): dropped 2 in-flight entries, kept the rest
-info:  STATECACHE prewarm t=0.83s built=37 dup=1 failed=1 skipped=0 buildMs=991 pausedMs=201
-warn:  STATS t=1 fps=60.0 ms=16.7/18.0/21.4 slow33=0 slow50=0 | rp=31.4 skip=2.1 cb=13.0 draws=1520 | ld=12.1 clr=9.0 ldDc=4.0 st=15.2 stDc=6.0 rsv=0.0 restore=0.0 savedMiB=231.4 attMs=1.3 clrFold=6.0 clrPass=1.0 | sh=0 pso=0 wait=0/0.0ms | allocMiB=5210 att=on | split=8.0 splitSubmit=6.0 splitXfer=0.0 splitClear=2.0 splitMiB=420.0
-info:  XFER t=1 | stretch copy=2 resolve=0 blit=5 (scaled=5 linear=4 convert=1 msaa=0) skip=0 | fill rt=1 rect=1 bc=0 skip=0
-warn:  STATS t=2 fps=60.0 ms=16.7/18.0/21.4 slow33=0 slow50=0 | rp=31.4 skip=2.1 cb=13.0 draws=1520 | ld=12.1 clr=9.0 ldDc=4.0 st=15.2 stDc=6.0 rsv=0.0 restore=0.0 savedMiB=231.4 attMs=1.3 clrFold=6.0 clrPass=1.0 | sh=0 pso=0 wait=0/0.0ms | allocMiB=5210 att=on | split=4.0 splitSubmit=2.0 splitXfer=0.0 splitClear=2.0 splitMiB=100.0
-info:  XFER t=2 | stretch copy=1 resolve=0 blit=0 (scaled=0 linear=0 convert=0 msaa=0) skip=1 | fill rt=0 rect=0 bc=2 skip=0
-info:  STATECACHE use t=60s hits=37 late=1 misses=2 recorded=3 unrecorded=0 ringDrops=0 hitBuildMs=991 | prewarm built=37 dup=1 failed=1 skipped=0 buildMs=991 pausedMs=201 boosts=1 ready=0 | entries=42 invalid=0 (final)
-info:  STATECACHE write entries=42 bytes=16128 ms=1.7
-LOG
-rpt=$("$APP/Contents/Resources/session-report.sh" "$R/wine.log" 2>&1 || true)
-printf '%s\n' "$rpt" >"$R/report.txt"
-has() { grep -qF -- "$1" "$R/report.txt"; }
-check "report: the A/B switches" grep -qE '^  A/B switches \(d9mt-ab\.sh\) +pfv vsync-off$' "$R/report.txt"
-check "report: the GPU path" has "lossless compression off (D9MT_TEX_PFV=1), narrow pass barrier, clears skip stores"
-check "report: DXVK_CONFIG" has "d3d9.presentInterval=0"
-check "report: the Frame Rate Limit" grep -qE '^  Frame Rate Limit +30 fps \(only on battery: on battery\)$' "$R/report.txt"
-check "report: d9mt's frame cap" grep -qE "^    d9mt's frame cap +30 fps: timer, cadence 33\.33 ms \(vsync off\)$" "$R/report.txt"
-check "report: pass splits (frame-weighted)" has "6.0 (4.0 with a submit), 260 MiB loaded again"
-check "report: state cache loaded" has "ok, 40 entries, 39 to prewarm, 1 invalid dropped"
-check "report: prewarm" has "built 37, failed 1, skipped 0, done 0.8 s after the start (991 ms of builds, paused 201 ms)"
-check "report: what the game needed" has "hits 37, late 1, misses 2 (build time saved 991 ms), 3 new recorded, 1 prewarms sped up"
-check "report: the guard" has "the last session ended while prewarm builds were running"
-check "report: written" has "42 entries, 15 KB"
-check "report: StretchRect by path, summed" has "copy 3, resolve 0, blit 5 (scaled 5, linear 4, convert 1, msaa 0), left alone 1 (2 seconds with any)"
-check "report: ColorFill by path" has "render target 1, part 1, block-compressed 2, left alone 0"
-check "report: SM3 hazards" has "2 shaders (crs-partial-mask, packed-io)"
-echo 'info:  XFER-SUMMARY | stretch copy=9 resolve=1 blit=5 (scaled=5 linear=4 convert=1 msaa=0) skip=1 | fill rt=1 rect=1 bc=2 skip=3' >>"$R/wine.log"
-echo 'info:  STATECACHE off (D9MT_STATE_CACHE=0)' >"$R/off.log"
-check "report: XFER-SUMMARY when the device was released" eval '"$APP/Contents/Resources/session-report.sh" "$R/wine.log" | grep -F "copy 9, resolve 1, blit 5 (scaled 5, linear 4, convert 1, msaa 0), left alone 1 (session total)" >/dev/null'
-check "report: state cache off" eval '"$APP/Contents/Resources/session-report.sh" "$R/off.log" | grep -F "off (D9MT_STATE_CACHE=0)" >/dev/null'
-check "report: --compare with both" eval '"$APP/Contents/Resources/session-report.sh" --compare "$R/wine.log" "$R/off.log" | grep "Pipeline state cache.*ok, 40 entries.*off (D9MT_STATE_CACHE=0)" >/dev/null'
+# (scripts/test-fixtures.sh runs the same group without the official app or Wine)
+# shellcheck source=scripts/fixtures/session-report.sh
+. scripts/fixtures/session-report.sh
+fx_session_report "$APP/Contents/Resources/session-report.sh" "$SANDBOX/report"
 
 echo "== 6d. the Wine session: up holding nothing of the caller's, one start at a time, leftovers of its prefix only (dummies)"
 T="$SANDBOX/session-test"
@@ -1753,9 +1756,9 @@ engine_same() {
 echo "== 14a. a check on a pipe reads all of it"
 check "pipes: a match early in a long output passes" eval 'seq 1 200000 | piped -x 1'
 check "pipes: the same check negated fails" eval '! ( ! seq 1 200000 | piped -x 1 )'
-check "pipes: no check greps a pipe with grep -q" eval '! grep -n "| *grep -q" "$REPO/scripts/test-sandbox.sh" | grep -v "^[0-9]*: *#" | piped .'
+check "pipes: no check greps a pipe with grep -q" eval '! cat "$REPO/scripts/test-sandbox.sh" "$REPO"/scripts/fixtures/*.sh | grep -n "| *grep -q" | grep -v "^[0-9]*: *#" | piped .'
 check "pipes: no helper is defined twice (a later one would replace the earlier for every check after it)" \
-  eval '[ -z "$(grep -o -E "^ *[A-Za-z_][A-Za-z0-9_]*\\(\\) *\\{" "$REPO/scripts/test-sandbox.sh" | sed -E "s/^ *//; s/\\(\\).*//" | sort | uniq -d)" ]'
+  eval '[ -z "$(grep -h -o -E "^ *[A-Za-z_][A-Za-z0-9_]*\\(\\) *\\{" "$REPO/scripts/test-sandbox.sh" "$REPO"/scripts/fixtures/*.sh | sed -E "s/^ *//; s/\\(\\).*//" | sort | uniq -d)" ]'
 
 echo "== 14b. the prefix comparison sees what changed"
 FP="$SANDBOX/fake-prefix"; rm -rf "$FP"; mkdir -p "$FP/drive_c/windows/system32"
@@ -1924,5 +1927,6 @@ fi
 cleanup_wine
 check "end: no Wine process of the sandbox" test -z "$(sandbox_wine)"
 echo "== $pass passed, $fail failed"
-if [ -z "${KEEP:-}" ] && [ "$fail" = 0 ]; then chmod -R u+w "$SANDBOX" 2>/dev/null || true; rm -rf "$SANDBOX"; fi
+if [ -n "$JOB_SANDBOX" ]; then job_sandbox_end 0
+elif [ -z "${KEEP:-}" ] && [ "$fail" = 0 ]; then chmod -R u+w "$SANDBOX" 2>/dev/null || true; rm -rf "$SANDBOX"; fi
 [ "$fail" = 0 ]

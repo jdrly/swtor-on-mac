@@ -603,6 +603,18 @@ another install's `env`), which the window and Play treat as unhooked and Reinst
 app's hook check repair. `scripts/test-update.sh` tests app updates with two Developer ID builds and a
 local feed, as in SWGL on Mac.
 
+`scripts/test-fixtures.sh [app] [group...]` runs the checks that need neither the official app nor
+Wine, so far the session report on a sample log (the suite's section 6f), in a folder of their own
+(`FIXTURE_ROOT`) with an empty home and an empty sandbox. Stand-ins for `wine`, `wineserver`, `open`
+and the like fail the run if a check starts one. `test-sandbox.sh` runs the same checks, from
+`scripts/fixtures/`. Under a job runner (`JOB_ID` and `JOB_ROOT` set) both refuse a temporary
+output folder (in `/tmp` or `$TMPDIR`, or the suite's default): `SANDBOX` and `FIXTURE_ROOT` must name
+a folder in the job's run directory. The suite then keeps its text output there whatever the
+result, and removes the sandbox's heavy children (`home/`, `prev-engine/`, `dev-engine/`). After a
+failure it first keeps a reproducer set in `repro/`: the run's inputs (`inputs.txt`: the apps'
+versions and CDHashes, the official app's version, the scripts' commit, macOS), SWTOR on Mac's
+files with the prefix's registry, and its logs.
+
 ## Building
 
 - `scripts/build-d9mt.sh` builds d9mt (x86_64) at a pinned commit of
