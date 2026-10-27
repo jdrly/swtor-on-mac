@@ -618,7 +618,11 @@ the checks after it without running them, while it still runs something else and
 ended, so a check (a negative one above all) can't pass without its process. For the same reason section 2b's call by
 executable names the launcher's file name outside any app's `Contents/MacOS` (the app checks only
 the name): the launcher's own path there would make the call look like the running launcher, the
-one process that stops the suite's job (group `is-launcher`). Stand-ins
+one process that stops the suite's job (group `is-launcher`). A check runs its `eval` string in
+the suite's own shell, so no string may call `exit` outside a subshell: the suite would end there
+with no `FAIL` line and no counts. Section 14a checks that over the suite and the fixture groups;
+group `eval-exit` checks that check, and the suite's "app files gone" checks on a planted file.
+Stand-ins
 for `wine`, `wineserver`, `open` and the like fail the run if a check starts one. Under a job
 runner (`JOB_ID` and `JOB_ROOT` set) both scripts refuse an output folder that isn't named (the
 suite's default is `/tmp/som-sandbox`) or lies in `/tmp` or `$TMPDIR`; the job's adapter puts it
