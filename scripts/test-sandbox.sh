@@ -1666,7 +1666,7 @@ if [ -x "$OLD_APP/Contents/Resources/som.sh" ]; then
   check "upgrade again: no Wine left running" test -z "$(sandbox_wine)"
   som uninstall >"$SANDBOX/uninstall2.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall2.txt"; bad "uninstall after upgrade"; }
   check "uninstall after upgrade: official install identical to stock" like_stock uninstall2
-  check "uninstall after upgrade: app files gone" eval 'for c in engine frameworks upgrade-backup prefix gamemode env install-manifest.json; do [ ! -e "$SOM/$c" ] || exit 1; done'
+  check "uninstall after upgrade: app files gone" eval '( for c in engine frameworks upgrade-backup prefix gamemode env install-manifest.json; do [ ! -e "$SOM/$c" ] || exit 1; done )'
 
   echo "== 14. this version's Uninstall of a $OLDV install (app updated, not reinstalled)"
   seed "$OLD_ENGINE" "$OLD_FW"
@@ -1744,6 +1744,11 @@ check "pipes: the same check negated fails" eval '! ( ! seq 1 200000 | piped -x 
 check "pipes: no check greps a pipe with grep -q" eval '! cat "$REPO/scripts/test-sandbox.sh" "$REPO"/scripts/fixtures/*.sh | grep -n "| *grep -q" | grep -v "^[0-9]*: *#" | piped .'
 check "pipes: no helper is defined twice (a later one would replace the earlier for every check after it)" \
   eval '[ -z "$(grep -h -o -E "^ *[A-Za-z_][A-Za-z0-9_]*\\(\\) *\\{" "$REPO/scripts/test-sandbox.sh" "$REPO"/scripts/fixtures/*.sh | sed -E "s/^ *//; s/\\(\\).*//" | sort | uniq -d)" ]'
+# (eval_exits: the lines whose eval string calls exit outside a subshell; check runs eval in this
+# shell, so the exit would end the suite with no FAIL line and no counts)
+# shellcheck source=scripts/fixtures/eval-exit.sh
+. scripts/fixtures/eval-exit.sh
+check "checks: no eval string calls exit outside a subshell (it would end the suite uncounted)" test -z "$(eval_exits "$REPO/scripts/test-sandbox.sh" "$REPO"/scripts/fixtures/*.sh)"
 
 echo "== 14b. the prefix comparison sees what changed"
 FP="$SANDBOX/fake-prefix"; rm -rf "$FP"; mkdir -p "$FP/drive_c/windows/system32"
@@ -1853,7 +1858,7 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   check "back to $PREVV: no Wine left running" test -z "$(sandbox_wine)"
   som uninstall >"$SANDBOX/uninstall4.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall4.txt"; bad "uninstall of $PREVV"; }
   check "this version's uninstall of $PREVV: official install identical to stock" like_stock uninstall4
-  check "this version's uninstall of $PREVV: app files gone (d9mt-ab.env too)" eval 'for c in engine prefix gamemode env install-manifest.json d9mt-ab.env; do [ ! -e "$SOM/$c" ] || exit 1; done'
+  check "this version's uninstall of $PREVV: app files gone (d9mt-ab.env too)" eval '( for c in engine prefix gamemode env install-manifest.json d9mt-ab.env; do [ ! -e "$SOM/$c" ] || exit 1; done )'
 else
   echo "== 15 skipped: no previous release at $PREV_APP (PREV_APP)"
 fi
@@ -1904,7 +1909,7 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: a Reinstall after it has nothing more to remove" eval 'grep -q "^@done" "$SANDBOX/dev-reinstall.txt" && ! grep -q -e "^Removed a development build" -e "^Removed the launcher-update guard" "$SANDBOX/dev-reinstall.txt"'
   som uninstall >"$SANDBOX/uninstall5.txt" 2>&1 || { tail -20 "$SANDBOX/uninstall5.txt"; bad "uninstall after $DEVV"; }
   check "uninstall after $DEVV: official install identical to stock" like_stock uninstall5
-  check "uninstall after $DEVV: app files and caches gone" eval 'for c in engine prefix gamemode env settings.conf install-manifest.json d9mt-ab.env dev-defaults; do [ ! -e "$SOM/$c" ] || exit 1; done; [ ! -e "$H/Library/Caches/SWTOR on Mac" ]'
+  check "uninstall after $DEVV: app files and caches gone" eval '( for c in engine prefix gamemode env settings.conf install-manifest.json d9mt-ab.env dev-defaults; do [ ! -e "$SOM/$c" ] || exit 1; done ) && [ ! -e "$H/Library/Caches/SWTOR on Mac" ]'
 elif [ "$CHANNEL" = release ]; then
   echo "== 16 skipped: no development build at $DEV_APP (DEV_APP)"
 fi
