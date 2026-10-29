@@ -1541,10 +1541,22 @@ fetch_mode alwaysdrop alwaysdrop fetch-stopped
 check "download: a connection that keeps dropping (both addresses): stopped at 192 of 224 MB, the part kept" eval 'grep -q "^@error The download of Wine engine stopped at 192 of 224 MB" "$SANDBOX/fetch-stopped.txt" && [ "$(stat -f %z "$DLC/$ENGINE_FILE.part")" = 201326592 ]'
 fetch_mode ok ok fetch-resumed
 check "download: the next try continues where it stopped" eval 'grep -q "^@done " "$SANDBOX/fetch-resumed.txt" && grep -q "resuming at 201326592 of" "$SANDBOX/fetch-resumed.log" && [ ! -e "$DLC/$ENGINE_FILE.part" ]'
-# (outside the sandbox: against the real home, as a dry run; what it said is kept in
-# fetch-real.txt with the time, for a look if it fails)
-(unset SWTOR_ON_MAC_ROOT; date '+%F %T'; SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$SOMSH" fetch-engine 2>&1 && echo "status 0" || echo "status $?") >"$SANDBOX/fetch-real.txt" 2>&1 || true
-check "download: only the sandbox may name another server (the real one stays on the pinned URLs)" grep -q "verified download in the cache\|download $(val ENGINE_URL "$SOMSH")" "$SANDBOX/fetch-real.txt"
+# Only a sandbox may point the download at another server: outside one (SWTOR_ON_MAC_ROOT unset)
+# som.sh must take the pinned URL whatever SWTOR_ON_MAC_ENGINE_URL says. Run with an empty home
+# of its own (HOME), never the real one: a dry run, what it said kept in fetch-real.txt.
+EH="$SANDBOX/empty-home"; rm -rf "$EH"; mkdir -p "$EH"
+fetch_outside() { # <som.sh> <out>: a dry-run fetch-engine outside a sandbox, in the empty home
+  (unset SWTOR_ON_MAC_ROOT; date '+%F %T'; HOME="$EH" SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$1" fetch-engine 2>&1 && echo "status 0" || echo "status $?") >"$2" 2>&1 || true
+}
+fetch_outside "$SOMSH" "$SANDBOX/fetch-real.txt"
+check "download: only the sandbox may name another server (the real one stays on the pinned URLs; an empty home)" grep -q "^\[dry-run\] download $(val ENGINE_URL "$SOMSH") " "$SANDBOX/fetch-real.txt"
+check "download: that check ran in its empty home, not the real one" eval 'grep -qF "$EH/Library/Caches/SWTOR on Mac/downloads/" "$SANDBOX/fetch-real.txt" && ! grep -qF "$HOME/Library" "$SANDBOX/fetch-real.txt"'
+# (the check against a som.sh that would take the URL outside a sandbox too: it must fail there)
+BR="$SANDBOX/res-bad"; rm -rf "$BR"; cp -cR "$APP/Contents/Resources" "$BR"
+sed -i '' 's/if \[ -n "\$ROOT" \]; then url=/if true; then url=/' "$BR/som.sh"
+fetch_outside "$BR/som.sh" "$SANDBOX/fetch-bad.txt"
+check "download: a som.sh that took the URL outside a sandbox would fail that check" eval '! grep -q "^\[dry-run\] download $(val ENGINE_URL "$SOMSH") " "$SANDBOX/fetch-bad.txt" && grep -q "127.0.0.1:1/x/y" "$SANDBOX/fetch-bad.txt"'
+rm -rf "$BR"
 kill "$fserver" 2>/dev/null || true; wait "$fserver" 2>/dev/null || true
 rm -rf "$DLC"
 
