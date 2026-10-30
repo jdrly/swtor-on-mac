@@ -52,6 +52,11 @@ performance. A setting you choose is kept through updates and Reinstall.
 - duration, median and 1%-low fps, the seconds below 58 fps;
 - frames over 33 ms and 50 ms;
 - hitches, split into d9mt's and the game's, and d9mt's top causes;
+- the frame rate, frame times and hitches count only the seconds the game window showed the
+  game (visible on the active Space, d9mt's `MtlPresenter: ... visibility` lines), leaving out
+  1 s around each change: d9mt slows Present down while the window is hidden (Cmd-Tab, another
+  Space, minimized). The hidden seconds get a line of their own (`window hidden or switching`),
+  and `with the hidden seconds` gives the average over every second, as earlier reports did;
 - compile waits and the memory peak;
 - render passes and the attachment traffic d9mt saved, and (0.0.6 and later) the
   render thread's CPU time in that optimization and the clears per frame, to tell its cost

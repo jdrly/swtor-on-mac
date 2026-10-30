@@ -18,6 +18,10 @@
 #   STATS     once a second (d9mt 0.0.6 dev and later): fps, frame times, slow frames, passes,
 #             attachment loads/stores, compiles, Metal's allocated memory; from 0.0.6-dev.3 also
 #             the render thread's CPU time in the attachment optimization and the clears
+#   MtlPresenter visibility  (0.1.0 and later) the game window's visibility changes (0x3:
+#             visible on the active Space). The frame rate, frame times and hitches count only
+#             the seconds it showed the game, 1 s around each change left out (Cmd-Tab, a Space
+#             switch: d9mt throttles Present while hidden); the hidden seconds get their own line
 #   HITCH     each frame over 50 ms: d9mt's time in it and by what, or the game's
 #   COMPILE   render-thread frames with compiles or over 33 ms (shader/pipeline waits)
 #   DIAG MEM  every 256 frames: Metal's allocated memory
@@ -92,6 +96,48 @@ analyze() {
       qs(a, lo, last - 1); qs(a, last + 1, hi)
     }
     function pct(a, n, p,    k) { if (!n) return ""; k = int((n - 1) * p + 0.5) + 1; return a[k] }
+    function hex(s,    i, n) { n = 0; s = tolower(s); for (i = 1; i <= length(s); i++) n = n * 16 + index("0123456789abcdef", substr(s, i, 1)) - 1; return n }
+    # the presenter shows the game: visible, on the active Space, not in the Dock (d9mt'"'"'s isVisible)
+    function shown(v) { return v % 2 == 1 && int(v / 2) % 2 == 1 && int(v / 4) % 2 == 0 }
+    BEGIN { vs = -1; wstart = -1; useg = 1 }
+
+    # Pass 1 (the log is read twice): which STATS seconds the window was hidden or switching in.
+    # d9mt logs "MtlPresenter: <time> visibility 0x3 -> 0x0" from Present, where it also counts
+    # the frames of STATS, so a line between "STATS t=N-1" and "STATS t=N" changed second N
+    # (STATS has no wall-clock time: t is seconds since the first Present). Window k is the k-th
+    # STATS line; bad[k]: the state wasn'"'"'t "shown" all through it.
+    NR == FNR {
+      if ($0 ~ / STATS t=/) {
+        t1 = num(field("t")); reset = nw && t1 < p1T; p1T = t1
+        nw++
+        bad[nw] = wbad || (wstart >= 0 && !shown(wstart))
+        if (wstart < 0) unk[nw] = 1
+        wbad = 0
+        # a second device: its presenter logs no first state, the next line'"'"'s "from" tells it
+        if (reset) { vs = -1; unk[nw] = 1; useg = nw }
+        wstart = vs
+      } else if ($0 ~ /MtlPresenter: .*visibility 0x[0-9a-fA-F]+ -> 0x[0-9a-fA-F]+/) {
+        l = $0; sub(/.*visibility 0x/, "", l)
+        pv = l; sub(/[^0-9a-fA-F].*/, "", pv); pv = hex(pv)
+        nv = l; sub(/^[^>]*> 0x/, "", nv); sub(/[^0-9a-fA-F].*/, "", nv); nv = hex(nv)
+        if (vs < 0) {
+          # the state since the start (or the device'"'"'s start) was this line'"'"'s "from"
+          for (vw = useg; vw <= nw; vw++) if (unk[vw] && !shown(pv)) bad[vw] = 1
+          if (wstart < 0) wstart = pv
+        } else if (pv != vs || index($0, "earlier lines suppressed")) {
+          # d9mt'"'"'s limiter left lines out: unknown since the last line
+          for (vw = lastvw; vw <= nw; vw++) bad[vw] = 1
+        }
+        vs = nv; wbad = 1; lastvw = nw + 1
+      }
+      next
+    }
+    # Pass 2: hid[k]: window k, or the one before or after it, was bad (1 s around a change)
+    !p2 {
+      p2 = 1
+      bad[nw + 1] = wbad || (wstart >= 0 && !shown(wstart))
+      for (vw = 1; vw <= nw + 1; vw++) hid[vw] = bad[vw] || bad[vw - 1] || bad[vw + 1]
+    }
 
     /D9MT: pipeline wait budget/ { budget = $0; sub(/.*budget /, "", budget); sub(/ per frame.*/, "", budget) }
     /D9MT: attachment load\/store optimization off/ { attoff = 1 }
@@ -162,13 +208,19 @@ analyze() {
       t = num(field("t"))
       if (t < lastT) { resets++ }        # a second device: counted on
       lastT = t
+      kw++
       if (t <= skip) next
       fps = num(field("fps")); split(field("ms"), ms, "/")
-      ns++; f[ns] = fps
-      secs++; frames += fps; ftime += num(ms[1]) * fps
-      if (fps < 58) below58++
-      p99[ns] = num(ms[2]); if (num(ms[3]) > maxft) maxft = num(ms[3])
-      s33 += num(field("slow33")); s50 += num(field("slow50"))
+      nall++; frames += fps
+      # the frame rate and frame times: seconds the window showed the game only
+      if (hid[kw]) { hsecs++; hframes += fps }
+      else {
+        ns++; f[ns] = fps
+        vframes += fps; ftime += num(ms[1]) * fps
+        if (fps < 58) below58++
+        p99[ns] = num(ms[2]); if (num(ms[3]) > maxft) maxft = num(ms[3])
+        s33 += num(field("slow33")); s50 += num(field("slow50"))
+      }
       rp += num(field("rp")) * fps; skp += num(field("skip")) * fps; cb += num(field("cb")) * fps
       dr += num(field("draws")) * fps; rst += num(field("restore")) * fps
       saved += num(field("savedMiB")) * fps
@@ -187,6 +239,7 @@ analyze() {
       next
     }
     / HITCH frame=/ {
+      if (hid[kw + 1]) next    # in the second the next STATS line closes
       nh++
       dt = num(field("dtMs")); hitchMs += dt
       in9 = num(field("inD9mtMs"))
@@ -279,19 +332,23 @@ analyze() {
       next
     }
     END {
-      print "stats=" ns + 0
-      if (ns) {
-        qs(f, 1, ns); qs(p99, 1, ns)
-        printf "duration=%d\n", secs
-        printf "frames=%d\n", frames
-        printf "fps_avg=%.1f\n", frames / secs
-        printf "fps_median=%.1f\n", pct(f, ns, 0.5)
-        printf "fps_p1=%.1f\n", pct(f, ns, 0.01)
-        printf "below58=%.1f\n", 100 * below58 / ns
-        printf "ft_avg=%.2f\n", ftime / (frames ? frames : 1)
-        printf "ft_p99_median=%.1f\n", pct(p99, ns, 0.5)
-        printf "ft_max=%.1f\n", maxft
-        printf "slow33=%d\nslow50=%d\n", s33, s50
+      print "stats=" nall + 0
+      if (nall) {
+        printf "duration=%d\n", nall
+        if (hsecs) printf "hidden=%d s, not counted below (%.1f fps)\n", hsecs, hframes / hsecs
+        if (ns) {
+          qs(f, 1, ns); qs(p99, 1, ns)
+          printf "frames=%d\n", vframes
+          printf "fps_avg=%.1f\n", vframes / ns
+          if (hsecs) printf "fps_avg_all=%.1f\n", frames / nall
+          printf "fps_median=%.1f\n", pct(f, ns, 0.5)
+          printf "fps_p1=%.1f\n", pct(f, ns, 0.01)
+          printf "below58=%.1f\n", 100 * below58 / ns
+          printf "ft_avg=%.2f\n", ftime / (vframes ? vframes : 1)
+          printf "ft_p99_median=%.1f\n", pct(p99, ns, 0.5)
+          printf "ft_max=%.1f\n", maxft
+          printf "slow33=%d\nslow50=%d\n", s33, s50
+        }
         if (frames) {
           printf "rp=%.1f\nskip=%.1f\ncb=%.1f\ndraws=%.0f\nrestore=%.2f\n", rp / frames, skp / frames, cb / frames, dr / frames, rst / frames
           printf "saved_mib_frame=%.1f\n", saved / frames
@@ -409,7 +466,7 @@ analyze() {
         if (ngc) printf "rawmouse_gc_rate=%d/s median (seconds with GCMouse moves: %d)\n", pct(gcs, ngc, 0.5), ngc
         printf "rawmouse_calibration=%d GCMouse device(s), %s pixels/count, speed %s\n", rmdev, (rmppc == "" ? "not measured" : rmppc), rmspeed
       }
-    }' "$1"
+    }' "$1" "$1"
 }
 
 get() { sed -n "s/^$1=//p" "$2" | head -1; }
@@ -437,8 +494,10 @@ report() {
   [ "$SKIP" -gt 0 ] && echo "  (first $SKIP s left out)"
   row "SWTOR on Mac, Wine engine, d9mt" build
   row "Seconds with STATS lines" duration
+  row "  window hidden or switching" hidden
   row "Frames" frames
   row "FPS: average" fps_avg
+  row "  with the hidden seconds" fps_avg_all
   row "FPS: median second" fps_median
   row "FPS: 1% low (worst seconds)" fps_p1
   row "Seconds below 58 fps (%)" below58
