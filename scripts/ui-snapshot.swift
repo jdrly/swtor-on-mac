@@ -197,6 +197,13 @@ func shots(_ dir: URL) async {
     capture(alert.window, to: dir.appendingPathComponent("logs-collected-\(dark ? "dark" : "light").png"), backdrop: true)
     alert.window.close()
   }
+  // the unofficial-fan-project notice (its popover's content), for its Discord link
+  for dark in [true, false] {
+    let win = window(NoticeText().padding(20).frame(width: 380), size: CGSize(width: 380, height: 330), dark: dark)
+    await settle(1.0)
+    capture(win, to: dir.appendingPathComponent("notice-\(dark ? "dark" : "light").png"))
+    win.close()
+  }
 }
 
 // Collect Logs…' alert, laid out and shown on the virtual display (not runModal, which centers

@@ -552,6 +552,9 @@ final class PidSet: @unchecked Sendable {
 
 @MainActor
 enum AppActions {
+  // Where players get help: a post in #swtor-on-mac-issues there (the README's invite)
+  static let discord = URL(string: "https://discord.gg/AnV3fZWz2b")!
+
   // The standard About panel with the credits and component versions.
   static func showAbout(credits: [String: String]) {
     let centered = NSMutableParagraphStyle()
@@ -563,7 +566,9 @@ enum AppActions {
       "Runs the official SWTOR Mac app on d9mt (Direct3D 9 on Metal)\n"
       + "Developed by \(credits["author"] ?? "Jan Drlý")\n\n"
       + disclaimer + "\n"
-      + "For help: Pharaphobia on Discord or a GitHub issue.\n", attributes: body)
+      + "For help, create a post in #swtor-on-mac-issues on the SWTOR on Mac Discord and tag "
+      + "@Pharaphobia, or open a GitHub issue.\n", attributes: body)
+    text.addAttribute(.link, value: discord, range: (text.string as NSString).range(of: "SWTOR on Mac Discord"))
     for key in ["repo", "github"] {
       guard let url = credits[key], !url.isEmpty, let link = URL(string: url) else { continue }
       var attributes = body
@@ -686,11 +691,11 @@ final class LogCollector {
       alert.messageText = "Logs collected"
       alert.informativeText = "\((zip as NSString).lastPathComponent) is in your \(folder) folder. Create a post in "
         + "#swtor-on-mac-issues on the SWTOR on Mac Discord with the zip and a short description of the "
-        + "problem, and tag @Pharaphobia. SWTOR's customer support can't help with SWTOR on Mac, so "
+        + "problem, and tag @Pharaphobia. Broadsword's customer support can't help with SWTOR on Mac, so "
         + "please don't send it there.\n\n"
         + "The zip has the crash reports of the game, Wine and SWTOR on Mac from the last 7 days, so "
         + "you don't have to look for them. It has no account names or passwords."
-      alert.link = ("SWTOR on Mac Discord", URL(string: "https://discord.gg/AnV3fZWz2b")!)
+      alert.link = ("SWTOR on Mac Discord", AppActions.discord)
       // Return, explicitly: on macOS 26 the first button has no key equivalent until runModal
       alert.addButton(withTitle: "Close").keyEquivalent = "\r"
       alert.addButton(withTitle: "Show in Finder")
