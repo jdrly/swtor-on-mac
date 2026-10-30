@@ -677,18 +677,20 @@ final class LogCollector {
     }!
   }
 
-  // Close (Return) and Show in Finder; with two buttons, macOS 26 lays the alert out wide, icon
-  // beside the text (also for scripts/ui-snapshot.swift)
+  // Close (Return) and Show in Finder; with two buttons and this much text, macOS 26 lays the
+  // alert out wide, icon beside the text (also for scripts/ui-snapshot.swift)
   static func alert(zip: String?, problem: String?) -> NSAlert {
-    let alert = NSAlert()
+    let alert = LinkAlert()
     if let zip {
       let folder = FileManager.default.displayName(atPath: (zip as NSString).deletingLastPathComponent)
       alert.messageText = "Logs collected"
-      alert.informativeText = "\((zip as NSString).lastPathComponent) is in your \(folder) folder. Send it to "
-        + "Pharaphobia on Discord with a short description of the problem, or attach it to a GitHub "
-        + "issue. SWTOR's customer support can't help with SWTOR on Mac, so please don't send it there.\n\n"
+      alert.informativeText = "\((zip as NSString).lastPathComponent) is in your \(folder) folder. Create a post in "
+        + "#swtor-on-mac-issues on the SWTOR on Mac Discord with the zip and a short description of the "
+        + "problem, and tag @Pharaphobia. SWTOR's customer support can't help with SWTOR on Mac, so "
+        + "please don't send it there.\n\n"
         + "The zip has the crash reports of the game, Wine and SWTOR on Mac from the last 7 days, so "
         + "you don't have to look for them. It has no account names or passwords."
+      alert.link = ("SWTOR on Mac Discord", URL(string: "https://discord.gg/AnV3fZWz2b")!)
       // Return, explicitly: on macOS 26 the first button has no key equivalent until runModal
       alert.addButton(withTitle: "Close").keyEquivalent = "\r"
       alert.addButton(withTitle: "Show in Finder")
@@ -700,6 +702,47 @@ final class LogCollector {
       alert.addButton(withTitle: "OK")
     }
     return alert
+  }
+}
+
+// An alert with a link in its text. NSAlert's informativeText is plain, and with the text in an
+// accessory view instead macOS 26 stacks the buttons under a narrow column (it lays an alert out
+// wide only for a long informativeText). So after each layout the informative text field is
+// covered by a text view with the same text and the link: system link colour, pointing hand,
+// opens in the browser. If a macOS lays alerts out without that field, the text stays plain.
+final class LinkAlert: NSAlert {
+  var link: (phrase: String, url: URL)?
+  private weak var linked: NSTextView?
+
+  override func layout() {
+    linked?.removeFromSuperview()
+    super.layout()
+    guard let link, let field = Self.field(showing: informativeText, in: window.contentView!),
+          let superview = field.superview else { return }
+    let text = NSMutableAttributedString(attributedString: field.attributedStringValue)
+    text.addAttribute(.link, value: link.url, range: (text.string as NSString).range(of: link.phrase))
+    let view = NSTextView()
+    view.isEditable = false
+    view.drawsBackground = false
+    view.textContainerInset = .zero
+    view.textContainer?.lineFragmentPadding = 0  // the lines start where the field's do
+    view.textStorage?.setAttributedString(text)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    superview.addSubview(view)
+    NSLayoutConstraint.activate([
+      view.leadingAnchor.constraint(equalTo: field.leadingAnchor),
+      view.trailingAnchor.constraint(equalTo: field.trailingAnchor),
+      view.topAnchor.constraint(equalTo: field.topAnchor),
+      view.bottomAnchor.constraint(equalTo: field.bottomAnchor),
+    ])
+    field.isHidden = true
+    linked = view
+  }
+
+  private static func field(showing text: String, in view: NSView) -> NSTextField? {
+    if let field = view as? NSTextField, field.stringValue == text { return field }
+    for sub in view.subviews { if let field = field(showing: text, in: sub) { return field } }
+    return nil
   }
 }
 

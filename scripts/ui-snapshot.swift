@@ -13,7 +13,8 @@
 //       window is not in front: on the virtual display windows count as occluded), game (the
 //       warp asked to run, but SWTOR runs), closed (no window)
 //   ui-snapshot bench <frames>                        the warp's drawing alone, off-screen
-//   ui-snapshot alertkeys                             which button Esc and Return press in the Logs collected alert
+//   ui-snapshot alertkeys                             which button Esc and Return press in the Logs collected alert,
+//                                                     and its Discord link
 
 import AppKit
 import SwiftUI
@@ -253,6 +254,20 @@ func alertKeys() async {
   }
   let alert = LogCollector.alert(zip: "/Desktop/x.zip", problem: nil)
   print("Return: \(alert.buttons.first { $0.keyEquivalent == "\r" }?.title ?? "no button")")
+  // LinkAlert: after a second layout, still one text view with the link over a hidden field
+  alert.layout()
+  alert.layout()
+  func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+  let views = all(alert.window.contentView!)
+  let links = views.compactMap { $0 as? NSTextView }.compactMap { view -> URL? in
+    var url: URL?
+    view.textStorage?.enumerateAttribute(.link, in: NSRange(location: 0, length: view.textStorage!.length)) { v, _, _ in
+      if let v = v as? URL { url = v }
+    }
+    return url
+  }
+  let hidden = views.compactMap { $0 as? NSTextField }.filter { $0.isHidden && $0.stringValue == alert.informativeText }.count
+  print("Link: \(links.map(\.absoluteString)) over \(hidden) hidden text field")
 }
 
 // The installed main window in dark, for comparing the warp's variants.
