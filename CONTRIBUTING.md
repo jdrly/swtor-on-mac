@@ -31,8 +31,10 @@ review.
 2. **[docs/adr/](docs/adr/index.md)**: accepted decisions. An ADR with status `accepted` is the
    target contract even when the code differs. Record the difference as a gap; **don't weaken an
    ADR to match the current code**.
-3. **[README.md](README.md)**: what the app does today, its settings, what it changes on disk,
-   how it works, how it is built, tested and released.
+3. **[README.md](README.md)** and its pages in **[docs/](docs)**: what the app does today, its
+   settings ([docs/settings.md](docs/settings.md)), what it changes on disk and how it works
+   ([docs/how-it-works.md](docs/how-it-works.md)), how it is built, tested and released
+   ([docs/building.md](docs/building.md), [docs/testing.md](docs/testing.md)).
 4. **[release-notes/README.md](release-notes/README.md)**: the release notes format.
 5. **The code and its tests**: `src/som.sh` (the installer), `src/wine-wrapper.sh`,
    `src/native` (the window), `scripts/test-sandbox.sh`.
@@ -55,7 +57,7 @@ If two sources conflict, report the conflict instead of silently choosing one.
 ## Branches
 
 - Never push directly to `main`. Every change goes through a pull request into `main`.
-  Development builds are cut from `dev` (README, *Releasing*).
+  Development builds are cut from `dev` (docs/building.md, *Releasing*).
 - Name the branch `<type>/<issue>-<short-description>`, in English `lower-case-kebab-case`, for
   example `fix/42-engine-download-resume`. Types: `feat`, `fix`, `perf`, `test`, `chore`,
   `docs`. A change without an issue (a typo) leaves out the number.
@@ -77,7 +79,7 @@ If two sources conflict, report the conflict instead of silently choosing one.
 - Fill in the [template](.github/PULL_REQUEST_TEMPLATE.md), with `Closes #<issue>`.
 - Keep the PR a **draft** until it meets the Definition of Done.
 - Keep changes focused: don't mix a change with unrelated refactoring, which gets its own issue
-  and PR. Update the README when behaviour changes.
+  and PR. Update the README, or its page in `docs/`, when behaviour changes.
 - **Review and merge.** Every PR gets an **independent agent review** (preferably GPT-6.1-Sol)
   by an agent that didn't write the change; its verdict goes into the PR, as a comment or in the
   description. The PR is **squash-merged**, with the PR title as the commit subject, once that
@@ -125,9 +127,9 @@ A change is done only when all of these hold:
 - [ ] A change on the game's path (the wrapper, `env`, the engine's parts, the d9mt pin) is
       nothing measurably slower: session reports of the same scene before and after
       (`session-report.sh --compare`).
-- [ ] A new d9mt pin changes `scripts/build-d9mt.sh`, `prebuilt/d9mt` and the README's *Pinned
-      components* together.
-- [ ] The README describes the new behaviour. Terms follow `CONTEXT.md`; a new term is added in
+- [ ] A new d9mt pin changes `scripts/build-d9mt.sh`, `prebuilt/d9mt`, the README's *Pinned
+      components* and *d9mt pin* in `docs/building.md` together.
+- [ ] The README, or its page in `docs/`, describes the new behaviour. Terms follow `CONTEXT.md`; a new term is added in
       the same PR.
 - [ ] A changed decision has an ADR in the same PR, or links an existing `accepted` ADR.
 - [ ] The independent agent review (preferably GPT-6.1-Sol) has no open `Blocker` or `High`, and
@@ -140,8 +142,8 @@ A change is done only when all of these hold:
 - Include game files, Broadsword's launcher or Wine, or anything from your SWTOR account
   (account names, logs with the launcher's command line) in an issue or a PR.
 - Test against the real install when the sandbox can do it: use `SWTOR_ON_MAC_ROOT` and
-  `SWTOR_ON_MAC_DRY_RUN` (README, *Testing without touching the system*).
-- Change anything in Broadsword's install beyond what the README's *What it changes* lists (the
+  `SWTOR_ON_MAC_DRY_RUN` ([docs/testing.md](docs/testing.md)).
+- Change anything in Broadsword's install beyond what *What it changes* in [docs/how-it-works.md](docs/how-it-works.md) lists (the
   two preloaders and `bin-real/`; Uninstall's copy of the game settings back).
 - Bundle or mirror the Wine engine (ADR-0002).
 - Put a development build into the update feed or a regular release.

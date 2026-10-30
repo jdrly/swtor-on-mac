@@ -18,8 +18,8 @@ Closes #
 - [ ] Install stays all-or-nothing, and Uninstall still puts Broadsword's folder back byte for byte apart from the game settings it copies back.
 - [ ] No log, `env` or Collect Logs file gains account names, e-mail addresses, the user name or the launcher's command line.
 - [ ] A change on the game's path (wrapper, `env`, the engine's parts, the d9mt pin) is nothing measurably slower: session reports before and after (`session-report.sh --compare`).
-- [ ] A new d9mt pin updates `scripts/build-d9mt.sh`, `prebuilt/d9mt` and the README's *Pinned components* together.
-- [ ] The README describes the new behaviour; terms follow `CONTEXT.md`, and a new term is added in this PR.
+- [ ] A new d9mt pin updates `scripts/build-d9mt.sh`, `prebuilt/d9mt`, the README's *Pinned components* and *d9mt pin* in `docs/building.md` together.
+- [ ] The README, or its page in `docs/`, describes the new behaviour; terms follow `CONTEXT.md`, and a new term is added in this PR.
 - [ ] A changed decision has an ADR in this PR, or links an existing `accepted` ADR.
 - [ ] The independent agent review (preferably GPT-6.1-Sol) has no open `Blocker` or `High`, and its verdict is in the PR.
 - [ ] The issue's UAT scenario has been clicked through and ticked off in the issue.

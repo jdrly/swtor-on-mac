@@ -5,8 +5,8 @@ one only after this one meets the Definition of Done in [`CONTRIBUTING.md`](CONT
 
 The documentation is the source of truth and should answer scope and design questions:
 [`CONTEXT.md`](CONTEXT.md), the decisions in [`docs/adr/index.md`](docs/adr/index.md) and the
-[README](README.md) (behaviour, what the app changes on disk, how it works, building, testing,
-releasing). Look the answer up there before asking or choosing an approach of your own.
+[README](README.md) with its pages in [`docs/`](docs) (behaviour, what the app changes on disk,
+how it works, building, testing, releasing). Look the answer up there before asking or choosing an approach of your own.
 
 - Test the installer in a sandbox (`SWTOR_ON_MAC_ROOT`, `SWTOR_ON_MAC_DRY_RUN`,
   `scripts/test-sandbox.sh`), never against the real install, and never start the game or a Wine
