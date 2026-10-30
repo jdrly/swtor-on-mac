@@ -30,8 +30,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 REPO="${D9MT_SRC:-https://github.com/jdrly/d9mt.git}"
-COMMIT=8b22a9915eec918d0b2ca380125a4c5b5f51247c
+COMMIT=b532e9c0f04b36913b8fe43bd9580c238d177e11
 MACOS_MIN=26.0
+# The AIR cache lineage the bridge must report (d9mt ADR-0006): with it, players keep the shaders
+# compiled by that release. Another Xcode or LLVM that changes the AIR codegen's code gives
+# winemetal.so a new AIR codegen id and every player a full shader recompile, so the build stops.
+AIR_LINEAGE=0.1.5.1
 V="${D9MT_WORK:-/tmp/swtor-on-mac-d9mt}"
 OUT="$ROOT/prebuilt/d9mt"
 export PATH="/opt/homebrew/bin:$PATH"   # the d9mt scripts need bash >= 4.3
@@ -64,6 +68,11 @@ if newer_than_min "$llvm_min"; then
 fi
 echo "[d9mt] bridge"
 SMOKE=0 scripts/build-bridge.sh >build-bridge.log 2>&1 || { tail -20 build-bridge.log; exit 1; }
+if ! grep -q "(lineage $AIR_LINEAGE: " build/bridge/air-codegen-id.txt 2>/dev/null; then
+  echo "winemetal.so's AIR codegen is not lineage $AIR_LINEAGE: $(cat build/bridge/air-codegen-id.txt 2>/dev/null || echo 'no build/bridge/air-codegen-id.txt')" >&2
+  echo "(every player's AIR cache would recompile; build with the toolchain the lineage was proven with)" >&2
+  exit 1
+fi
 echo "[d9mt] driver (x86_64)"
 ARCH=x64 scripts/build-driver.sh >build-driver-x64.log 2>&1 || { tail -20 build-driver-x64.log; exit 1; }
 
@@ -91,5 +100,5 @@ if [ "$compat" -eq 0 ] || [ "$compat" -lt "$newer" ]; then
   echo "d3d9.dll: $newer metallibs for macOS newer than $MACOS_MIN but $compat Compat ones" >&2
   exit 1
 fi
-echo "[d9mt] built for macOS $MACOS_MIN (winemetal.so minos $so_min)"
+echo "[d9mt] built for macOS $MACOS_MIN (winemetal.so minos $so_min); $(cat build/bridge/air-codegen-id.txt)"
 echo "[d9mt] prebuilt/d9mt: $(ls "$OUT" | tr '\n' ' ')"
