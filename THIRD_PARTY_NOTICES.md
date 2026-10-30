@@ -26,7 +26,8 @@ SWTOR on Mac: they come from the official install from [swtor.com](https://www.s
 
 The same d9mt files and license texts are in this repository under [`prebuilt/d9mt`](prebuilt/d9mt)
 (built by `scripts/build-d9mt.sh`), the Mac driver's under [`prebuilt/winemac`](prebuilt/winemac)
-(built by `scripts/build-winemac.sh`), the fonts and their licenses under [`src/fonts`](src/fonts); Sparkle is downloaded by `build.sh` at a pinned version
+(built by `scripts/build-winemac.sh`), ntdll's under [`prebuilt/ntdll`](prebuilt/ntdll) (built by
+`scripts/build-ntdll.sh`), the fonts and their licenses under [`src/fonts`](src/fonts); Sparkle is downloaded by `build.sh` at a pinned version
 and sha256.
 
 ## Downloaded at install time (not in the app, not redistributed)

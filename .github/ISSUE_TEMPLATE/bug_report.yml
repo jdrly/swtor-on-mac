@@ -89,7 +89,22 @@ body:
     attributes:
       label: SWTOR on Mac version
       description: SWTOR on Mac > About SWTOR on Mac.
-      placeholder: "0.1.3"
+      placeholder: "0.1.5.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: debug-logging
+    attributes:
+      label: Was Debug Logging on when it happened?
+      description: >-
+        Settings > Debug Logging. With it on, d9mt also measures every frame (`D9MT_PROFILE`),
+        so frame rates and frame times differ from a game without it. Development builds turn
+        it on by default. Either is fine for a report; we only need to know which.
+      options:
+        - I don't know
+        - "Yes, Debug Logging was on"
+        - "No, Debug Logging was off"
     validations:
       required: true
 
