@@ -112,6 +112,9 @@ final class Installer {
   var endingLeftovers = false
   // som.sh rehook runs (the launcher hook check when the app opens, and before Play)
   var rehooking = false
+  // when macOS ended what the launcher left running because it is not allowed in the
+  // background, in the last 24 hours (checkBackground)
+  var backgroundEnds: [String] = []
   // the launcher or the game runs (NSWorkspace; the Play button brings it to the front), and
   // the Play button is opening the official app (Play.swift)
   var runningLauncher = false
@@ -215,6 +218,40 @@ final class Installer {
       onIdle?()
     }
   }
+
+  // When the app opens: did macOS end what the launcher left running when it quit (the game's
+  // Wine with it), because the launcher is not allowed in the background (System Settings >
+  // Login Items > App Background Activity)? som.sh btm-check reads the last 24 hours of macOS's
+  // log (a few seconds, ended after 60 s at the latest; off the main thread). The window says so until the newest of those times
+  // has been dismissed.
+  func checkBackground() {
+    let script = script
+    Task {
+      backgroundEnds = Installer.parseBackgroundEnds(await Installer.capture(script: script, arguments: ["btm-check", "24h"]))
+    }
+  }
+
+  // som.sh btm-check: one "YYYY-MM-DD HH:MM:SS" line per end, oldest first
+  nonisolated static func parseBackgroundEnds(_ output: String) -> [String] {
+    output.split(separator: "\n").map(String.init).filter {
+      $0.range(of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$"#, options: .regularExpression) != nil
+    }
+  }
+
+  // (the times sort as text)
+  var showBackgroundNote: Bool {
+    guard let newest = backgroundEnds.last else { return false }
+    return newest > (UserDefaults.standard.string(forKey: Installer.backgroundDismissedKey) ?? "")
+  }
+
+  func dismissBackgroundNote() {
+    guard let newest = backgroundEnds.last else { return }
+    UserDefaults.standard.set(newest, forKey: Installer.backgroundDismissedKey)
+    backgroundEnds = []
+  }
+
+  static let backgroundDismissedKey = "backgroundEndDismissed"
+  static let loginItemsSettings = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!
 
   // som.sh rehook's last "@done", "@notice" or "@error" line
   nonisolated static func rehookAnswer(_ output: String) -> String {
@@ -751,6 +788,8 @@ struct SWTORonMacApp: App {
           // the launcher hook check (a launcher update may have replaced it while the app was
           // closed); it refreshes the status afterwards
           installer.rehook()
+          // did macOS end the game's Wine when the launcher quit (not allowed in the background)?
+          installer.checkBackground()
           settings.reload()
           // (not for the UI test script, which drives the window in the background)
           switch ProcessInfo.processInfo.environment["SWTOR_ON_MAC_UI_TEST"] {

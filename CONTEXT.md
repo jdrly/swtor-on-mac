@@ -151,6 +151,15 @@ SWTOR on Mac's logs and the official launcher's, account names, e-mail addresses
 and the Mac's name replaced and without the game's command line; a leak check leaves out a file
 that still has one (README, *Reporting problems*; `src/collect-logs.sh`).
 
+**App Background Activity**
+macOS's setting for the launcher, in System Settings > Login Items. When
+it is off, macOS ends what the launcher left running when it quits ~30 s after Play: the Wine
+session with it, so the game hangs without a window. `som.sh btm-check` finds that in macOS's log;
+the window, a notification at the next Play and Collect Logs say so (README, *Troubleshooting*,
+*How it works*; `src/som.sh`).
+_Avoid_: “BTM” (Background Task Management) in the window's text and release notes; it is fine in
+code.
+
 **Session report**
 `session-report.sh`: a summary of the last game session from `wine.log` (frame rate, hitches,
 compile waits, memory, d9mt's pipeline state cache); `--compare` puts two sessions side by side
