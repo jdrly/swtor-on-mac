@@ -1,7 +1,8 @@
 # Checks every pull request and every push to main: the scripts and workflows lint clean, and
 # the app builds. No secrets and read-only access; signing and notarizing happen only in
 # release.yml. (The installer's end-to-end test, scripts/test-sandbox.sh, needs the official
-# SWTOR Mac app installed, so it runs on a developer's Mac, not here.)
+# SWTOR Mac app installed, so it runs on a developer's Mac, not here; its fixture groups,
+# scripts/test-fixtures.sh, need neither that app nor Wine and run here on the built app.)
 name: Checks
 
 on:
@@ -93,3 +94,8 @@ jobs:
           play="$(SWTOR_ON_MAC_ROOT="$RUNNER_TEMP/sandbox" "dist/SWTOR on Mac.app/Contents/MacOS/SWTORonMac" --play-target)"
           echo "$play"
           grep -q '^unavailable The official SWTOR app was not found' <<<"$play"
+
+      # The fixture groups (all of them, with their negative controls) on the packaged app, in a
+      # new root of their own; the script removes it after a pass and keeps it after a failure.
+      - name: fixtures
+        run: FIXTURE_ROOT="$RUNNER_TEMP/fixtures" scripts/test-fixtures.sh "dist/SWTOR on Mac.app"
