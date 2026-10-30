@@ -65,7 +65,8 @@ fx_end() { # <name> <fail> <what to break: - | cp | mkdir | mv (and cp)>: the en
     case $3 in cp) cp() { return 1; } ;; mkdir) mkdir() { return 1; } ;; mv) cp() { return 1; }; mv() { return 1; } ;; esac
     job_sandbox_end 0 ) >"$D/$1.out" 2>&1
 }
-fx_ls() { (cd "$D/$1" && find . -type f | sort | sed 's|^\./||' | tr '\n' ' '); }
+# (in C order: a UTF-8 locale, as on GitHub's runners, sorts repro/broadsword… before repro/Logs)
+fx_ls() { (cd "$D/$1" && find . -type f | LC_ALL=C sort | sed 's|^\./||' | tr '\n' ' '); }
 fx_job_sandbox() {
   D=$1
   mkdir -p "$D"
