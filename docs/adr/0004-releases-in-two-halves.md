@@ -9,13 +9,13 @@ deciders: Jan Drlý
 ## Context
 
 The app updates itself with Sparkle, whose feed is signed with an EdDSA key (`SUPublicEDKey`);
-whoever holds the private key can ship code to every player (README, *Updates*). Releases also
+whoever holds the private key can ship code to every player (docs/updates.md). Releases also
 need the Developer ID signature and Apple's notarization.
 
 ## Decision
 
 - Sparkle's EdDSA key never leaves the maintainer's Mac, so a release comes in two halves
-  (README, *Releasing*):
+  (docs/building.md, *Releasing*):
   1. A `v<version>` tag starts the Release workflow, which runs only after approval in the
      `release` environment: it builds, signs and notarizes the app and creates a draft release
      with the DMG.
@@ -32,13 +32,13 @@ need the Developer ID signature and Apple's notarization.
 
 - No release can be published without the maintainer's Mac; CI alone can't ship an update.
 - A development build is never offered as an update; testers install it from the DMG, and the
-  next release is offered over it (README, *Development builds*).
+  next release is offered over it (docs/updates.md, *Development builds*).
 - Each development build's `CFBundleVersion` has to sort between the previous release and its
-  own (README, *Development builds*).
+  own (docs/updates.md, *Development builds*).
 
 ## Alternatives considered
 
 - **Signing the feed in CI**: rejected, because the EdDSA key would have to leave the Mac
-  (README, *Releasing*).
+  (docs/building.md, *Releasing*).
 - **Everything on the Mac** (`./build.sh && scripts/release.sh`): still possible without CI, but
-  not the normal path (README, *Releasing*).
+  not the normal path (docs/building.md, *Releasing*).

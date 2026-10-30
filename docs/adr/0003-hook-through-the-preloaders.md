@@ -9,8 +9,8 @@ deciders: Jan Drlý
 ## Context
 
 SWTOR on Mac works on top of the official app and must not change the game's files or the
-launcher (README, notice and *What it changes*). The launcher starts every
-Wine process through `bin/wine64`, which loads `bin/wine64-preloader` (README, *How it works*).
+launcher (README; docs/how-it-works.md, *What it changes*). The launcher starts every
+Wine process through `bin/wine64`, which loads `bin/wine64-preloader` (docs/how-it-works.md).
 Players must be able to go back to exactly what Broadsword ships.
 
 ## Decision
@@ -18,13 +18,13 @@ Players must be able to go back to exactly what Broadsword ships.
 - The wrapper (`src/wine-wrapper.sh`) is installed as `bin/wine64-preloader` and
   `bin/wine-preloader`; Broadsword's preloaders move, unchanged, to `bin-real/`, next to
   SWTOR on Mac's helpers `hold-launcher` and `setsid-exec`. Those are the changes Install makes in
-  Broadsword's install; `bin/wine64` stays the real program (README, *What it changes*;
+  Broadsword's install; `bin/wine64` stays the real program (docs/how-it-works.md, *What it changes*;
   `src/wine-wrapper.sh`). The prefix is only read (it is cloned once).
 - Without SWTOR on Mac's `env` or engine, the wrapper runs Broadsword's real preloader, so a
   half-removed setup still starts the game the official way.
 - Install is idempotent and all or nothing: it refuses while the launcher or the game runs,
   prepares everything in SWTOR on Mac's folders first, touches Broadsword's folder last, and rolls
-  back what it created if anything fails (README, *How it works*; `cmd_install` and
+  back what it created if anything fails (docs/how-it-works.md; `cmd_install` and
   `on_install_exit` in `src/som.sh`).
 - Another tool's wrapper is left alone unless the player confirms; SWTOR on Mac then keeps a copy
   in `backup/` (README, *Troubleshooting*).
@@ -37,15 +37,14 @@ Players must be able to go back to exactly what Broadsword ships.
 ## Consequences
 
 - A launcher update that replaces its Wine also removes the hook. The app's hook check puts it
-  back the next time the app opens, or the window offers *Repair the Launcher Hook* (README,
+  back the next time the app opens, or the window offers *Repair the Launcher Hook* (docs/how-it-works.md,
   *Launcher updates*; [ADR 0005](0005-no-background-helper.md), which replaced the launchd job
   that did this up to 0.1.3).
 - Every Wine process the launcher starts goes through the wrapper, not only the game's; the
-  wrapper has to handle `mac_wine`'s calls and the Wine session correctly (README, *How it
-  works*).
+  wrapper has to handle `mac_wine`'s calls and the Wine session correctly (docs/how-it-works.md).
 - The wrapper and `som.sh` run under macOS's `/bin/bash` 3.2, which the Checks workflow tests.
 - Uninstall, the manual removal steps and the tests have to stay in step with the install
-  (README, *Removing it by hand*).
+  (docs/how-it-works.md, *Removing it by hand*).
 
 ## Alternatives considered
 
