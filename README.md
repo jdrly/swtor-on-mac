@@ -92,7 +92,7 @@ showing its frames, that check cost about 1.5 % of the frame rate. 0.1.5 measure
 0.1.3 in the same test, and it checks every frame shown on screen.
 
 0.1.6 is in testing and has no release date. Its graphics driver, d9mt
-[`8b22a99`](https://github.com/jdrly/d9mt/tree/8b22a9915eec918d0b2ca380125a4c5b5f51247c), is
+[`b532e9c`](https://github.com/jdrly/d9mt/tree/b532e9c0f04b36913b8fe43bd9580c238d177e11), is
 already pinned on `main` and fixes three problems:
 
 - A black screen on macOS 26. d9mt tagged its compiled shaders with a Metal shader format version
@@ -105,6 +105,11 @@ already pinned on `main` and fixes three problems:
 - A frozen game after a GPU hang. When the GPU never finishes submitted work, d9mt writes
   `D9MT-GPU-HUNG` to `wine.log` after about 10 seconds and ends the game. Before, the game stayed
   frozen until you force quit it. See [jdrly/d9mt#53](https://github.com/jdrly/d9mt/pull/53).
+
+Updating from 0.1.5.1 keeps your compiled shaders on macOS 27: d9mt now keys its shader cache on
+the code that compiles them, and 0.1.6 compiles them to the same bytes, see
+[jdrly/d9mt#122](https://github.com/jdrly/d9mt/pull/122). On macOS 26 the shaders compile once
+more, because 0.1.5.1's were the ones macOS 26 rejected.
 
 0.1.6 also carries 0.1.5.1's background activity check, which `main` received in
 [#75](https://github.com/jdrly/swtor-on-mac/pull/75), and gives Collect Logs the run time and
@@ -436,11 +441,11 @@ that holds its EdDSA key, which never leaves that Mac. [docs/building.md](docs/b
 |---|---|---|
 | Wine engine `cx-26.3.0-8`, CrossOver 26.3 with Wine 11.0, x86_64 WoW64 | [athei/wine-build cx-26.3.0-8](https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
 | Sparkle 2.10.0, bundled | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
-| d9mt `8b22a99`, bundled in `prebuilt/d9mt` | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/8b22a9915eec918d0b2ca380125a4c5b5f51247c) | see `prebuilt/d9mt` |
+| d9mt `b532e9c`, bundled in `prebuilt/d9mt` | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/b532e9c0f04b36913b8fe43bd9580c238d177e11) | see `prebuilt/d9mt` |
 | Wine sources for the Mac driver and `ntdll.so`, athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), codeload tar.gz | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006, only to configure that build | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
-`main` pins d9mt `8b22a99` for 0.1.6. Release 0.1.5.1 was built from the `release/0.1.5`
+`main` pins d9mt `b532e9c` for 0.1.6. Release 0.1.5.1 was built from the `release/0.1.5`
 branch with the d9mt build it shipped.
 
 ## Documentation

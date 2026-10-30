@@ -9,9 +9,12 @@
   0.1.0's: the bridge's source is the same, and `SOURCE_DATE_EPOCH=1792149856` builds it byte
   for byte. 0.1.2's `d3d9.dll` is d9mt main `2a1bc00` built with `SOURCE_DATE_EPOCH=1792457826`,
   the time of `c3f46ce`, which has the same tree: byte for byte the file 0.1.2-dev.2 and dev.3
-  were tested with. 0.1.4 pins main `b0d4597` and 0.1.6 main `8b22a99`, each built with its own
+  were tested with. 0.1.4 pins main `b0d4597` and 0.1.6 main `b532e9c`, each built with its own
   commit time; from `8b22a99` on, `winemetal.so` must come from an LLVM built for macOS 26.0,
-  `otool -l winemetal.so` showing minos 26.0, since d9mt #110's macOS 26 path is in it.)
+  `otool -l winemetal.so` showing minos 26.0, since d9mt #110's macOS 26 path is in it. From
+  `b532e9c` on, the bridge must also report the AIR cache lineage `AIR_LINEAGE` names
+  (`build/bridge/air-codegen-id.txt`, d9mt ADR-0006), or the script stops: another toolchain
+  that changes the shader compiler's code would make every player recompile their shaders.)
 - `build.sh` assembles `dist/SWTOR on Mac.app` with Sparkle (pinned download; ad-hoc signed;
   `--install` copies it to /Applications). Needs Xcode 27 (macOS 27 SDK); the app runs on
   macOS 26 and later.
@@ -88,7 +91,9 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 
 ## d9mt pin
 
-`main` pins d9mt `8b22a99`, main after jdrly/d9mt#117. It brings shaders
+`main` pins d9mt `b532e9c`, main after jdrly/d9mt#122. It keeps the shaders players compiled
+with 0.1.5.1 on macOS 27 (#122: the AIR cache keyed on the shader compiler's code, with 0.1.5.1's
+cache adopted; AIR codegen id `38243f7b…`, lineage 0.1.5.1). It brings shaders
 tagged with the AIR version macOS 26 accepts (#110), textures sampled before their first write
 read as empty (#105), a GPU hang ends the game (#53), the per-draw vertex copy clamped from the
 first vertex (#57), the GPU canary on every present and at most every 250 ms otherwise (#67), and
