@@ -57,28 +57,28 @@ LOG
 
 # The frame rate over the seconds the window showed the game: d9mt's "MtlPresenter: ...
 # visibility" lines between the STATS lines, 1 s around each change left out too.
-# st <t> <fps> [<ms avg/p99/max> <slow33> <slow50>]: a STATS line
-st() {
+# fx_sr_st <t> <fps> [<ms avg/p99/max> <slow33> <slow50>]: a STATS line
+fx_sr_st() {
   printf 'warn:  STATS t=%s fps=%s ms=%s slow33=%s slow50=%s | rp=1.0 skip=0.0 cb=1.0 draws=1500 | ld=0.0 clr=0.0 ldDc=0.0 st=0.0 stDc=0.0 rsv=0.0 restore=0.0 savedMiB=0.0 attMs=0.1 clrFold=0.0 clrPass=0.0 | sh=0 pso=0 wait=0/0.0ms | allocMiB=100 att=on\n' \
     "$1" "$2" "${3:-16.7/17.0/17.5}" "${4:-0}" "${5:-0}"
 }
-vis() { printf 'warn:  MtlPresenter: 20:00:00.000 visibility 0x%s -> 0x%s (visible=0 activeSpace=0 miniaturized=0)%s\n' "$1" "$2" "${3:-}"; }
-hitch() { echo 'warn:  HITCH frame=1 dtMs=70.0 inD9mtMs=1.0 (1%) texMiB created=0.0 uploaded=0.0 csBehind=0 | texCreate=1/1.0ms/0.0MiB | cs: renderWait=0/0.0ms shaders=0/0.0ms psos=0/0.0ms'; }
+fx_sr_vis() { printf 'warn:  MtlPresenter: 20:00:00.000 visibility 0x%s -> 0x%s (visible=0 activeSpace=0 miniaturized=0)%s\n' "$1" "$2" "${3:-}"; }
+fx_sr_hitch() { echo 'warn:  HITCH frame=1 dtMs=70.0 inD9mtMs=1.0 (1%) texMiB created=0.0 uploaded=0.0 csBehind=0 | texCreate=1/1.0ms/0.0MiB | cs: renderWait=0/0.0ms shaders=0/0.0ms psos=0/0.0ms'; }
 fx_session_report_visibility() {
   local t
   # 1-4 shown; 5 the second before the change; 6 the change (Cmd-Tab: 0x3 -> 0x2 -> 0x0);
   # 7-8 hidden; 9 back (0x0 -> 0x1 -> 0x3); 10 the second after; 11-14 shown
   {
-    for t in 1 2 3 4; do st "$t" 60.0; done
-    st 5 59.0
-    vis 3 2; vis 2 0
-    st 6 40.0 25.0/120.0/120.0 3 3
-    hitch
-    st 7 30.0; st 8 30.0
-    vis 0 1; vis 1 3
-    st 9 31.0; st 10 45.0; st 11 60.0; st 12 60.0
-    hitch
-    st 13 50.0 20.0/70.0/70.0 1 1; st 14 60.0
+    for t in 1 2 3 4; do fx_sr_st "$t" 60.0; done
+    fx_sr_st 5 59.0
+    fx_sr_vis 3 2; fx_sr_vis 2 0
+    fx_sr_st 6 40.0 25.0/120.0/120.0 3 3
+    fx_sr_hitch
+    fx_sr_st 7 30.0; fx_sr_st 8 30.0
+    fx_sr_vis 0 1; fx_sr_vis 1 3
+    fx_sr_st 9 31.0; fx_sr_st 10 45.0; fx_sr_st 11 60.0; fx_sr_st 12 60.0
+    fx_sr_hitch
+    fx_sr_st 13 50.0 20.0/70.0/70.0 1 1; fx_sr_st 14 60.0
   } >"$R/visibility.log"
   "$REPORT_SH" "$R/visibility.log" >"$R/visibility.txt" 2>&1 || true
   check "report: every second in the total" grep -qE '^  Seconds with STATS lines +14$' "$R/visibility.txt"
@@ -94,22 +94,22 @@ fx_session_report_visibility() {
   # before a line whose "from" isn't the state (the limiter left lines out: unknown, hidden);
   # 13 before a second device whose first state (hidden) only the next line's "from" tells
   {
-    st 1 30.0; st 2 30.0
-    vis 0 3
-    st 3 60.0
-    for t in 4 5 6 7; do st "$t" 50.0; done
-    vis 0 3 ' [2 earlier lines suppressed]'
-    for t in 8 9 10 11 12 13; do st "$t" 60.0; done
-    st 1 50.0; st 2 50.0; st 3 50.0
-    vis 0 3
-    for t in 4 5 6 7; do st "$t" 60.0; done
+    fx_sr_st 1 30.0; fx_sr_st 2 30.0
+    fx_sr_vis 0 3
+    fx_sr_st 3 60.0
+    for t in 4 5 6 7; do fx_sr_st "$t" 50.0; done
+    fx_sr_vis 0 3 ' [2 earlier lines suppressed]'
+    for t in 8 9 10 11 12 13; do fx_sr_st "$t" 60.0; done
+    fx_sr_st 1 50.0; fx_sr_st 2 50.0; fx_sr_st 3 50.0
+    fx_sr_vis 0 3
+    for t in 4 5 6 7; do fx_sr_st "$t" 60.0; done
   } >"$R/visibility-gaps.log"
   "$REPORT_SH" "$R/visibility-gaps.log" >"$R/visibility-gaps.txt" 2>&1 || true
   check "report: hidden from the start, lines left out, a second device" \
     grep -qE '^    window hidden or switching +15 s, not counted below \(51\.3 fps\)$' "$R/visibility-gaps.txt"
   check "report: only the shown seconds after them" eval 'grep -qE "^  FPS: average +60\.0$" "$R/visibility-gaps.txt" && grep -qE "^  Frames +300$" "$R/visibility-gaps.txt"'
   check "report: --skip leaves out hidden seconds, too" eval '"$REPORT_SH" --skip 6 "$R/visibility.log" | grep -E "^    window hidden or switching +4 s, not counted below \(34\.0 fps\)$" >/dev/null'
-  { st 1 30.0; vis 3 0; st 2 30.0; } >"$R/all-hidden.log"
+  { fx_sr_st 1 30.0; fx_sr_vis 3 0; fx_sr_st 2 30.0; } >"$R/all-hidden.log"
   "$REPORT_SH" "$R/all-hidden.log" >"$R/all-hidden.txt" 2>&1 || true
   check "report: all seconds hidden, no frame rate" eval 'grep -qE "^    window hidden or switching +2 s, not counted below \(30\.0 fps\)$" "$R/all-hidden.txt" && ! grep -q "FPS: average" "$R/all-hidden.txt"'
 }
