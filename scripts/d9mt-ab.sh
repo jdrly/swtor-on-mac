@@ -25,6 +25,15 @@
 #   cap-noalign   D9MT_FPS_CAP_ALIGN=0: the cap's timer only, presents not aligned to vsync
 #   dxvkcap=<fps> DXVK_CONFIG d3d9.maxFrameRate=<fps>: DXVK's frame limiter (busy-waits the last
 #                 4+ ms of every sleep), the cap before 0.1.3, for comparison
+#   unwritten-off D9MT_UNWRITTEN_NULL=0: a texture sampled before its first write shows its
+#                 memory again, as before d9mt #105 (the magenta icons on an M4)
+#   pso-async     D9MT_PSO_ASYNC_FLUSH=1: d9mt writes its pipeline archive on a thread at a quiet
+#                 moment instead of in the build that makes it due (d9mt #114); no archive write
+#                 at exit, so the last pipelines of a session aren't kept
+#   flush-cap     D9MT_FLUSH_CAP=1: weak flush hints don't submit a command buffer mid-frame
+#                 (upstream DXVK's cap on tiling GPUs, d9mt #113)
+#   compile-maxconc D9MT_COMPILE_MAXCONC=1: asks Metal to compile more pipelines at once
+#                 (d9mt #117)
 #   cold=<name>   an empty shader cache and pipeline archives of their own for this run, in
 #                 ~/Library/Caches/SWTOR on Mac/d9mt-ab/<name> (D9MT_AIR_CACHE,
 #                 D9MT_PSO_ARCHIVE_DIR): the game starts as after an update that changed
@@ -96,6 +105,10 @@ for a in "$@"; do
         *) case "$config" in *maxFrameRate*) ;; *) config="${config:+$config;}d3d9.maxFrameRate=$n" ;; esac ;;
       esac ;;
     cap-noalign) add "$a"; var 'D9MT_FPS_CAP_ALIGN=0' ;;
+    unwritten-off) add "$a"; var 'D9MT_UNWRITTEN_NULL=0' ;;
+    pso-async) add "$a"; var 'D9MT_PSO_ASYNC_FLUSH=1' ;;
+    flush-cap) add "$a"; var 'D9MT_FLUSH_CAP=1' ;;
+    compile-maxconc) add "$a"; var 'D9MT_COMPILE_MAXCONC=1' ;;
     cold=*)
       n=${a#cold=}
       case "$n" in ''|*[!A-Za-z0-9._-]*|.*) echo "cold=<name>: letters, digits, . _ - only" >&2; exit 2 ;; esac
