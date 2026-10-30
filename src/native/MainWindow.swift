@@ -1099,8 +1099,10 @@ struct NoticeText: View {
       Text("It's not a game mod: it doesn't change the game's files, memory or network traffic. It only "
            + "replaces the compatibility layer the official Mac app already runs on (Wine, plus d9mt for "
            + "Direct3D 9 on Metal), and Uninstall puts that back the way Broadsword ships it.")
-      Text("For help, contact Pharaphobia on Discord or open a GitHub issue. Please don't send logs or "
-           + "bug reports about SWTOR on Mac to Broadsword or SWTOR customer support.")
+      // a LocalizedStringKey, so the Markdown link renders
+      Text(LocalizedStringKey("For help, create a post in #swtor-on-mac-issues on the [SWTOR on Mac "
+           + "Discord](\(AppActions.discord.absoluteString)) and tag @Pharaphobia, or open a GitHub issue. "
+           + "Please don't send logs or bug reports about SWTOR on Mac to Broadsword or SWTOR customer support."))
       Text("STAR WARS is a registered trademark of Lucasfilm Ltd. Star Wars: The Old Republic and SWTOR "
            + "are trademarks of their respective owners. Mac is a trademark of Apple Inc.")
         .font(.footnote)

@@ -13,6 +13,8 @@
 //       window is not in front: on the virtual display windows count as occluded), game (the
 //       warp asked to run, but SWTOR runs), closed (no window)
 //   ui-snapshot bench <frames>                        the warp's drawing alone, off-screen
+//   ui-snapshot alertkeys                             which button Esc and Return press in the Logs collected alert,
+//                                                     and its Discord link
 
 import AppKit
 import SwiftUI
@@ -30,8 +32,9 @@ struct UISnapshot {
         case "still" where args.count == 2: await still(URL(fileURLWithPath: args[1]))
         case "measure" where args.count == 3: await measure(args[1], seconds: Double(args[2]) ?? 30)
         case "bench" where args.count == 2: bench(frames: Int(args[1]) ?? 300)
+        case "alertkeys": await alertKeys()
         default:
-          print("usage: ui-snapshot shots <dir> | measure <animating|paused|game|closed> <seconds> | bench <frames>")
+          print("usage: ui-snapshot shots <dir> | measure <animating|paused|game|closed> <seconds> | bench <frames> | alertkeys")
           exit(2)
         }
         exit(0)
@@ -86,11 +89,22 @@ func window<V: View>(_ view: V, size: CGSize, dark: Bool, key: Bool = true) -> N
 @MainActor
 func settle(_ seconds: Double) async { try? await Task.sleep(for: .seconds(seconds)) }
 
+// backdrop: the window's background colour under it, rounded, for an alert, whose glass
+// cacheDisplay doesn't draw
 @MainActor
-func capture(_ win: NSWindow, to url: URL) {
+func capture(_ win: NSWindow, to url: URL, backdrop: Bool = false) {
   let view = win.contentView!.superview ?? win.contentView!
-  guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { fail("no bitmap for \(url.lastPathComponent)") }
+  guard var rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { fail("no bitmap for \(url.lastPathComponent)") }
   view.cacheDisplay(in: view.bounds, to: rep)
+  if backdrop, let out = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: out)
+    win.effectiveAppearance.performAsCurrentDrawingAppearance { NSColor.windowBackgroundColor.setFill() }
+    NSBezierPath(roundedRect: view.bounds, xRadius: 26, yRadius: 26).fill()
+    rep.draw(in: view.bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    NSGraphicsContext.restoreGraphicsState()
+    rep = out
+  }
   try! rep.representation(using: .png, properties: [:])!.write(to: url)
   print("wrote \(url.path) (\(rep.pixelsWide)x\(rep.pixelsHigh))")
 }
@@ -177,6 +191,90 @@ func shots(_ dir: URL) async {
     capture(win, to: dir.appendingPathComponent("settings-game-\(dark ? "dark" : "light").png"))
     win.close()
   }
+  for dark in [true, false] {
+    let alert = logsAlert(dark: dark)
+    await settle(1.0)
+    capture(alert.window, to: dir.appendingPathComponent("logs-collected-\(dark ? "dark" : "light").png"), backdrop: true)
+    alert.window.close()
+  }
+  // the unofficial-fan-project notice (its popover's content), for its Discord link
+  for dark in [true, false] {
+    let win = window(NoticeText().padding(20).frame(width: 380), size: CGSize(width: 380, height: 330), dark: dark)
+    await settle(1.0)
+    capture(win, to: dir.appendingPathComponent("notice-\(dark ? "dark" : "light").png"))
+    win.close()
+  }
+}
+
+// Collect Logs…' alert, laid out and shown on the virtual display (not runModal, which centers
+// it on the main display)
+@MainActor
+func logsAlert(dark: Bool) -> NSAlert {
+  let alert = LogCollector.alert(zip: NSHomeDirectory() + "/Desktop/SWTOR-on-Mac-logs-2026-10-30-1313.zip", problem: nil)
+  alert.window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+  alert.layout()
+  let screen = virtualScreen(), win = alert.window
+  // in the middle: an alert grows by about 72 pt on each side while it pops in
+  win.setFrameOrigin(CGPoint(x: screen.frame.midX - win.frame.width / 2, y: screen.frame.midY - win.frame.height / 2))
+  let main = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID).map { CGDisplayIsMain($0) != 0 } ?? false }
+  guard screen.frame.insetBy(dx: 200, dy: 200).contains(win.frame), !(main?.frame.intersects(win.frame.insetBy(dx: -200, dy: -200)) ?? true) else {
+    fail("the alert \(win.frame) would not be on the virtual display alone")
+  }
+  win.orderFrontRegardless()
+  return alert
+}
+
+// Which button Esc presses in the alert's modal session, without LogCollector's monitor
+// (AppKit's own behaviour) and with it; a key that presses nothing times out. Return is only
+// checked as Close's key equivalent: a button takes it only in the key window, and this
+// accessory app is never active, so its alert never is.
+@MainActor
+func alertKeys() async {
+  for monitor in [false, true] {
+    let alert = logsAlert(dark: false)
+    await settle(0.5)
+    let win = alert.window
+    let escape = monitor ? LogCollector.closeOnEscape(alert) : nil
+    let screen = virtualScreen()
+    // run loop timers, not GCD: this runs in a main-queue job, and the modal loop below
+    // doesn't drain the main queue meanwhile
+    var running = true
+    let key = Timer(timeInterval: 0.5, repeats: false) { _ in
+      MainActor.assumeIsolated {
+        guard screen.frame.insetBy(dx: 100, dy: 100).contains(win.frame) else { fail("the alert moved off the virtual display: \(win.frame)") }
+        NSApp.postEvent(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: win.windowNumber, context: nil,
+          characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!, atStart: false)
+      }
+    }
+    let timeout = Timer(timeInterval: 4, repeats: false) { _ in MainActor.assumeIsolated { if running { NSApp.abortModal() } } }
+    for t in [key, timeout] { RunLoop.main.add(t, forMode: .common) }
+    let response = NSApp.runModal(for: win)
+    running = false
+    timeout.invalidate()
+    if let escape { NSEvent.removeMonitor(escape) }
+    let pressed = response == .alertFirstButtonReturn ? "Close" : response == .alertSecondButtonReturn ? "Show in Finder"
+      : response == .abort ? "nothing (timed out)" : "\(response.rawValue)"
+    print("Esc\(monitor ? "" : ", AppKit alone"): \(pressed)")
+    win.close()
+    await settle(0.5)
+  }
+  let alert = LogCollector.alert(zip: "/Desktop/x.zip", problem: nil)
+  print("Return: \(alert.buttons.first { $0.keyEquivalent == "\r" }?.title ?? "no button")")
+  // LinkAlert: after a second layout, still one text view with the link over a hidden field
+  alert.layout()
+  alert.layout()
+  func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+  let views = all(alert.window.contentView!)
+  let links = views.compactMap { $0 as? NSTextView }.compactMap { view -> URL? in
+    var url: URL?
+    view.textStorage?.enumerateAttribute(.link, in: NSRange(location: 0, length: view.textStorage!.length)) { v, _, _ in
+      if let v = v as? URL { url = v }
+    }
+    return url
+  }
+  let hidden = views.compactMap { $0 as? NSTextField }.filter { $0.isHidden && $0.stringValue == alert.informativeText }.count
+  print("Link: \(links.map(\.absoluteString)) over \(hidden) hidden text field")
 }
 
 // The installed main window in dark, for comparing the warp's variants.
