@@ -77,23 +77,14 @@ Uninstall and every Settings pane.
 
 ## Current version
 
-The current release is [0.1.5.1](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.5.1),
-published on 26 October 2026. Every release lists its changes on the
+The current release is [0.1.6](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.6),
+published on 30 October 2026. Every release lists its changes on the
 [releases page](https://github.com/jdrly/swtor-on-mac/releases) and on
 [swonmac.com](https://swonmac.com).
 
-0.1.5.1 tells you why a game hangs without a window after you press Play. When macOS doesn't
-allow the launcher to run in the background, macOS ends everything the launcher left running
-once the launcher quits, including the game's Wine. SWTOR on Mac finds this in macOS's log and names the
-setting that fixes it. See [Troubleshooting](#troubleshooting).
-
-0.1.5 removed the cost of a GPU error check that 0.1.4 added. In a test that draws without
-showing its frames, that check cost about 1.5 % of the frame rate. 0.1.5 measures as fast as
-0.1.3 in the same test, and it checks every frame shown on screen.
-
-0.1.6 is in testing and has no release date. Its graphics driver, d9mt
-[`b532e9c`](https://github.com/jdrly/d9mt/tree/b532e9c0f04b36913b8fe43bd9580c238d177e11), is
-already pinned on `main` and fixes three problems:
+0.1.6's graphics driver, d9mt
+[`b532e9c`](https://github.com/jdrly/d9mt/tree/b532e9c0f04b36913b8fe43bd9580c238d177e11), fixes
+three problems:
 
 - A black screen on macOS 26. d9mt tagged its compiled shaders with a Metal shader format version
   that only macOS 27 accepts, so macOS 26 rejected every shader. d9mt now tags them with the
@@ -111,17 +102,16 @@ the code that compiles them, and 0.1.6 compiles them to the same bytes, see
 [jdrly/d9mt#122](https://github.com/jdrly/d9mt/pull/122). On macOS 26 the shaders compile once
 more, because 0.1.5.1's were the ones macOS 26 rejected.
 
-0.1.6 also carries 0.1.5.1's background activity check, which `main` received in
-[#75](https://github.com/jdrly/swtor-on-mac/pull/75), and gives Collect Logs the run time and
-exit status of the last 10 game starts and the launcher's own logs.
+0.1.6 also carries 0.1.5.1's background activity check: when macOS doesn't allow the launcher to
+run in the background, macOS ends the game's Wine once the launcher quits, and SWTOR on Mac names
+the setting that fixes it. See [Troubleshooting](#troubleshooting). Collect Logs now keeps failed
+game starts, the run time and exit status of the last 10 game starts and the launcher's own logs.
 
 ## Install
 
 You need:
 
 - A Mac with Apple Silicon and macOS 26 or later. SWTOR on Mac is developed on macOS 27.
-  Until 0.1.6 ships, the game shows a black screen on macOS 26, see
-  [Known issues](#known-issues).
 - The official SWTOR Mac app from [swtor.com](https://www.swtor.com), installed in Applications
   and started once so it has set up the game. SWTOR on Mac refuses to install without it.
 - Rosetta. macOS offers it the first time you start the official app.
@@ -220,8 +210,6 @@ it. If the problem stays after Uninstall, it isn't caused by SWTOR on Mac.
 
 ## Known issues
 
-- On macOS 26, 0.1.5.1 shows a black screen after the first loading screen while the game plays
-  sound. The fix is in 0.1.6, see [Current version](#current-version).
 - A rare GPU error can freeze the whole screen, not only the game. macOS may restart the
   graphical session and return you to the login screen. If it happens, open SWTOR on Mac soon
   afterwards and send the Collect Logs zip, which holds the GPU errors of the last 2 hours.
@@ -446,8 +434,8 @@ that holds its EdDSA key, which never leaves that Mac. [docs/building.md](docs/b
 | Wine sources for the Mac driver and `ntdll.so`, athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), codeload tar.gz | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006, only to configure that build | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
-`main` pins d9mt `b532e9c` for 0.1.6. Release 0.1.5.1 was built from the `release/0.1.5`
-branch with the d9mt build it shipped.
+Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
+`release/0.1.5` branch with the d9mt build it shipped.
 
 ## Documentation
 
