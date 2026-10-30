@@ -47,6 +47,7 @@ against any background helper: "when my app is not running, the helper should no
 
 ## Implementation status as of 2026-10-22
 
-`cmd_rehook` and `remove_agent` in `src/som.sh`; `Installer.rehook` (at start) and
-`Installer.play` in `src/native/`; `scripts/test-sandbox.sh` sections 6c, 7b, 7c (the check) and
-11c, 15, 16 (the old job removed over 0.0.6, 0.1.3 and a development build).
+`cmd_rehook`, `agent_state`, `unload_agent` and `remove_agent_files` in `src/som.sh`;
+`Installer.rehook` (at start) and `Installer.play` in `src/native/`; `scripts/test-sandbox.sh`
+sections 6c, 7b, 7c (the check) and 11c, 15, 16 (the old job removed over 0.0.6, 0.1.3 and a
+development build).
