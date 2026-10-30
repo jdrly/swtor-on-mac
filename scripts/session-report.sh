@@ -19,9 +19,10 @@
 #             attachment loads/stores, compiles, Metal's allocated memory; from 0.0.6-dev.3 also
 #             the render thread's CPU time in the attachment optimization and the clears
 #   MtlPresenter visibility  (0.1.0 and later) the game window's visibility changes (0x3:
-#             visible on the active Space). The frame rate, frame times and hitches count only
-#             the seconds it showed the game, 1 s around each change left out (Cmd-Tab, a Space
-#             switch: d9mt throttles Present while hidden); the hidden seconds get their own line
+#             visible on the active Space), and d9mt's "window minimized, throttling Present"
+#             lines. The frame rate, frame times and hitches count only the seconds it showed
+#             the game, 1 s around each change left out (Cmd-Tab, a Space switch, the Dock:
+#             d9mt throttles Present while hidden); the hidden seconds get their own line
 #   HITCH     each frame over 50 ms: d9mt's time in it and by what, or the game's
 #   COMPILE   render-thread frames with compiles or over 33 ms (shader/pipeline waits)
 #   DIAG MEM  every 256 frames: Metal's allocated memory
@@ -99,23 +100,27 @@ analyze() {
     function hex(s,    i, n) { n = 0; s = tolower(s); for (i = 1; i <= length(s); i++) n = n * 16 + index("0123456789abcdef", substr(s, i, 1)) - 1; return n }
     # the presenter shows the game: visible, on the active Space, not in the Dock (d9mt'"'"'s isVisible)
     function shown(v) { return v % 2 == 1 && int(v / 2) % 2 == 1 && int(v / 4) % 2 == 0 }
-    BEGIN { vs = -1; wstart = -1; useg = 1 }
+    BEGIN { vs = -1; wstart = -1; useg = 1; lastmw = 1 }
 
     # Pass 1 (the log is read twice): which STATS seconds the window was hidden or switching in.
     # d9mt logs "MtlPresenter: <time> visibility 0x3 -> 0x0" from Present, where it also counts
     # the frames of STATS, so a line between "STATS t=N-1" and "STATS t=N" changed second N
     # (STATS has no wall-clock time: t is seconds since the first Present). Window k is the k-th
-    # STATS line; bad[k]: the state wasn'"'"'t "shown" all through it.
+    # STATS line; bad[k]: the state wasn'"'"'t "shown" all through it. Minimized, Present returns
+    # before it asks the presenter, so no visibility line comes: d9mt'"'"'s throttle lines tell it
+    # ("window minimized, throttling Present to 10 fps", logged at every change of the throttle,
+    # from Present as well).
     NR == FNR {
       if ($0 ~ / STATS t=/) {
         t1 = num(field("t")); reset = nw && t1 < p1T; p1T = t1
         nw++
-        bad[nw] = wbad || (wstart >= 0 && !shown(wstart))
+        bad[nw] = wbad || (wstart >= 0 && !shown(wstart)) || wmin
         if (wstart < 0) unk[nw] = 1
         wbad = 0
-        # a second device: its presenter logs no first state, the next line'"'"'s "from" tells it
-        if (reset) { vs = -1; unk[nw] = 1; useg = nw }
-        wstart = vs
+        # a second device: its presenter logs no first state, the next line'"'"'s "from" tells it;
+        # its throttle starts off and logs its first change (none in this second: not minimized)
+        if (reset) { vs = -1; unk[nw] = 1; useg = nw; if (lastmw != nw) mn = 0 }
+        wstart = vs; wmin = mn
       } else if ($0 ~ /MtlPresenter: .*visibility 0x[0-9a-fA-F]+ -> 0x[0-9a-fA-F]+/) {
         l = $0; sub(/.*visibility 0x/, "", l)
         pv = l; sub(/[^0-9a-fA-F].*/, "", pv); pv = hex(pv)
@@ -129,13 +134,18 @@ analyze() {
           for (vw = lastvw; vw <= nw; vw++) bad[vw] = 1
         }
         vs = nv; wbad = 1; lastvw = nw + 1
+      } else if ($0 ~ /D9MT: .*(, throttling Present to [0-9]+ fps|presenting normally again)/) {
+        m1 = index($0, " window minimized, throttling Present") > 0
+        if (index($0, "earlier lines suppressed")) for (vw = lastmw; vw <= nw; vw++) bad[vw] = 1
+        if (m1 != mn) wbad = 1
+        mn = m1; lastmw = nw + 1
       }
       next
     }
     # Pass 2: hid[k]: window k, or the one before or after it, was bad (1 s around a change)
     !p2 {
       p2 = 1
-      bad[nw + 1] = wbad || (wstart >= 0 && !shown(wstart))
+      bad[nw + 1] = wbad || (wstart >= 0 && !shown(wstart)) || wmin
       for (vw = 1; vw <= nw + 1; vw++) hid[vw] = bad[vw] || bad[vw - 1] || bad[vw + 1]
     }
 

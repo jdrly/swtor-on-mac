@@ -108,6 +108,20 @@ fx_session_report_visibility() {
   check "report: hidden from the start, lines left out, a second device" \
     grep -qE '^    window hidden or switching +15 s, not counted below \(51\.3 fps\)$' "$R/visibility-gaps.txt"
   check "report: only the shown seconds after them" eval 'grep -qE "^  FPS: average +60\.0$" "$R/visibility-gaps.txt" && grep -qE "^  Frames +300$" "$R/visibility-gaps.txt"'
+  # minimized: Present returns before it asks the presenter, no visibility line, only d9mt's
+  # throttle lines; 5-8 minimized, 4 and 9-10 around it; a drawable stall in 12 hides nothing
+  {
+    for t in 1 2 3 4; do fx_sr_st "$t" 60.0; done
+    echo 'warn:  D9MT: 20:00:04.000 window minimized, throttling Present to 10 fps'
+    for t in 5 6 7 8; do fx_sr_st "$t" 10.0; done
+    echo 'warn:  D9MT: 20:00:08.000 presenting normally again (was: window minimized)'
+    for t in 9 10 11; do fx_sr_st "$t" 60.0; done
+    echo 'warn:  D9MT: 20:00:11.500 no drawable (presents skipped), throttling Present to 60 fps'
+    echo 'warn:  D9MT: 20:00:11.600 presenting normally again (was: no drawable (presents skipped))'
+    fx_sr_st 12 60.0
+  } >"$R/minimized.log"
+  "$REPORT_SH" "$R/minimized.log" >"$R/minimized.txt" 2>&1 || true
+  check "report: minimized with no visibility line" eval 'grep -qE "^    window hidden or switching +7 s, not counted below \(31\.4 fps\)$" "$R/minimized.txt" && grep -qE "^  FPS: average +60\.0$" "$R/minimized.txt" && grep -qE "^  Frames +300$" "$R/minimized.txt"'
   check "report: --skip leaves out hidden seconds, too" eval '"$REPORT_SH" --skip 6 "$R/visibility.log" | grep -E "^    window hidden or switching +4 s, not counted below \(34\.0 fps\)$" >/dev/null'
   { fx_sr_st 1 30.0; fx_sr_vis 3 0; fx_sr_st 2 30.0; } >"$R/all-hidden.log"
   "$REPORT_SH" "$R/all-hidden.log" >"$R/all-hidden.txt" 2>&1 || true

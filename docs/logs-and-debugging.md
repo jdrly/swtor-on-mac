@@ -53,7 +53,8 @@ performance. A setting you choose is kept through updates and Reinstall.
 - frames over 33 ms and 50 ms;
 - hitches, split into d9mt's and the game's, and d9mt's top causes;
 - the frame rate, frame times and hitches count only the seconds the game window showed the
-  game (visible on the active Space, d9mt's `MtlPresenter: ... visibility` lines), leaving out
+  game (visible on the active Space and not minimized: d9mt's `MtlPresenter: ... visibility`
+  and `window minimized, throttling Present` lines), leaving out
   1 s around each change: d9mt slows Present down while the window is hidden (Cmd-Tab, another
   Space, minimized). The hidden seconds get a line of their own (`window hidden or switching`),
   and `with the hidden seconds` gives the average over every second, as earlier reports did;
