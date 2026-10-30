@@ -242,9 +242,10 @@ ones beside them as `settings-backup-<time>`. Then it puts Broadsword's Wine fil
 deletes SWTOR on Mac's engine, prefix, settings and downloads. Your characters live on the server
 and don't change. Logs stay in `~/Library/Logs/SWTOR on Mac`. Then move the app to the Bin.
 
-If the app is gone or Uninstall can't run,
-[docs/how-it-works.md](docs/how-it-works.md#removing-it-by-hand) has the Terminal commands that
-do the same by hand.
+If the app is gone or Uninstall can't run, you can remove SWTOR on Mac by hand with the Terminal
+commands in [docs/how-it-works.md](docs/how-it-works.md#removing-it-by-hand). Unlike Uninstall,
+they don't copy your game settings back, and they delete SWTOR on Mac's prefix, which holds your
+current UI layouts and key bindings. Copy the settings folder first, as that page describes.
 
 ## How it hooks into the official app
 
