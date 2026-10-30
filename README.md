@@ -36,6 +36,7 @@ For players:
 For developers, and anyone who wants to see exactly what it changes:
 
 - [How it hooks into the official app](#how-it-hooks-into-the-official-app)
+- [Game start](#game-start)
 - [The stack](#the-stack)
 - [Patches](#patches)
 - [Testing](#testing)
@@ -247,6 +248,35 @@ do the same by hand.
 
 ## How it hooks into the official app
 
+```mermaid
+flowchart TB
+  app["SWTOR on Mac.app<br/>window, som.sh, Collect Logs"]
+  subgraph bw["Official install, Broadsword's files"]
+    launcher["SWTOR launcher"]
+    wine64["Wine/bin/wine64<br/>unchanged"]
+    pre["Wine/bin/wine64-preloader<br/>SWTOR on Mac's wrapper"]
+    real["Wine/bin-real/<br/>Broadsword's preloaders, moved unchanged"]
+    bprefix["Broadsword's Wine prefix<br/>read, cloned once"]
+    gamefiles["Game files<br/>read only"]
+  end
+  subgraph ours["~/Library/Application Support/SWTOR on Mac"]
+    env["env, settings.conf, dxvk.conf"]
+    engine["engine/<br/>CrossOver 26.3, Wine 11, patched ntdll.so and winemac.so, winemetal bridge"]
+    prefix["prefix/<br/>d9mt d3d9.dll in system32"]
+  end
+  app -- "Install" --> pre
+  app -- "Install" --> ours
+  launcher --> wine64 --> pre
+  pre -- "reads" --> env
+  pre -- "no env or no engine" --> real
+  pre --> engine
+  bprefix -. "APFS clone at install" .-> prefix
+  engine --> exe["swtor.exe"]
+  prefix --- exe
+  gamefiles --- exe
+  exe --> d3d9["d9mt d3d9.dll"] --> bridge["winemetal bridge"] --> metal["Metal"]
+```
+
 The official launcher starts every Wine process through `bin/wine64`, which loads
 `bin/wine64-preloader`. Install moves Broadsword's two preloaders into `bin-real/` and puts
 SWTOR on Mac's wrapper script, [`src/wine-wrapper.sh`](src/wine-wrapper.sh), in their place. The
@@ -279,6 +309,36 @@ after the launcher quits. For the game, `swtor.exe`, it also writes the game's o
 Game Mode on. When the game ends, nothing of SWTOR on Mac
 keeps running. [ADR 0005](docs/adr/0005-no-background-helper.md) records that rule.
 [docs/how-it-works.md](docs/how-it-works.md) covers every file and step.
+
+## Game start
+
+```mermaid
+flowchart TB
+  open["Open SWTOR on Mac"] --> rehook1["som.sh rehook<br/>hooks back in after a launcher update"]
+  open --> btm24["som.sh btm-check 24h<br/>App Background Activity notice in the window"]
+  play["Play SWTOR"] --> rehook2["som.sh rehook"] --> official["Official app opens<br/>log in, press Play"]
+  official --> wcall["Each Wine call goes through the wrapper"]
+  wcall --> session["hold-launcher --start-session<br/>ends leftovers, starts wineserver -p10"]
+  session -- "leftovers ended, exit 3" --> btm1h["som.sh btm-check 1h, detached<br/>notification if macOS ended the last session"]
+  session --> isgame{"swtor.exe?"}
+  isgame -- "no" --> other["The engine runs the call"]
+  isgame -- "yes" --> prep["Daily update check, frame rate limit,<br/>Game Mode link, wine.log"]
+  prep --> run["hold-launcher --run-game<br/>swtor.exe on the engine and prefix"]
+  run --> holdlog["hold.log: run time, exit code"]
+```
+
+Collect Logs, `src/collect-logs.sh`, gathers these files along with system information such as
+the macOS version, chip and memory. It redacts every file before it goes into the zip:
+
+```mermaid
+flowchart LR
+  logs["~/Library/Logs/SWTOR on Mac<br/>wine.log and the 4 before it, hold.log, install.log, rehook.log"] --> cl
+  conf["env, settings.conf, dxvk.conf, install-manifest.json"] --> cl
+  diag["~/Library/Logs/DiagnosticReports<br/>crash, hang and spin reports, 7 days"] --> cl
+  ulog["macOS unified log<br/>GPU errors, 2 hours; btm-check, 7 days"] --> cl
+  llogs["The official launcher's logs"] --> cl
+  cl["collect-logs.sh<br/>redaction, then a leak check"] --> zip["SWTOR-on-Mac-logs-date.zip"]
+```
 
 ## The stack
 
