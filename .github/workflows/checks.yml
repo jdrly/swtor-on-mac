@@ -65,6 +65,8 @@ jobs:
                    Contents/Resources/helpers/hold-launcher Contents/Resources/helpers/setsid-exec \
                    Contents/Resources/d9mt/d3d9.dll Contents/Resources/d9mt/winemetal.so \
                    Contents/Resources/wine/winemac.so Contents/Resources/wine/ntdll.so Contents/Resources/Licenses/winemac/COPYING.LIB \
+                   Contents/Resources/Licenses/ntdll/COPYING.LIB Contents/Resources/Licenses/fonts/Unbounded-OFL.txt \
+                   Contents/Resources/Licenses/fonts/JetBrainsMono-OFL.txt \
                    Contents/Resources/collect-logs.sh Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle \
                    Contents/Resources/Licenses/d9mt/bridge/COPYING.LIB Contents/Resources/Licenses/sparkle/LICENSE \
                    Contents/Resources/Licenses/SWTOR-on-Mac-LICENSE.txt Contents/Resources/Licenses/THIRD_PARTY_NOTICES.md; do

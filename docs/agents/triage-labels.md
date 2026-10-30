@@ -32,7 +32,7 @@ maintainer's decision is `ready-for-human`.
 
 | Label            | Meaning                                                                          |
 | ---------------- | -------------------------------------------------------------------------------- |
-| `area:installer` | Install, Reinstall, Uninstall, the launchd job (`src/som.sh`)                    |
+| `area:installer` | Install, Reinstall, Uninstall, removing the launchd job of 0.1.3 and older (`src/som.sh`) |
 | `area:wrapper`   | The wrapper, the Wine session, Game Mode (`src/wine-wrapper.sh`, `src/helpers/`) |
 | `area:app`       | The window, Settings, Play SWTOR (`src/native/`)                                 |
 | `area:engine`    | The Wine engine and SWTOR on Mac's Wine builds (`patches/`, `prebuilt/winemac`, `prebuilt/ntdll`) |
