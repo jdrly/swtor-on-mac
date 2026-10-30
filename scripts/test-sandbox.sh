@@ -811,6 +811,8 @@ if [ "$CHANNEL" = dev ]; then
   "$AB" cap=30 cap-noalign dxvkcap=40 >/dev/null
   check "ab: cap=30 cap-noalign dxvkcap=40" eval '[ "$(envv D9MT_FPS_CAP)/$(envv D9MT_FPS_CAP_ALIGN)/$(envv DXVK_CONFIG)" = "30/0/d3d9.maxFrameRate=40" ]'
   check "ab: cap=10 and cap=x refused, the switches kept" eval '! "$AB" cap=10 >/dev/null 2>&1 && ! "$AB" cap=x >/dev/null 2>&1 && [ "$(envv D9MT_FPS_CAP)" = 30 ]'
+  "$AB" unwritten-off pso-async flush-cap compile-maxconc >/dev/null
+  check "ab: unwritten-off pso-async flush-cap compile-maxconc" eval '[ "$(envv SWTOR_D9MT_AB)" = "unwritten-off pso-async flush-cap compile-maxconc" ] && [ "$(envv D9MT_UNWRITTEN_NULL)/$(envv D9MT_PSO_ASYNC_FLUSH)/$(envv D9MT_FLUSH_CAP)/$(envv D9MT_COMPILE_MAXCONC)" = "0/1/1/1" ]'
   mkdir -p "$H/Library/Caches/SWTOR on Mac/d9mt-ab/t1"
   check "ab: a cold name used before: warned" eval '"$AB" cold=t1 | grep "used before" >/dev/null'
   "$AB" reset --clean >/dev/null
