@@ -26,9 +26,10 @@
   `--ci`, `--feed <version>` for the two halves of a CI release, as in SWGL on Mac).
 - `scripts/ui-snapshot.sh` builds the app's windows into a small test bundle and runs it on a
   temporary virtual display (swtor-mac-proper's `tools/vd/with-vd.sh`), never on the main one:
-  screenshots of the main window in its states and of Settings (`shots`), and what the warp
-  costs (`measure`, `sweep`, `findcost`, `idlecheck`, `stillcheck`: CPU, instructions, the
-  GPU time the GPU driver counts for the process, frames drawn).
+  screenshots of the main window in its states, of Settings and of the Logs collected alert
+  (`shots`), which keys close that alert (`alertkeys`), and what the warp costs (`measure`,
+  `sweep`, `findcost`, `idlecheck`, `stillcheck`: CPU, instructions, the GPU time the GPU driver
+  counts for the process, frames drawn).
 - `.github/workflows/checks.yml` lints the scripts and builds the app;
   `.github/workflows/release.yml` signs and notarizes on a `v*` tag. Both build on GitHub's
   `xcode-27` image (macOS 27 with Xcode 27, a public preview; there is no `macos-27` label).

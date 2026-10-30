@@ -18,6 +18,7 @@
 #                                                (counted from 4 s on: about 70 frames in 20 s)
 #   scripts/ui-snapshot.sh stillcheck           the window as 0.1.4 ships it (the warp still), in
 #                                                front, no input: one draw at most, then nothing
+#   scripts/ui-snapshot.sh alertkeys            which button Return and Esc press in Collect Logs…'s alert
 #   scripts/ui-snapshot.sh build                 only builds .cache/ui-snapshot/UISnapshot.app, for
 #                                                several runs in one with-vd.sh call
 #
@@ -42,8 +43,14 @@ cat >"$B/Info.plist" <<EOF
 <key>CFBundleShortVersionString</key><string>0.1.3</string>
 <key>ATSApplicationFontsPath</key><string>Fonts</string>
 <key>LSUIElement</key><true/>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>CFBundleIconName</key><string>AppIcon</string>
 </dict></plist>
 EOF
+# the app's icon (as build.sh makes it), for the alerts
+xcrun actool "$ROOT/src/AppIcon.icon" --compile "$B/Resources" --platform macosx \
+  --minimum-deployment-target "$(plutil -extract LSMinimumSystemVersion raw src/Info.plist)" \
+  --app-icon AppIcon --output-partial-info-plist "$ROOT/.cache/ui-snapshot/icon.plist" >/dev/null
 install -m 644 src/fonts/*.ttf "$B/Resources/Fonts/"
 printf 'version=0.1.3\nauthor=Jan Drlý\ngithub=https://github.com/jdrly\nrepo=https://github.com/jdrly/swtor-on-mac\n' >"$B/Resources/app.properties"
 printf 'app 0.1.3\nd9mt 2a1bc00\nengine cx-26.3.0-8\n' >"$B/Resources/VERSIONS"

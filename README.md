@@ -167,7 +167,7 @@ setup up to the app's version. [docs/updates.md](docs/updates.md) has the detail
 ## Getting help
 
 1. Choose **SWTOR on Mac > Collect Logs…**. After 10 to 30 seconds it saves
-   `SWTOR-on-Mac-logs-<date>.zip` to your Desktop and shows it in Finder.
+   `SWTOR-on-Mac-logs-<date>.zip` to your Desktop. **Show in Finder** shows it there.
 2. Send the zip, with a few lines on what happened and when, to Pharaphobia on
    [Discord](https://discord.gg/AnV3fZWz2b) or attach it to a
    [GitHub issue](https://github.com/jdrly/swtor-on-mac/issues/new/choose).

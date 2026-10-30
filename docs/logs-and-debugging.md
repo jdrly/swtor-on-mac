@@ -6,7 +6,8 @@ What Collect Logs puts in its zip, and the tools for a report about stutter or f
 
 Choose **SWTOR on Mac > Collect Logs…**. After 10–30 seconds (the menu item says
 *Collecting Logs…* meanwhile) it saves `SWTOR-on-Mac-logs-<date>.zip` to your Desktop (or,
-without access to the Desktop, to `~/Library/Logs/SWTOR on Mac`) and shows it in Finder.
+without access to the Desktop, to `~/Library/Logs/SWTOR on Mac`) and says where it is. **Show in
+Finder** shows it there; **Close** (Return or Esc) just closes the message.
 
 The zip holds SWTOR on Mac's logs, `env`, `settings.conf`, `dxvk.conf`,
 `install-manifest.json`, the versions, system information (macOS, chip, memory, displays, the size of macOS's Metal caches for the engine's processes, shared with other CrossOver-based apps, the size of Metal's archive usage index and the MDB_MAP_FULL events of the last 2 hours beside it) and

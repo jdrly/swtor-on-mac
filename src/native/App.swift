@@ -656,25 +656,50 @@ final class LogCollector {
 
   private func finished(zip: String?, problem: String?) {
     busy = false
+    let alert = Self.alert(zip: zip, problem: problem)
+    NSApp.activate()
+    let escape = Self.closeOnEscape(alert)
+    let response = alert.runModal()
+    NSEvent.removeMonitor(escape)
+    if let zip, response == .alertSecondButtonReturn {
+      NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: zip)])
+    }
+  }
+
+  // Esc presses the first button too: AppKit gives Esc only to a button titled Cancel. Returns
+  // the monitor to remove once the alert is closed.
+  static func closeOnEscape(_ alert: NSAlert) -> Any {
+    let window = alert.window, close = alert.buttons[0]
+    return NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+      guard event.keyCode == 53, event.window === window else { return event }
+      MainActor.assumeIsolated { close.performClick(nil) }
+      return nil
+    }!
+  }
+
+  // Close (Return) and Show in Finder; with two buttons, macOS 26 lays the alert out wide, icon
+  // beside the text (also for scripts/ui-snapshot.swift)
+  static func alert(zip: String?, problem: String?) -> NSAlert {
     let alert = NSAlert()
     if let zip {
       let folder = FileManager.default.displayName(atPath: (zip as NSString).deletingLastPathComponent)
       alert.messageText = "Logs collected"
-      alert.informativeText = "\((zip as NSString).lastPathComponent) is in your \(folder) folder. Send it with a "
-        + "short description of the problem to Pharaphobia on Discord or attach it to a GitHub issue, "
-        + "not to Broadsword or SWTOR customer support. It includes the crash reports of the game, "
-        + "Wine and SWTOR on Mac from the last 7 days, so you don't need to look for them, and "
-        + "contains no account names or passwords."
+      alert.informativeText = "\((zip as NSString).lastPathComponent) is in your \(folder) folder. Send it to "
+        + "Pharaphobia on Discord with a short description of the problem, or attach it to a GitHub "
+        + "issue. SWTOR's customer support can't help with SWTOR on Mac, so please don't send it there.\n\n"
+        + "The zip has the crash reports of the game, Wine and SWTOR on Mac from the last 7 days, so "
+        + "you don't have to look for them. It has no account names or passwords."
+      // Return, explicitly: on macOS 26 the first button has no key equivalent until runModal
+      alert.addButton(withTitle: "Close").keyEquivalent = "\r"
       alert.addButton(withTitle: "Show in Finder")
     } else {
       alert.alertStyle = .warning
       alert.messageText = "Could not collect the logs"
       alert.informativeText = "\(problem?.isEmpty == false ? problem! : "collect-logs.sh failed.")\n\n"
         + "The logs are in ~/Library/Logs/SWTOR on Mac."
+      alert.addButton(withTitle: "OK")
     }
-    NSApp.activate()
-    alert.runModal()
-    if let zip { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: zip)]) }
+    return alert
   }
 }
 
