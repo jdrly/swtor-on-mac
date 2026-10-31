@@ -92,9 +92,13 @@ For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, t
 
 ## d9mt pin
 
-`main` pins d9mt `b532e9c`, main after jdrly/d9mt#122. It keeps the shaders players compiled
-with 0.1.5.1 on macOS 27 (#122: the AIR cache keyed on the shader compiler's code, with 0.1.5.1's
-cache adopted; AIR codegen id `38243f7b…`, lineage 0.1.5.1). It brings shaders
+`main` pins d9mt `73511be`, main after jdrly/d9mt#125: a StretchRect of a sub-rect of a
+multisampled surface is resolved at its offset, not the whole source at (0,0). It changes only
+`d3d9.dll`; `winemetal.so` and `winemetal.dll` are byte for byte `b532e9c`'s, with the same AIR
+codegen id, so players keep 0.1.6's shader cache. `b532e9c`, main after jdrly/d9mt#122, keeps
+the shaders players compiled with 0.1.5.1 on macOS 27 (#122: the AIR cache keyed on the shader
+compiler's code, with 0.1.5.1's cache adopted; AIR codegen id `38243f7b…`, lineage 0.1.5.1). It
+brings shaders
 tagged with the AIR version macOS 26 accepts (#110), textures sampled before their first write
 read as empty (#105), a GPU hang ends the game (#53), the per-draw vertex copy clamped from the
 first vertex (#57), the GPU canary on every present and at most every 250 ms otherwise (#67), and

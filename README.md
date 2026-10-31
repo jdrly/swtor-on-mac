@@ -430,7 +430,7 @@ that holds its EdDSA key, which never leaves that Mac. [docs/building.md](docs/b
 |---|---|---|
 | Wine engine `cx-26.3.0-8`, CrossOver 26.3 with Wine 11.0, x86_64 WoW64 | [athei/wine-build cx-26.3.0-8](https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
 | Sparkle 2.10.0, bundled | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
-| d9mt `b532e9c`, bundled in `prebuilt/d9mt` | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/b532e9c0f04b36913b8fe43bd9580c238d177e11) | see `prebuilt/d9mt` |
+| d9mt `73511be`, bundled in `prebuilt/d9mt` | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/73511bed36cf9264d8421f880e7d1bdde32952d9) | see `prebuilt/d9mt` |
 | Wine sources for the Mac driver and `ntdll.so`, athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), codeload tar.gz | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006, only to configure that build | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 

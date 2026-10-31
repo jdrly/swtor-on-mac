@@ -30,7 +30,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 REPO="${D9MT_SRC:-https://github.com/jdrly/d9mt.git}"
-COMMIT=b532e9c0f04b36913b8fe43bd9580c238d177e11
+COMMIT=73511bed36cf9264d8421f880e7d1bdde32952d9
 MACOS_MIN=26.0
 # The AIR cache lineage the bridge must report (d9mt ADR-0006): with it, players keep the shaders
 # compiled by that release. Another Xcode or LLVM that changes the AIR codegen's code gives
