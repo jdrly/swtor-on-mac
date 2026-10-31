@@ -294,8 +294,8 @@ struct SettingsView: View {
         Toggle(isOn: settings.toggle("flushcap")) {
           Text("Fewer GPU Batches (Experimental)")
           Text("Sends each frame to the GPU in fewer, larger batches, so less data moves through "
-               + "memory. Recommended on for MacBook Air, and worth a try on a base M1, M2 or M3. "
-               + "Turn it off if the game stutters more.")
+               + "memory. Recommended for lower-end MacBooks and MacBook Airs. Turn it off if the "
+               + "game stutters more.")
         }
       }
 
