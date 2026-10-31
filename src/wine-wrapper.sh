@@ -88,6 +88,22 @@ fps_limit() {
   export D9MT_FPS_CAP="$SWTOR_FPS_LIMIT"
 }
 
+# Fewer GPU Batches (Settings, experimental): d9mt's flush cap for the game, D9MT_FLUSH_CAP=1
+# (d9mt #113; d9mt's own line is an info line, in wine.log only with Debug Logging on). A
+# development build's $CONF reads d9mt-ab.env after its settings, so a D9MT_FLUSH_CAP set there
+# (d9mt-ab.sh flush-cap, flush-cap-off) wins over Settings: keep that order. Sets flush_note
+# for wine.log.
+flush_cap() {
+  flush_note=""
+  [ "$SWTOR_FLUSH_CAP" = 1 ] || return 0
+  if [ -n "${D9MT_FLUSH_CAP+set}" ] && [ "$D9MT_FLUSH_CAP" != 1 ]; then
+    flush_note="D9MT_FLUSH_CAP=$D9MT_FLUSH_CAP from d9mt-ab, over Settings' on"
+    return 0
+  fi
+  flush_note="on"
+  export D9MT_FLUSH_CAP=1
+}
+
 # The game's language, from its command line: the values of "-set lang" and "-set torsets"
 # only, their letters, digits and , . _ - (the line also holds the account name and session
 # token, which are never read). Sets game_lang ("lang=de-de torsets=..." or "not given").
@@ -165,6 +181,7 @@ if [ -n "$SWTOR_ENGINE" ]; then
       # Debug Logging: Wine debug channels for the game only (RAWMOUSE, THREADCPU lines)
       [ -z "$SWTOR_GAME_WINEDEBUG" ] || export WINEDEBUG="$SWTOR_GAME_WINEDEBUG"
       fps_limit
+      flush_cap
       game_lang "$@"
       # (and the locale the game gets: a German one once failed where English worked)
       { date; env | grep -E '^(WINE|DYLD_|SWTOR_|DXVK_|MTL_|D9MT_|LANG=|LC_)' | sort
@@ -186,6 +203,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
         [ -z "$SWTOR_D9MT_AB" ] || echo "SWTOR on Mac d9mt-ab: $SWTOR_D9MT_AB" >&2
         # the Frame Rate Limit, if one is set (d9mt's own "frame cap" line follows)
         [ -z "$fps_note" ] || echo "SWTOR on Mac frame rate limit: $fps_note" >&2
+        # Fewer GPU Batches, if on (with Debug Logging, d9mt's "flush cap" line follows)
+        [ -z "$flush_note" ] || echo "SWTOR on Mac flush cap: $flush_note" >&2
         # the game's language and locale (after those: the A/B switches stay the second line)
         echo "SWTOR on Mac game language: $game_lang, LANG=${LANG:-}" >&2
       else

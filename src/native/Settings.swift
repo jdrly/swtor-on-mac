@@ -289,6 +289,15 @@ struct SettingsView: View {
                + "of memory. Unlimited is for comparisons.")
         }
       }
+      Section {
+        // d9mt's flush cap, D9MT_FLUSH_CAP=1 for the game (som.sh flushcap)
+        Toggle(isOn: settings.toggle("flushcap")) {
+          Text("Fewer GPU Batches (Experimental)")
+          Text("Sends each frame to the GPU in fewer, larger batches, so less data moves through "
+               + "memory. Recommended for lower-end MacBooks and MacBook Airs. Turn it off if the "
+               + "game stutters more.")
+        }
+      }
 
     case .game:
       Section {

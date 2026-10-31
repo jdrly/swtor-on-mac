@@ -74,7 +74,9 @@ performance. A setting you choose is kept through updates and Reinstall.
   cache from the `STATECACHE` lines: what it loaded (and whether the last session ended
   during its prewarm, `guard`), what the prewarm built or failed, and how many pipelines the
   game then found prewarmed (`hits`), still building (`late`) or not in it (`misses`);
-  StretchRect and ColorFill by path from the `XFER` lines.
+  StretchRect and ColorFill by path from the `XFER` lines;
+- (0.1.7 and later) Settings' Fewer GPU Batches when it is on (the wrapper's `flush cap:` line)
+  and, with Debug Logging, the flush cap d9mt applies.
 
 `wine.log` starts afresh at every game start (the wrapper keeps the 4 before it as
 `wine.log.1` to `wine.log.4`, the newest first), so `--keep` saves a copy to `sessions/`.
