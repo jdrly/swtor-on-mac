@@ -62,7 +62,7 @@ the parts underneath it:
 
 The app itself is a small window with an Install button, a Play SWTOR button and a Settings
 window. Settings has Retina mode, vsync, a frame rate limit for heat and battery, the video memory
-d9mt reports to the game, Game Mode, the Metal HUD, game keys by keyboard position for non-US
+d9mt reports to the game, an experimental switch for fewer GPU batches, Game Mode, the Metal HUD, game keys by keyboard position for non-US
 layouts, raw mouse-look and its speed, debug logging and update checks.
 [docs/settings.md](docs/settings.md) explains each one.
 

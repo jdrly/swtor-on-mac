@@ -31,7 +31,10 @@
 #                 moment instead of in the build that makes it due (d9mt #114); no archive write
 #                 at exit, so the last pipelines of a session aren't kept
 #   flush-cap     D9MT_FLUSH_CAP=1: weak flush hints don't submit a command buffer mid-frame
-#                 (upstream DXVK's cap on tiling GPUs, d9mt #113)
+#                 (upstream DXVK's cap on tiling GPUs, d9mt #113), as Settings' Fewer GPU
+#                 Batches sets it
+#   flush-cap-off D9MT_FLUSH_CAP=0: no flush cap, also with Fewer GPU Batches on in Settings
+#                 (these switches win over that setting)
 #   compile-maxconc D9MT_COMPILE_MAXCONC=1: asks Metal to compile more pipelines at once
 #                 (d9mt #117)
 #   cold=<name>   an empty shader cache and pipeline archives of their own for this run, in
@@ -107,7 +110,10 @@ for a in "$@"; do
     cap-noalign) add "$a"; var 'D9MT_FPS_CAP_ALIGN=0' ;;
     unwritten-off) add "$a"; var 'D9MT_UNWRITTEN_NULL=0' ;;
     pso-async) add "$a"; var 'D9MT_PSO_ASYNC_FLUSH=1' ;;
-    flush-cap) add "$a"; var 'D9MT_FLUSH_CAP=1' ;;
+    flush-cap|flush-cap-off)
+      v=$([ "$a" = flush-cap ] && echo 1 || echo 0)
+      case "$vars" in *"D9MT_FLUSH_CAP=$((1 - v))"*) echo "flush-cap and flush-cap-off: only one of them" >&2; exit 2 ;; esac
+      add "$a"; var "D9MT_FLUSH_CAP=$v" ;;
     compile-maxconc) add "$a"; var 'D9MT_COMPILE_MAXCONC=1' ;;
     cold=*)
       n=${a#cold=}

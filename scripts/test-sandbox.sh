@@ -614,6 +614,9 @@ check "set fpslimit: empty refused" eval '! som set fpslimit "" >/dev/null 2>&1'
 check "set: two values in one refused (fpslimit '30 40', 'off 30'; hudpos, mousespeed), env unchanged" \
   eval '! som set fpslimit "30 40" >/dev/null 2>&1 && ! som set fpslimit "off 30" >/dev/null 2>&1 && ! som set hudpos "topleft topcenter" >/dev/null 2>&1 && ! som set mousespeed "0.5 0.75" >/dev/null 2>&1 && grep -qx SWTOR_FPS_LIMIT=60 "$SOM/env"'
 som set fpslimit 45 >/dev/null
+check "settings: Fewer GPU Batches off by default, SWTOR_FLUSH_CAP=0 in the env" eval '[ "$(som settings | sed -n "s/^flushcap=//p")" = off ] && grep -qx SWTOR_FLUSH_CAP=0 "$SOM/env" && ! grep -q "^D9MT_FLUSH_CAP" "$SOM/env"'
+som set flushcap on >/dev/null && check "set flushcap on: settings.conf and env, not D9MT_FLUSH_CAP itself (the wrapper sets it for the game)" eval 'grep -qx flushcap=on "$SOM/settings.conf" && grep -qx SWTOR_FLUSH_CAP=1 "$SOM/env" && ! grep -q "^D9MT_FLUSH_CAP" "$SOM/env"'
+check "set flushcap: a value other than on/off refused, the setting kept" eval '! som set flushcap 1 >/dev/null 2>&1 && ! som set flushcap "on off" >/dev/null 2>&1 && grep -qx SWTOR_FLUSH_CAP=1 "$SOM/env"'
 check "set: bad value refused" eval '! som set memory huge >/dev/null 2>&1'
 check "set: bad key refused" eval '! som set foo on >/dev/null 2>&1'
 cp "$SANDBOX/fake" "$SOM/engine/bin/test-leftover"; l5=$(orphan "$SOM/engine/bin/test-leftover"); sleep 0.3
@@ -790,6 +793,9 @@ if [ "$CHANNEL" = dev ]; then
   check "ab: cap=10 and cap=x refused, the switches kept" eval '! "$AB" cap=10 >/dev/null 2>&1 && ! "$AB" cap=x >/dev/null 2>&1 && [ "$(envv D9MT_FPS_CAP)" = 30 ]'
   "$AB" unwritten-off pso-async flush-cap compile-maxconc >/dev/null
   check "ab: unwritten-off pso-async flush-cap compile-maxconc" eval '[ "$(envv SWTOR_D9MT_AB)" = "unwritten-off pso-async flush-cap compile-maxconc" ] && [ "$(envv D9MT_UNWRITTEN_NULL)/$(envv D9MT_PSO_ASYNC_FLUSH)/$(envv D9MT_FLUSH_CAP)/$(envv D9MT_COMPILE_MAXCONC)" = "0/1/1/1" ]'
+  "$AB" flush-cap-off >/dev/null
+  check "ab: flush-cap-off: D9MT_FLUSH_CAP=0" eval '[ "$(envv SWTOR_D9MT_AB)/$(envv D9MT_FLUSH_CAP)" = flush-cap-off/0 ]'
+  check "ab: flush-cap with flush-cap-off refused, the switches kept" eval '! "$AB" flush-cap flush-cap-off >/dev/null 2>&1 && ! "$AB" flush-cap-off flush-cap >/dev/null 2>&1 && [ "$(envv D9MT_FLUSH_CAP)" = 0 ]'
   mkdir -p "$H/Library/Caches/SWTOR on Mac/d9mt-ab/t1"
   check "ab: a cold name used before: warned" eval '"$AB" cold=t1 | grep "used before" >/dev/null'
   "$AB" reset --clean >/dev/null
@@ -813,6 +819,7 @@ check "reinstall: no Wine left running" test -z "$(sandbox_wine)"
 check "reinstall: settings kept" eval 'grep -qx memory=high "$SOM/settings.conf" && grep -qx D9MT_MEMORY_PROFILE=high "$SOM/env" && grep -qx DXVK_LOG_LEVEL=info "$SOM/env"'
 check "reinstall: vsync stays off" eval '! grep -q "^d3d9.presentInterval" "$SOM/dxvk.conf"'
 check "reinstall: Frame Rate Limit 45 only on battery stays" eval 'grep -qx SWTOR_FPS_LIMIT=45 "$SOM/env" && grep -qx SWTOR_FPS_LIMIT_BATTERY=1 "$SOM/env"'
+check "reinstall: Fewer GPU Batches stays on" eval 'grep -qx flushcap=on "$SOM/settings.conf" && grep -qx SWTOR_FLUSH_CAP=1 "$SOM/env"'
 check "reinstall: Retina stays on" reg_has 'Software\\Wine\\Mac Driver' '"RetinaMode"="y"'
 check "reinstall: the app's Mac driver stays" wm_is app
 check "reinstall: PhysicalKeyboard stays y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="y"'
@@ -824,8 +831,8 @@ som set hud off >/dev/null; som set hudpos topcenter >/dev/null
 som set physkeys off >/dev/null && check "set physkeys off again: the app's driver (raw mouse-look on)" wm_is app
 som set vsync on >/dev/null; som set debug off >/dev/null; som set memory auto >/dev/null
 som set gamemode on >/dev/null; som set updates on >/dev/null
-som set fpslimit off >/dev/null; som set fpsbattery off >/dev/null
-check "settings: back to the defaults" eval '[ "$(som settings | sed -n "s/^debug=//p")" = off ] && grep -qx SWTOR_FPS_LIMIT=0 "$SOM/env"'
+som set fpslimit off >/dev/null; som set fpsbattery off >/dev/null; som set flushcap off >/dev/null
+check "settings: back to the defaults" eval '[ "$(som settings | sed -n "s/^debug=//p")" = off ] && grep -qx SWTOR_FPS_LIMIT=0 "$SOM/env" && grep -qx SWTOR_FLUSH_CAP=0 "$SOM/env"'
 
 echo "== 6b. the wrapper's daily update check (stub engine; the game is never started)"
 U="$SANDBOX/update-check"
@@ -836,6 +843,11 @@ cp "$BS_WINE/bin-real/setsid-exec" "$BS_WINE/bin-real/hold-launcher" "$U/bin-rea
 cat >"$U/engine/bin/wine" <<STUB
 #!/bin/bash
 echo "\$@" >>"$U/wine-args"
+# (each start that gets a D9MT_FLUSH_CAP: its value, the game or another command)
+[ -z "\${D9MT_FLUSH_CAP+set}" ] || case " \$* " in
+  *swtor.exe*) echo "D9MT_FLUSH_CAP=\$D9MT_FLUSH_CAP game" >>"$U/flush-env" ;;
+  *) echo "D9MT_FLUSH_CAP=\$D9MT_FLUSH_CAP other" >>"$U/flush-env" ;;
+esac
 case " \$* " in
   *swtor.exe*)
     echo "\$\$ \$PPID" >"$U/game-pids"
@@ -939,6 +951,19 @@ check "wrapper: only on battery, no answer from pmset: no cap, said so" eval '[ 
 sed -i '' 's/^SWTOR_FPS_LIMIT=30$/SWTOR_FPS_LIMIT=0/' "$U/env"; game
 check "wrapper: limit off: no D9MT_FPS_CAP, no line" eval '[ -z "$(fx)" ] && ! grep -q "frame rate limit" "$U/logs/wine.log"'
 check "wrapper: other Wine starts get no cap" eval '! grep -q D9MT_FPS_CAP "$U/logs/hold.log"'
+# Fewer GPU Batches: D9MT_FLUSH_CAP=1 for the game and a wine.log line, nothing when off; a
+# D9MT_FLUSH_CAP from a development build's d9mt-ab.env (read after the settings) wins
+fl() { sed -n 's/^D9MT_FLUSH_CAP=//p' "$U/logs/effective-env.txt"; }
+check "wrapper: Fewer GPU Batches unset: no D9MT_FLUSH_CAP, no line" eval '[ -z "$(fl)" ] && ! grep -q "flush cap" "$U/logs/wine.log"'
+printf 'SWTOR_FLUSH_CAP=1\n' >>"$U/env"; game
+check "wrapper: Fewer GPU Batches on: D9MT_FLUSH_CAP=1 for the game ($(fl))" test "$(fl)" = 1
+check "wrapper: wine.log names it" grep -qx "SWTOR on Mac flush cap: on" "$U/logs/wine.log"
+rm -f "$U/flush-env"; "$U/bin/wine64-preloader" "$U/bin/wine64" 'C:\windows\system32\reg.exe' query 'HKCU\Software' >/dev/null 2>&1; game
+check "wrapper: other Wine starts get no D9MT_FLUSH_CAP, the game does ($(tr '\n' ';' <"$U/flush-env" 2>/dev/null))" eval '[ "$(cat "$U/flush-env" 2>/dev/null)" = "D9MT_FLUSH_CAP=1 game" ]'
+printf 'D9MT_FLUSH_CAP=0\n' >>"$U/env"; game
+check "wrapper: d9mt-ab's D9MT_FLUSH_CAP=0 wins over Settings, said so ($(fl))" eval '[ "$(fl)" = 0 ] && grep -qx "SWTOR on Mac flush cap: D9MT_FLUSH_CAP=0 from d9mt-ab, over Settings'"'"' on" "$U/logs/wine.log"'
+sed -i '' -e '/^D9MT_FLUSH_CAP=/d' -e 's/^SWTOR_FLUSH_CAP=1$/SWTOR_FLUSH_CAP=0/' "$U/env"; game
+check "wrapper: Fewer GPU Batches off: no D9MT_FLUSH_CAP, no line" eval '[ -z "$(fl)" ] && ! grep -q "flush cap" "$U/logs/wine.log"'
 # The game's end: one hold.log line (run time, exit code or signal, its language), the
 # launcher sees the game's status, and the last starts' wine.log are kept (a start that failed,
 # then one that works)
@@ -1795,7 +1820,7 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
     sed -e "s/$a/V/g; s/$b/V/g" -e 's/^SWTOR_D9MT=.*/SWTOR_D9MT=H/' "$1" |
       { if [ "$CHANNEL" = dev ]; then sed 's/^SWTOR_UPDATE_CHECK=.*/SWTOR_UPDATE_CHECK=X/'; else cat; fi; } |
       grep -v -e '^#' -e '^$' -e '^D9MT_STATE_CACHE=' -e 'd9mt-ab\.env' -e '^SWTOR_FPS_LIMIT=' -e '^SWTOR_FPS_LIMIT_BATTERY=' \
-        -e '^SWTOR_SOM_SH=' -e '^SWTOR_ON_MAC_ROOT='
+        -e '^SWTOR_FLUSH_CAP=' -e '^SWTOR_SOM_SH=' -e '^SWTOR_ON_MAC_ROOT='
   }
   echo SWTOR_ON_MAC_VERSION=0.1.5 >"$SANDBOX/envnorm-short"; echo SWTOR_ON_MAC_VERSION=0.1.5.1 >"$SANDBOX/envnorm-long"
   check "env comparison: 0.1.5 and 0.1.5.1 come out alike, either one as this version" eval '( PREVV=0.1.5 APPV=0.1.5.1; diff <(envnorm "$SANDBOX/envnorm-short") <(envnorm "$SANDBOX/envnorm-long") ) >/dev/null && ( PREVV=0.1.5.1 APPV=0.1.5; diff <(envnorm "$SANDBOX/envnorm-short") <(envnorm "$SANDBOX/envnorm-long") ) >/dev/null'
@@ -1832,9 +1857,9 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
     check "over $PREVV: winemetal.dll byte for byte $PREVV's" cmp -s "$PREV_APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll"
   fi
   # (settings.conf: this version writes every setting it knows, so the ones $PREVV does not know,
-  # hudpos, fpslimit and fpsbattery, come in with their defaults)
-  check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter, fpslimit=off, fpsbattery=off), dxvk.conf unchanged" eval 'diff <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/prev-settings.conf") <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && grep -qx fpslimit=off "$SOM/settings.conf" && grep -qx fpsbattery=off "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
-  check "over $PREVV: env: the state cache line, the Frame Rate Limit lines (off), the btm-check lines$([ "$CHANNEL" = dev ] && echo " and the A/B include") added, the rest as before (versions aside)" eval 'diff <(envnorm "$SANDBOX/prev-env") <(envnorm "$SOM/env") >"$SANDBOX/prev-env.diff" && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && [ "$(envv SWTOR_FPS_LIMIT)/$(envv SWTOR_FPS_LIMIT_BATTERY)" = 0/0 ] && [ "$(envv SWTOR_SOM_SH)/$(envv SWTOR_ON_MAC_ROOT)" = "$SOMSH/$SANDBOX" ]'
+  # hudpos, fpslimit, fpsbattery and flushcap, come in with their defaults)
+  check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter, fpslimit=off, fpsbattery=off, flushcap=off), dxvk.conf unchanged" eval 'diff <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" "$SANDBOX/prev-settings.conf") <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && grep -qx fpslimit=off "$SOM/settings.conf" && grep -qx fpsbattery=off "$SOM/settings.conf" && grep -qx flushcap=off "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
+  check "over $PREVV: env: the state cache line, the Frame Rate Limit lines (off), the Fewer GPU Batches line (off), the btm-check lines$([ "$CHANNEL" = dev ] && echo " and the A/B include") added, the rest as before (versions aside)" eval 'diff <(envnorm "$SANDBOX/prev-env") <(envnorm "$SOM/env") >"$SANDBOX/prev-env.diff" && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && [ "$(envv SWTOR_FPS_LIMIT)/$(envv SWTOR_FPS_LIMIT_BATTERY)/$(envv SWTOR_FLUSH_CAP)" = 0/0/0 ] && [ "$(envv SWTOR_SOM_SH)/$(envv SWTOR_ON_MAC_ROOT)" = "$SOMSH/$SANDBOX" ]'
   check "over $PREVV: no Wine left running" test -z "$(sandbox_wine)"
   [ "$CHANNEL" != dev ] || "$APP/Contents/Resources/d9mt-ab.sh" pfv >/dev/null
 
@@ -1889,10 +1914,10 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: the A/B switches removed, said so" eval '[ ! -e "$SOM/d9mt-ab.env" ] && grep -q "^Removed a development build.s d9mt A/B switches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: the cold test caches removed, said so" eval '[ ! -e "$COLD" ] && grep -q "^Removed a development build.s d9mt test caches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: env as a release writes it (no A/B include, state cache on, update check on)" eval '! grep -q d9mt-ab "$SOM/env" && [ "$(envv D9MT_TEX_PFV)/$(envv SWTOR_D9MT_AB)" = "<unset>/<unset>" ] && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && grep -qx SWTOR_UPDATE_CHECK=1 "$SOM/env"'
-  # (this version writes every setting it knows: the Frame Rate Limit's two, which $DEVV does
-  # not know, come in with their defaults; everything else byte for byte)
-  check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high), only fpslimit=off and fpsbattery=off added" \
-    eval '! grep -q -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/dev-settings.conf" && [ "$(grep -c "^fpslimit=" "$SOM/settings.conf")" = 1 ] && grep -qx fpslimit=off "$SOM/settings.conf" && [ "$(grep -c "^fpsbattery=" "$SOM/settings.conf")" = 1 ] && grep -qx fpsbattery=off "$SOM/settings.conf" && cmp -s "$SANDBOX/dev-settings.conf" <(perl -ne "print unless /^(fpslimit|fpsbattery)=/" "$SOM/settings.conf")'
+  # (this version writes every setting it knows: the Frame Rate Limit's two and Fewer GPU
+  # Batches, which $DEVV does not know, come in with their defaults; everything else byte for byte)
+  check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high), only fpslimit=off, fpsbattery=off and flushcap=off added" \
+    eval '! grep -q -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" "$SANDBOX/dev-settings.conf" && [ "$(grep -c "^fpslimit=" "$SOM/settings.conf")" = 1 ] && grep -qx fpslimit=off "$SOM/settings.conf" && [ "$(grep -c "^fpsbattery=" "$SOM/settings.conf")" = 1 ] && grep -qx fpsbattery=off "$SOM/settings.conf" && [ "$(grep -c "^flushcap=" "$SOM/settings.conf")" = 1 ] && grep -qx flushcap=off "$SOM/settings.conf" && cmp -s "$SANDBOX/dev-settings.conf" <(perl -ne "print unless /^(fpslimit|fpsbattery|flushcap)=/" "$SOM/settings.conf")'
   prefix_changes "$SANDBOX/dev-prefix.txt" "" "$SANDBOX/dev-prefix-after.txt" >"$SANDBOX/dev-prefix.diff"
   # (the bridge: $DEVV's, or this app's when the d9mt pin moved with a new one)
   dev_bridge=$(bridge_pinned "$APP" "$DEV_APP" "$SOM/engine" "$sys" && echo moved || echo kept)

@@ -140,6 +140,12 @@ _Avoid_: “raw input” (SWTOR has none).
 The game sees every key by its position on a US keyboard (`PhysicalKeyboard=y`), for layouts whose
 keys type something else (docs/settings.md).
 
+**Fewer GPU Batches**
+The experimental Graphics setting that gives the game d9mt's flush cap (`D9MT_FLUSH_CAP=1`): a
+frame goes to the GPU in fewer command buffers, with fewer mid-frame submits. Off by default; for
+testers on Macs with less memory bandwidth (docs/settings.md).
+_Avoid_: “flush cap” in the window's text and release notes; it is fine in code and logs.
+
 **Debug Logging**
 The Troubleshooting setting that makes d9mt and the Mac driver log in detail (`STATS`, `PACE`,
 `THREADCPU`, `RAWMOUSE` lines) for the next game start; it costs a little performance (docs/settings.md;

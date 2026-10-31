@@ -6,7 +6,7 @@
 #   som.sh uninstall   revert everything (the official install goes back to stock)
 #   som.sh settings    KEY=VALUE lines: the settings (Settings window) and whether they can change
 #   som.sh set K V     change one setting (retina, hud, gamemode, vsync, debug, physkeys,
-#                      rawmouse, fpsbattery: on/off; memory: auto/low/medium/high/ultra/unlimited;
+#                      rawmouse, fpsbattery, flushcap: on/off; memory: auto/low/medium/high/ultra/unlimited;
 #                      updates: on/off; mousespeed: one of MOUSE_SPEEDS; hudpos: one of
 #                      HUD_POSITIONS; fpslimit: one of FPS_LIMITS)
 #   som.sh rehook      the app's check when it opens (and before Play SWTOR): hook the wrapper
@@ -390,9 +390,11 @@ status() {
 #               game from SWTOR_FPS_LIMIT in the env file
 #   fpsbattery  "Only on battery": the limit only if the Mac runs on battery when the game
 #               starts (SWTOR_FPS_LIMIT_BATTERY=1; the wrapper asks pmset once)
+#   flushcap    "Fewer GPU Batches" (experimental): the wrapper sets d9mt's D9MT_FLUSH_CAP=1 for
+#               the game from SWTOR_FLUSH_CAP=1 in the env file (d9mt #113)
 # With physkeys or rawmouse on, the engine's Mac driver is the app's patched build
 # (Resources/wine/), else the engine's own (install_winemac).
-SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery"
+SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery flushcap"
 MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
 HUD_POSITIONS="topleft topcenter topright centerleft centered centerright bottomleft bottomcenter bottomright"
 FPS_LIMITS="off 30 40 45 60"
@@ -400,7 +402,7 @@ setting_default() {
   case "$1" in
     retina|gamemode|vsync|updates|rawmouse) echo on ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
-    hud|physkeys|fpslimit|fpsbattery) echo off ;;
+    hud|physkeys|fpslimit|fpsbattery|flushcap) echo off ;;
     memory) echo auto ;;
     mousespeed) echo 1 ;;
     hudpos) echo topcenter ;;
@@ -413,7 +415,7 @@ setting_valid() { # <key> <value>
   case "$1:$2" in
     retina:on|retina:off|hud:on|hud:off|gamemode:on|gamemode:off|vsync:on|vsync:off) return 0 ;;
     debug:on|debug:off|updates:on|updates:off|physkeys:on|physkeys:off) return 0 ;;
-    rawmouse:on|rawmouse:off|fpsbattery:on|fpsbattery:off) return 0 ;;
+    rawmouse:on|rawmouse:off|fpsbattery:on|fpsbattery:off|flushcap:on|flushcap:off) return 0 ;;
     memory:auto|memory:low|memory:medium|memory:high|memory:ultra|memory:unlimited) return 0 ;;
     mousespeed:*) in_list "$2" "$MOUSE_SPEEDS" && return 0 ;;
     hudpos:*) in_list "$2" "$HUD_POSITIONS" && return 0 ;;
@@ -1071,6 +1073,10 @@ $hud
 # it later).
 SWTOR_FPS_LIMIT=$fps
 SWTOR_FPS_LIMIT_BATTERY=$([ "$(setting fpsbattery)" = on ] && echo 1 || echo 0)
+
+# Fewer GPU Batches (1: on, experimental): the wrapper gives the game d9mt's flush cap,
+# D9MT_FLUSH_CAP=1 (weak flush hints don't submit a command buffer mid-frame)
+SWTOR_FLUSH_CAP=$([ "$(setting flushcap)" = on ] && echo 1 || echo 0)
 
 # At most once a day, when the game starts: look for a newer SWTOR on Mac (a notification
 # if there is one; the app updates itself)
