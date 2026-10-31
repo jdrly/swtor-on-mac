@@ -51,3 +51,29 @@ owned_path() {
     esac
   done
 }
+# macho_same <a> <b>: the same Mach-O code: equal once their code signatures and the space
+# codesign reserves for one (__LINKEDIT's vmsize) are left out
+macho_same() {
+  local t r
+  t=$(mktemp -d)
+  cp "$1" "$t/a" && cp "$2" "$t/b" || { rm -rf "$t"; return 1; }
+  codesign --remove-signature "$t/a" 2>/dev/null || true
+  codesign --remove-signature "$t/b" 2>/dev/null || true
+  python3 -I -c '
+import struct, sys
+def norm(p):
+    b = bytearray(open(p, "rb").read())
+    if struct.unpack_from("<I", b, 0)[0] != 0xfeedfacf:
+        sys.exit(1)
+    off = 32
+    for _ in range(struct.unpack_from("<I", b, 16)[0]):
+        cmd, size = struct.unpack_from("<II", b, off)
+        if cmd == 0x19 and bytes(b[off + 8:off + 24]).rstrip(b"\0") == b"__LINKEDIT":
+            struct.pack_into("<Q", b, off + 32, 0)
+        off += size
+    return bytes(b)
+sys.exit(0 if norm(sys.argv[1]) == norm(sys.argv[2]) else 1)' "$t/a" "$t/b"
+  r=$?
+  rm -rf "$t"
+  return $r
+}

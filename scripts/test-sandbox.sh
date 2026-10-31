@@ -32,6 +32,9 @@ cd "$(dirname "$0")/.."
 # ok, bad, check, piped and the job runner's rules (owned_path)
 # shellcheck source=scripts/fixtures/lib.sh
 . scripts/fixtures/lib.sh
+# bridge_moved, bridge_pinned, bridge_prefix_extra (sections 14d, 15 and 16)
+# shellcheck source=scripts/fixtures/bridge.sh
+. scripts/fixtures/bridge.sh
 pass=0 fail=0
 APP="$(cd "${1:-dist/SWTOR on Mac.app}" && pwd)"
 SOMSH="$APP/Contents/Resources/som.sh"
@@ -106,32 +109,6 @@ sbx_wine() {
 }
 # envv <name>: the variable as the wrapper gets it from the sandbox's env file ("<unset>" if not)
 envv() { ( set -a; . "$SOM/env"; set +a; eval "printf '%s' \"\${$1-<unset>}\"" ); }
-# macho_same <a> <b>: the same Mach-O code: equal once their code signatures and the space
-# codesign reserves for one (__LINKEDIT's vmsize) are left out
-macho_same() {
-  local t r
-  t=$(mktemp -d)
-  cp "$1" "$t/a" && cp "$2" "$t/b" || { rm -rf "$t"; return 1; }
-  codesign --remove-signature "$t/a" 2>/dev/null || true
-  codesign --remove-signature "$t/b" 2>/dev/null || true
-  python3 -I -c '
-import struct, sys
-def norm(p):
-    b = bytearray(open(p, "rb").read())
-    if struct.unpack_from("<I", b, 0)[0] != 0xfeedfacf:
-        sys.exit(1)
-    off = 32
-    for _ in range(struct.unpack_from("<I", b, 16)[0]):
-        cmd, size = struct.unpack_from("<II", b, off)
-        if cmd == 0x19 and bytes(b[off + 8:off + 24]).rstrip(b"\0") == b"__LINKEDIT":
-            struct.pack_into("<Q", b, off + 32, 0)
-        off += size
-    return bytes(b)
-sys.exit(0 if norm(sys.argv[1]) == norm(sys.argv[2]) else 1)' "$t/a" "$t/b"
-  r=$?
-  rm -rf "$t"
-  return $r
-}
 cleanup_wine() {
   local ws="$SOM/engine/bin/wineserver"
   [ -x "$ws" ] && WINEPREFIX="$SOM/prefix" DYLD_FALLBACK_LIBRARY_PATH="$SOM/frameworks:/usr/lib" "$ws" -k 2>/dev/null || true
@@ -1722,11 +1699,14 @@ prefix_changes() {
 # app's build and the engine's own, checked by ntdll_is_apps) and the app's Mac driver where
 # this version's build differs from the other's (winemac.so and its PE sides: then exactly this
 # app's files). A Developer ID build of either side signs its Mach-O files, winemetal.so and
-# winemac.so, with signatures of their own: those may differ, their code not.
+# winemac.so, with signatures of their own: those may differ, their code not. With "moved" (the
+# d9mt bridge changed with the pin, and bridge_pinned found the engine's to be this app's)
+# winemetal.so and winemetal.dll may differ too.
 engine_same() {
   local f
   while IFS= read -r f; do
     case "$f" in ""|./lib/wine/x86_64-unix/ntdll.so|./lib/wine/x86_64-unix/ntdll.so.stock) continue ;; esac
+    case "$f" in ./lib/wine/x86_64-unix/winemetal.so|./lib/wine/x86_64-windows/winemetal.dll) [ "${2:-}" != moved ] || continue ;; esac
     case "$f" in
       ./lib/wine/x86_64-unix/winemac.so)
         ! cmp -s "$APP/Contents/Resources/wine/winemac.so" "$SOM/engine/$f" || continue ;;
@@ -1788,6 +1768,10 @@ echo ./lib/wine/x86_64-unix/other.so >>"$SANDBOX/fake-engine.diff"
 check "engine comparison: another changed file fails" eval '! ( SOM="$FE"; engine_same fake ) >/dev/null 2>&1'
 rm -rf "$FE" "$SANDBOX/fake-engine" "$SANDBOX/fake-engine.diff"
 
+# the d9mt bridge over another version (sections 15 and 16): fixture group bridge
+echo "== 14d. the bridge may change over another version only with the d9mt pin, to this app's"
+fx_bridge "$APP" "$SANDBOX/bridge-fixture"
+
 if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   PREVSOM="$PREV_APP/Contents/Resources/som.sh"
   PREVV=$(sed -n 's/^version=//p' "$PREV_APP/Contents/Resources/app.properties")
@@ -1830,15 +1814,23 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   check "over $PREVV: @done, manifest $APPV" eval 'grep -q "^@done" "$SANDBOX/prev-upgrade.txt" && [ "$(plutil -extract version raw -o - "$SOM/install-manifest.json")" = "$APPV" ]'
   check "over $PREVV: the engine already in place, no download" eval 'grep -q "is already in place" "$SANDBOX/prev-upgrade.txt" && ! grep -q "Unpacking the Wine engine" "$SANDBOX/prev-upgrade.txt"'
   prefix_changes "$SANDBOX/prev-prefix.txt" "" "$SANDBOX/prev-prefix-after.txt" >"$SANDBOX/prev-prefix.diff"
+  # (the bridge: $PREVV's, or this app's when the d9mt pin moved with a new one, 0.1.6 over 0.1.5.1)
+  prev_bridge=$(bridge_pinned "$APP" "$PREV_APP" "$SOM/engine" "$sys" && echo moved || echo kept)
   # (a previous release with this version's d3d9.dll, 0.1.2 for 0.1.3: nothing changes)
-  check "over $PREVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" eval '[ -z "$(grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll "$SANDBOX/prev-prefix.diff")" ]'
+  check "over $PREVV: in the prefix at most d9mt's d3d9.dll$([ "$prev_bridge" = kept ] || echo " and its bridge's winemetal.dll") changed ($(tr '\n' ' ' <"$SANDBOX/prev-prefix.diff"))" eval '[ -z "$(bridge_prefix_extra "$SANDBOX/prev-prefix.diff" "$prev_bridge")" ]'
   check "over $PREVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/prev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-engine.diff"
-  check "over $PREVV: the engine unchanged, signatures aside, but ntdll.so and this app's Mac driver ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same prev
+  check "over $PREVV: the engine unchanged, signatures aside, but ntdll.so and this app's Mac driver$([ "$prev_bridge" = kept ] || echo " and d9mt bridge") ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same prev "$prev_bridge"
   # ($PREVV's ntdll.so: the engine's own, or, from 0.1.2 on, the app's build in its own signature)
   check "over $PREVV: the app's ntdll.so, the engine's own kept as .stock" eval 'ntdll_is_apps && { cmp -s "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" || macho_same "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so"; }'
-  check "over $PREVV: winemetal.so is $PREVV's code (LC_UUID $(dwarfdump -u "$WM/winemetal.so" | awk '{ print $2 }'))" eval 'macho_same "$PREV_APP/Contents/Resources/d9mt/winemetal.so" "$WM/winemetal.so" && [ "$(dwarfdump -u "$WM/winemetal.so" | awk "{ print \$2 }")" = "$(dwarfdump -u "$PREV_APP/Contents/Resources/d9mt/winemetal.so" | awk "{ print \$2 }")" ]'
-  check "over $PREVV: winemetal.dll byte for byte $PREVV's" cmp -s "$PREV_APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll"
+  if [ "$prev_bridge" = moved ]; then
+    check "over $PREVV: winemetal.so is this app's code, the bridge moved with the d9mt pin ($(cat "$PREV_APP/Contents/Resources/d9mt/VERSION") -> $(cat "$APP/Contents/Resources/d9mt/VERSION"); LC_UUID $(dwarfdump -u "$WM/winemetal.so" | awk '{ print $2 }'))" \
+      eval 'macho_same "$APP/Contents/Resources/d9mt/winemetal.so" "$WM/winemetal.so" && [ "$(dwarfdump -u "$WM/winemetal.so" | awk "{ print \$2 }")" = "$(dwarfdump -u "$APP/Contents/Resources/d9mt/winemetal.so" | awk "{ print \$2 }")" ]'
+    check "over $PREVV: winemetal.dll byte for byte this app's (in the engine and the prefix)" eval 'cmp -s "$APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll" && cmp -s "$APP/Contents/Resources/d9mt/winemetal.dll" "$sys/winemetal.dll"'
+  else
+    check "over $PREVV: winemetal.so is $PREVV's code (LC_UUID $(dwarfdump -u "$WM/winemetal.so" | awk '{ print $2 }'))" eval 'macho_same "$PREV_APP/Contents/Resources/d9mt/winemetal.so" "$WM/winemetal.so" && [ "$(dwarfdump -u "$WM/winemetal.so" | awk "{ print \$2 }")" = "$(dwarfdump -u "$PREV_APP/Contents/Resources/d9mt/winemetal.so" | awk "{ print \$2 }")" ]'
+    check "over $PREVV: winemetal.dll byte for byte $PREVV's" cmp -s "$PREV_APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll"
+  fi
   # (settings.conf: this version writes every setting it knows, so the ones $PREVV does not know,
   # hudpos, fpslimit and fpsbattery, come in with their defaults)
   check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter, fpslimit=off, fpsbattery=off), dxvk.conf unchanged" eval 'diff <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/prev-settings.conf") <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && grep -qx fpslimit=off "$SOM/settings.conf" && grep -qx fpsbattery=off "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
@@ -1902,12 +1894,14 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high), only fpslimit=off and fpsbattery=off added" \
     eval '! grep -q -e "^fpslimit=" -e "^fpsbattery=" "$SANDBOX/dev-settings.conf" && [ "$(grep -c "^fpslimit=" "$SOM/settings.conf")" = 1 ] && grep -qx fpslimit=off "$SOM/settings.conf" && [ "$(grep -c "^fpsbattery=" "$SOM/settings.conf")" = 1 ] && grep -qx fpsbattery=off "$SOM/settings.conf" && cmp -s "$SANDBOX/dev-settings.conf" <(perl -ne "print unless /^(fpslimit|fpsbattery)=/" "$SOM/settings.conf")'
   prefix_changes "$SANDBOX/dev-prefix.txt" "" "$SANDBOX/dev-prefix-after.txt" >"$SANDBOX/dev-prefix.diff"
+  # (the bridge: $DEVV's, or this app's when the d9mt pin moved with a new one)
+  dev_bridge=$(bridge_pinned "$APP" "$DEV_APP" "$SOM/engine" "$sys" && echo moved || echo kept)
   # (a development build with this version's d3d9.dll, 0.1.2-dev.3 for 0.1.2 and 0.1.3: nothing
   # changes; with an older pin, d3d9.dll)
-  check "over $DEVV: in the prefix at most d9mt's d3d9.dll changed ($(tr '\n' ' ' <"$SANDBOX/dev-prefix.diff"))" eval '[ -z "$(grep -F -v -x -- ./drive_c/windows/system32/d3d9.dll "$SANDBOX/dev-prefix.diff")" ]'
+  check "over $DEVV: in the prefix at most d9mt's d3d9.dll$([ "$dev_bridge" = kept ] || echo " and its bridge's winemetal.dll") changed ($(tr '\n' ' ' <"$SANDBOX/dev-prefix.diff"))" eval '[ -z "$(bridge_prefix_extra "$SANDBOX/dev-prefix.diff" "$dev_bridge")" ]'
   check "over $DEVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/dev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/dev-engine.diff"
-  check "over $DEVV: the engine unchanged, signatures aside, but ntdll.so and this app's Mac driver ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev
+  check "over $DEVV: the engine unchanged, signatures aside, but ntdll.so and this app's Mac driver$([ "$dev_bridge" = kept ] || echo " and d9mt bridge") ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev "$dev_bridge"
   # ($DEVV's ntdll.so: the engine's own, or, from 0.1.2-dev.1 on, the app's build in its own
   # signature, its code ours)
   check "over $DEVV: the app's ntdll.so, the engine's own kept as .stock ($DEVV had $(cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" && echo "the engine's" || echo "the app's build"))" eval 'ntdll_is_apps && { cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" || macho_same "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so"; }'
