@@ -139,7 +139,7 @@ Path:             /Users/fxplayer/Library/Application Support/SWTOR on Mac/engin
 Footprint:        9.10 GB
 Num threads:      140
 
-  Thread 0x3001    Thread name "wine_d9mt_present"    12 samples (1-12)    priority 47 (base 47)    cpu time 0.500s
+  Thread 0x3001    Thread name "d9mt-compile"    12 samples (1-12)    priority 47 (base 47)    cpu time 0.500s
   12  ??? (SecretAppBeta + 1) [0x2] 1-12
 
 Binary Images:
@@ -156,7 +156,7 @@ EOF
     "0" : {"pid" : 0, "procname" : "kernel_task", "processUptime" : 12500.0, "threadById" : {"10" : {"id" : 10, "name" : "kernel-thread-x"}}},
     "312" : {"pid" : 312, "procname" : "WindowServer", "processUptime" : 9900.4, "threadById" : {"11" : {"id" : 11, "name" : "ws_main_thread"}, "12" : {"id" : 12, "name" : "com.apple.coreanimation.render-server"}, "13" : {"id" : 13}}},
     "313" : {"pid" : 313, "procname" : "loginwindow", "processUptime" : 12420.0, "threadById" : {"14" : {"id" : 14, "name" : "lw_main"}}},
-    "4321" : {"pid" : 4321, "procname" : "swtor.exe", "processUptime" : 169.7, "threadById" : {"15" : {"id" : 15, "name" : "d9mt_present"}, "16" : {"id" : 16, "name" : "render $me queue"}}},
+    "4321" : {"pid" : 4321, "procname" : "swtor.exe", "processUptime" : 169.7, "threadById" : {"15" : {"id" : 15, "name" : "d9mt-compile"}, "16" : {"id" : 16, "name" : "render $me queue"}}},
     "900" : {"pid" : 900, "procname" : "SecretAppAlpha", "processUptime" : 120.0, "threadById" : {"17" : {"id" : 17, "name" : "alpha-worker-thread"}}},
     "901" : {"pid" : 901, "procname" : "SecretDaemonGamma", "processUptime" : 99.0, "threadById" : {"18" : {"id" : 18, "name" : "gamma-thread"}}}
   }
@@ -197,45 +197,47 @@ EOF
   local d="system-reports"
   check "system reports: the extracts, the Mac's name gone from the names" eval '[ "$(LC_ALL=C ls "$SR_OUT/$d" | tr "\n" " ")" = "WindowServer-2026-10-31-195329.ips.txt WindowServer-2026-10-31-234600.ips.txt WindowServer_2026-10-31-195334.userspace_watchdog_timeout.spin.txt gpuEvent-swtor.exe-2026-10-31-195244.ips panic-full-2026-11-01-000358.0002.panic.txt swtor.exe_2026-10-31-213115.diag.txt " ]'
   check "system reports: the GPU event whole" eval 'sr_has "$d/gpuEvent-swtor.exe-2026-10-31-195244.ips" "\"restart_reason_desc\":\"BIF0 page fault\"" && sr_has "$d/gpuEvent-swtor.exe-2026-10-31-195244.ips" "\"is_read\":true"'
+  # (ws, wc, sp, pn and dg are read in the checks' eval strings)
+  # shellcheck disable=SC2034
   local ws="$d/WindowServer-2026-10-31-195329.ips.txt"
-  # (timed, macOS's time daemon, is in its process list: "timed out" stays)
-  check "system reports: WindowServer's termination and thermal pressure" eval 'sr_has "$ws" "Termination: namespace WATCHDOG, code 1, indicator monitoring timed out for service" && sr_has "$ws" "  40 seconds since last successful checkin" && sr_has "$ws" "Thermal pressure: ThermalPressureLevelNominal (0)" && sr_has "$ws" "Timestamp: 2026-10-31 19:53:29.00 +0100"'
-  check "system reports: WindowServer's details with another app's name as OTHER" sr_has "$ws" "  waiting on OTHER for 40 seconds since /Users/USER/Library"
+  check "system reports: WindowServer's termination and thermal pressure" eval 'sr_has "$ws" "Termination namespace: WATCHDOG" && sr_has "$ws" "Termination code: 1" && sr_has "$ws" "Termination indicator: monitoring timed out for service" && sr_has "$ws" "  40 seconds since last successful checkin" && sr_has "$ws" "Thermal pressure: ThermalPressureLevelNominal (0)" && sr_has "$ws" "Timestamp: 2026-10-31 19:53:29.00 +0100"'
+  check "system reports: WindowServer's details: its own service kept, a line of no known form left out" eval 'sr_has "$ws" "  (1 monitored services unresponsive): checkin with service: WindowServer (0 induced crashes) returned not alive with context:" && sr_has "$ws" "(a line of an unknown form, left out)"'
   check "system reports: WindowServer's report without its stack shot or key" eval '! sr_has "$ws" ws_main_thread && ! sr_has "$ws" 0000000000aa'
-  # (wc, sp, pn and dg are read in the checks' eval strings)
   # shellcheck disable=SC2034
   local wc="$d/WindowServer-2026-10-31-234600.ips.txt"
-  check "system reports: a cut-off WindowServer report: its first lines' fields, the details' names as OTHER" eval 'sr_has "$wc" "(its JSON is cut off" && sr_has "$wc" "Termination: namespace WATCHDOG, code 1, indicator monitoring timed out for service" && sr_has "$wc" "Uptime: 9000 s" && sr_has "$wc" "  waiting on OTHER" && grep -qF "WindowServer-2026-10-31-234600.ips.txt (" "$SR_OUT/system-info.txt"'
+  check "system reports: a cut-off WindowServer report: its first lines' fields" eval 'sr_has "$wc" "(its JSON is cut off" && sr_has "$wc" "Termination namespace: WATCHDOG" && sr_has "$wc" "Termination indicator: monitoring timed out for service" && sr_has "$wc" "Uptime: 9000 s" && grep -qF "WindowServer-2026-10-31-234600.ips.txt (" "$SR_OUT/system-info.txt"'
   # shellcheck disable=SC2034
   local sp="$d/WindowServer_2026-10-31-195334.userspace_watchdog_timeout.spin.txt"
-  check "system reports: the spin's header" eval 'sr_has "$sp" "Event:            service process watchdog" && sr_has "$sp" "Duration:         5.50s" && ! sr_has "$sp" "Shared Cache:"'
-  check "system reports: the spin's WindowServer and game threads" eval 'sr_has "$sp" "Thread name \"ws_main_thread\"" && sr_has "$sp" "Process: swtor.exe" && sr_has "$sp" "Thread name \"wine_d9mt_present\"" && sr_has "$sp" "Num threads:      140"'
+  check "system reports: the spin's header" eval 'sr_has "$sp" "Event:            service process watchdog" && sr_has "$sp" "Duration:         5.50s" && sr_has "$sp" "Hardware model:   Mac99,1" && ! sr_has "$sp" "Shared Cache:"'
+  check "system reports: the spin's WindowServer and game threads, known names kept" eval 'sr_has "$sp" "DispatchQueue \"com.apple.main-thread\"(1)    Thread name \"ws_main_thread\"    12 samples (1-12)    priority 79 (base 79)    cpu time 0.033s" && sr_has "$sp" "Process: swtor.exe" && sr_has "$sp" "Thread name \"d9mt-compile\"" && sr_has "$sp" "Num threads:      140"'
   check "system reports: the spin without stacks or another process's block" eval '! sr_has "$sp" "???" && ! sr_has "$sp" "beta-secret-thread" && ! sr_has "$sp" "Binary Images"'
   # shellcheck disable=SC2034
   local pn="$d/panic-full-2026-11-01-000358.0002.panic.txt"
-  check "system reports: the panic string's head, up to the Debugger message" eval 'sr_has "$pn" "userspace watchdog timeout: no successful checkins from WindowServer (2 induced crashes) in 120 seconds" && sr_has "$pn" "  service: OTHER, total successful checkins" && sr_has "$pn" "Debugger message: panic" && ! sr_has "$pn" "secret-after-debugger"'
-  check "system reports: the panic's WindowServer, loginwindow and game (uptime, threads)" eval 'sr_has "$pn" "WindowServer (pid 312): up 9900 s, 3 threads" && sr_has "$pn" "    com.apple.coreanimation.render-server" && sr_has "$pn" "    (1 without a name)" && sr_has "$pn" "loginwindow (pid 313): up 12420 s, 1 threads" && sr_has "$pn" "swtor.exe (pid 4321): up 170 s, 2 threads" && sr_has "$pn" "    d9mt_present"'
+  check "system reports: the panic string's head, up to the Debugger message" eval 'sr_has "$pn" "userspace watchdog timeout: no successful checkins from WindowServer (2 induced crashes) in 120 seconds" && sr_has "$pn" "  service: OTHER, total successful checkins" && sr_has "$pn" "  service: WindowServer (2 induced crashes), total successful checkins in 9900 seconds: 990, last successful checkin: 120 seconds ago" && sr_has "$pn" "Debugger message: panic" && ! sr_has "$pn" "secret-after-debugger"'
+  check "system reports: the panic's WindowServer, loginwindow and game (uptime, threads)" eval 'sr_has "$pn" "WindowServer (pid 312): up 9900 s, 3 threads" && sr_has "$pn" "      com.apple.coreanimation.render-server" && sr_has "$pn" "      (1 without a name)" && sr_has "$pn" "loginwindow (pid 313): up 12420 s, 1 threads" && sr_has "$pn" "swtor.exe (pid 4321): up 170 s, 2 threads" && sr_has "$pn" "      d9mt-compile"'
   check "system reports: the panic without kernel_task's or other processes' threads" eval '! sr_has "$pn" kernel-thread-x && ! sr_has "$pn" gamma-thread && ! sr_has "$pn" 0000000000bb'
   # shellcheck disable=SC2034
   local dg="$d/swtor.exe_2026-10-31-213115.diag.txt"
   check "system reports: the resource report's event, limit and duration lines" eval 'sr_has "$dg" "Event:            disk writes" && sr_has "$dg" "Writes limit:     2150.00 MB" && sr_has "$dg" "Limit duration:   86400s" && sr_has "$dg" "Duration:         3200.00s" && ! sr_has "$dg" "Path:" && ! sr_has "$dg" "Heaviest"'
   check "system reports: no other app's name, home folder or Mac's name anywhere in the zip" eval '! grep -r -l -E "SecretApp|SecretDaemon|alpha-worker|beta-secret|gamma-thread|fxplayer|Fixture-Host-Mac" "$SR_OUT" >/dev/null'
-  check "system reports: this user's name is not in them (OTHER or USER)" eval '! grep -r -w -F -- "$me" "$SR_OUT/$d" >/dev/null && { sr_has "$sp" "Thread name \"render OTHER queue\"" || sr_has "$sp" "Thread name \"render USER queue\""; }'
+  check "system reports: this user's name is not in them (a thread name with it: OTHER)" eval '! grep -r -w -F -- "$me" "$SR_OUT/$d" >/dev/null && sr_has "$sp" "Thread 0x19b5    Thread name \"OTHER\""'
   check "system reports: the malformed panic is named, not in the zip" eval 'grep -qF "panic-full-2026-11-01-010000.0003.panic (" "$SR_OUT/system-info.txt" && grep -qF "its JSON could not be read (malformed), left out" "$SR_OUT/system-info.txt"'
   check "system reports: the counts line in system-info.txt" grep -qxF "System reports of the last 48 h: 1 GPU faults, 2 WindowServer watchdog restarts, 2 kernel panics; 1 malformed; 1 cut off" "$SR_OUT/system-info.txt"
   check "system reports: the session report repeats it" eval '[ "$(sed -n 2p "$SR_OUT/session-report.txt")" = "System reports of the last 48 h: 1 GPU faults, 2 WindowServer watchdog restarts, 2 kernel panics; 1 malformed; 1 cut off" ]'
   check "system reports: nothing left out by the leak check" test ! -e "$SR_OUT/left-out.txt"
 
   # Names in no process list (a service gone before the snapshot, a kext, a queue's or thread's
-  # label, a report with no process list at all) and an older, dotted name of the Mac in file
-  # names: every one must come out as OTHER, or go
-  echo "  (run 1b: names in no process list, a dotted former Mac name)"
+  # label, a report with no process list at all), names in other scripts, names that are words of
+  # Apple's texts (Fork), several of them (Movie Maker), a number (2048) or begin like Wine's
+  # (winePrivateSentinel), another user's and an older, dotted name of the Mac: every one must come
+  # out as OTHER, or its line must go
+  echo "  (run 1b: names in no process list, in other scripts, like Apple's words; a former Mac name)"
   mkdir -p "$SR/hold"; mv "$SYSD"/* "$SR/hold/"
   sr_plant WindowServer-2026-11-01-100000.ips 15 <<'EOF'
 {"name":"WindowServer","timestamp":"2026-11-01 10:00:00.00 +0100","bug_type":"409"}
 {
   "captureTime" : "2026-11-01 10:00:00.5000 +0100",
-  "termination" : {"code":1,"namespace":"WATCHDOG","indicator":"waiting on UnlistedIndicatorApp","details":[null,"waiting on UnlistedDetailsApp","40 seconds since last successful checkin"]},
+  "termination" : {"code":1,"namespace":"WATCHDOG","indicator":"waiting on 隐私应用","details":[null,"(1 monitored services unresponsive): checkin with service: 隐私应用 (0 induced crashes) returned not alive with context:","(1 monitored services unresponsive): checkin with service: Fork (0 induced crashes) returned not alive with context:","service: 李明 on 私人电脑.local","waiting on winePrivateSentinel","waiting on Movie Maker","waiting on UnlistedDetailsApp","service: Fork returned not alive","task 2048 failed","40 seconds since last successful checkin"]},
   "thermalPressureLevel" : "ThermalPressureLevelNominal (0)",
   "uptime" : 3000
 }
@@ -243,10 +245,12 @@ EOF
   sr_plant panic-full-2026-11-01-100100.0004.panic 14 <<'EOF'
 {"bug_type":"210","timestamp":"2026-11-01 10:01:00.00 +0100"}
 {
-  "panicString" : "panic(cpu 2 caller 0x1): task UnlistedPanicApp failed in com.unlistedvendor.driver.UnlistedKext\nservice: UnlistedServiceApp, total successful checkins in 100 seconds: 10, last successful checkin: 0 seconds ago\nDebugger message: panic\n",
+  "panicString" : "panic(cpu 2 caller 0x1): task 秘密程序 failed in com.机密厂商.driver.秘密扩展\nservice: UnlistedServiceApp, total successful checkins in 100 seconds: 10, last successful checkin: 0 seconds ago\nservice: Fork, total successful checkins in 100 seconds: 10, last successful checkin: 0 seconds ago\nservice: Movie Maker, total successful checkins in 100 seconds: 10, last successful checkin: 0 seconds ago\nservice: 2048, total successful checkins in 100 seconds: 10, last successful checkin: 0 seconds ago\nservice: winePrivateSentinel, total successful checkins in 100 seconds: 10, last successful checkin: 0 seconds ago\nservice: 秘密程序, total successful checkins in 100 seconds: 10, last successful checkin: 0 seconds ago\npath /Users/李明/Library on 私人电脑\nDebugger message: panic\n",
   "processByPid" : {
-    "312" : {"pid" : 312, "procname" : "WindowServer", "processUptime" : 3000.0, "threadById" : {"1" : {"id" : 1, "name" : "com.UnlistedQueueApp.render"}}},
-    "4321" : {"pid" : 4321, "procname" : "swtor.exe", "processUptime" : 100.0, "threadById" : {"2" : {"id" : 2, "name" : "com.UnlistedOverlayApp.queue"}, "3" : {"id" : 3, "name" : "d9mt_present"}}}
+    "312" : {"pid" : 312, "procname" : "WindowServer", "processUptime" : 3000.0, "threadById" : {"1" : {"id" : 1, "name" : "com.UnlistedQueueApp.render"}, "4" : {"id" : 4, "name" : "com.私人程序.render"}}},
+    "4321" : {"pid" : 4321, "procname" : "swtor.exe", "processUptime" : 100.0, "threadById" : {"2" : {"id" : 2, "name" : "com.UnlistedOverlayApp.queue"}, "3" : {"id" : 3, "name" : "d9mt-compile"}}},
+    "77" : {"pid" : 77, "procname" : "winePrivateSentinel", "processUptime" : 10.0, "threadById" : {"5" : {"id" : 5, "name" : "sentinel-thread"}}},
+    "78" : {"pid" : 78, "procname" : "Fork", "processUptime" : 10.0, "threadById" : {"6" : {"id" : 6, "name" : "fork-thread"}}}
   }
 }
 EOF
@@ -254,38 +258,53 @@ EOF
 Date/Time:        2026-11-01 10:01:55.000 +0100
 OS Version:       macOS 27.2 (Build 26B123)
 Computer name:    Prior-Owner-Mac
-Reason:           (1 monitored services unresponsive): UnlistedReasonApp blocked
+Reason:           (1 monitored services unresponsive): UnlistedReasonApp blocked  私人电脑.local blocked 李明
 
 Event:            service process watchdog
 
 Process:          WindowServer [312]
 Num threads:      2
 
-  Thread 0x10    DispatchQueue "com.UnlistedQueueApp.event"(5)    Thread name "UnlistedThreadApp worker"    12 samples (1-12)    priority 79 (base 79)
+  Thread 0x10    DispatchQueue "com.UnlistedQueueApp.event"(5)    Thread name "隐私应用 worker"    12 samples (1-12)    priority 79 (base 79)    blocked by Fork
+
+Process:          winePrivateSentinel [77]
+Num threads:      1
+
+  Thread 0x11    Thread name "sentinel-thread"    12 samples (1-12)
 EOF
   sr_plant UnlistedDaemonApp_2026-11-01-100300_Prior.Owner.Mac.userspace_watchdog_timeout.spin 12 <<'EOF'
 Date/Time:        2026-11-01 10:02:55.000 +0100
-Command:          UnlistedDaemonApp
+Command:          Fork
 EOF
   sr_plant swtor.exe_2026-11-01-100400_Prior.Owner.Mac.cpu_resource.diag 11 <<'EOF'
 Date/Time:        2026-11-01 09:00:00.000 +0100
 Command:          swtor.exe
-Event:            cpu usage (UnlistedEventApp)
+Event:            cpu usage (隐私应用)
 Duration:         100.00s
 EOF
   sr_plant wine64-preloader_2026-11-01-100500_Prior.Owner.Mac.diag 10 <<'EOF'
 Event:            disk writes
 EOF
+  # (another process whose name begins like Wine's: not the game's, left out by name)
+  sr_plant winePrivateSentinel_2026-11-01-100600_Prior.Owner.Mac.diag 9 <<'EOF'
+Command:          winePrivateSentinel
+EOF
+  sr_plant gpuEvent-winePrivateSentinel-2026-11-01-100700.ips 8 <<'EOF'
+{"bug_type":"284","timestamp":"2026-11-01 10:07:00.00 +0100"}
+{ "process_name" : "winePrivateSentinel", "analysis" : {"restart_reason_desc":"BIF0 page fault"} }
+EOF
   sr_zip unlisted
   # shellcheck disable=SC2034
-  local u="$d/WindowServer-2026-11-01-100000.ips.txt" up="$d/panic-full-2026-11-01-100100.0004.panic.txt" us="$d/WindowServer_2026-11-01-100200.userspace_watchdog_timeout.spin.txt" ud="$d/swtor.exe_2026-11-01-100400.cpu_resource.diag.txt"
+  local u="$d/WindowServer-2026-11-01-100000.ips.txt" up="$d/panic-full-2026-11-01-100100.0004.panic.txt" us="$d/WindowServer_2026-11-01-100200.userspace_watchdog_timeout.spin.txt" uo="$d/OTHER_2026-11-01-100300.userspace_watchdog_timeout.spin.txt" ud="$d/swtor.exe_2026-11-01-100400.cpu_resource.diag.txt"
   check "system reports, unlisted: the Mac's dotted former name gone from the names (spin, diag, kind suffix kept)" eval '[ "$(LC_ALL=C ls "$SR_OUT/$d" | tr "\n" " ")" = "OTHER_2026-11-01-100300.userspace_watchdog_timeout.spin.txt WindowServer-2026-11-01-100000.ips.txt WindowServer_2026-11-01-100200.userspace_watchdog_timeout.spin.txt panic-full-2026-11-01-100100.0004.panic.txt swtor.exe_2026-11-01-100400.cpu_resource.diag.txt wine64-preloader_2026-11-01-100500.diag.txt " ]'
-  check "system reports, unlisted: no process list: indicator and details as OTHER, a null detail named, the rest kept" eval 'sr_has "$u" "indicator waiting on OTHER" && sr_has "$u" "  (not a text)" && sr_has "$u" "  waiting on OTHER" && sr_has "$u" "  40 seconds since last successful checkin"'
-  check "system reports, unlisted: the panic string's task, kext and service as OTHER" eval 'sr_has "$up" "task OTHER failed in com.OTHER.driver.OTHER" && sr_has "$up" "  service: OTHER, total successful checkins"'
-  check "system reports, unlisted: queue and thread labels as OTHER, ours kept" eval 'sr_has "$up" "    com.OTHER.render" && sr_has "$up" "    com.OTHER.queue" && sr_has "$up" "    d9mt_present" && sr_has "$us" "DispatchQueue \"com.OTHER.event\"(5)" && sr_has "$us" "Thread name \"OTHER worker\""'
-  check "system reports, unlisted: the spin's reason as OTHER, an unknown header line left out" eval 'sr_has "$us" "Reason:           (1 monitored services unresponsive): OTHER blocked" && ! sr_has "$us" "Computer name"'
-  check "system reports, unlisted: the resource report's event as OTHER" sr_has "$ud" "Event:            cpu usage (OTHER)"
-  check "system reports, unlisted: no planted name or former Mac name anywhere in the zip" eval '! grep -r -l -E "Unlisted|unlisted|Prior[.-]|Owner" "$SR_OUT" >/dev/null'
+  check "system reports, unlisted: another process like Wine's: its GPU event and resource report left out, named as OTHER" eval 'grep -qF "  left out: gpuEvent-OTHER-2026-11-01-100700.ips (not the game" "$SR_OUT/system-info.txt" && grep -qF "  left out: OTHER_2026-11-01-100600.diag (not the game" "$SR_OUT/system-info.txt"'
+  check "system reports, unlisted: no process list: services as OTHER (Fork too), lines of no known form left out, a null named, the rest kept" eval 'sr_has "$u" "  (not a text)" && [ "$(grep -c -F "checkin with service: OTHER (0 induced crashes)" "$SR_OUT/$u")" = 2 ] && [ "$(grep -c -F "(a line of an unknown form, left out)" "$SR_OUT/$u")" = 7 ] && sr_has "$u" "  40 seconds since last successful checkin"'
+  check "system reports, unlisted: the panic string: its unknown rest left out, every service as OTHER" eval 'sr_has "$up" "  panic(cpu 2 caller 0x1): (the rest, of an unknown form, left out)" && [ "$(grep -c -F "  service: OTHER, total successful checkins in 100 seconds: 10" "$SR_OUT/$up")" = 6 ] && sr_has "$up" "(a line of an unknown form, left out)"'
+  check "system reports, unlisted: thread and queue names as OTHER, known ones kept, other processes not listed" eval '[ "$(grep -c -x "      OTHER" "$SR_OUT/$up")" = 3 ] && sr_has "$up" "      d9mt-compile" && ! sr_has "$up" "(pid 77)" && ! sr_has "$up" "(pid 78)" && sr_has "$us" "DispatchQueue \"OTHER\"(5)    Thread name \"OTHER\"    12 samples (1-12)    priority 79 (base 79)    OTHER"'
+  check "system reports, unlisted: the spin: its reason left out, an unknown header line too, another process like Wine's not kept" eval 'sr_has "$us" "Reason:" && [ "$(grep -c -F "(a line of an unknown form, left out)" "$SR_OUT/$us")" = 2 ] && ! sr_has "$us" "Computer name" && ! sr_has "$us" "Process: OTHER" && sr_has "$uo" "Command:          OTHER"'
+  check "system reports, unlisted: the resource report's event of no known form left out" eval 'sr_has "$ud" "(a line of an unknown form, left out)" && sr_has "$ud" "Duration:         100.00s"'
+  check "system reports, unlisted: no planted name, number or former Mac or user name in the extracts or their list" eval '! grep -r -l -E "Unlisted|unlisted|Prior[.-]|Owner|Fork|Movie|2048|winePrivate|sentinel" "$SR_OUT/$d" >/dev/null && ! grep -E "^  (left out: |not readable: )?[A-Za-z]" "$SR_OUT/system-info.txt" | grep -q -E "Unlisted|Prior|Owner|winePrivate"'
+  check "system reports, unlisted: no byte outside printable ASCII in the extracts" eval '! LC_ALL=C grep -r -l "[^ -~]" "$SR_OUT/$d" >/dev/null'
   check "system reports, unlisted: the counts line" grep -qxF "System reports of the last 48 h: 0 GPU faults, 1 WindowServer watchdog restarts, 1 kernel panics" "$SR_OUT/system-info.txt"
   rm -f "$SYSD"/*
 

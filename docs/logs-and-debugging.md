@@ -49,12 +49,15 @@ since these reports list every running process:
 | `panic-full-*.panic` (a kernel panic) | timestamp, the panic string up to its "Debugger message", and WindowServer's, loginwindow's and the game's uptime and thread names |
 | `swtor.exe*.diag`, `wine*.diag` (resource reports, e.g. disk writes) | the event, limit and duration lines |
 
-At most 10 of each kind, the newest. No other app's name: an extract (all but the GPU event) keeps
-only the words Apple writes in these reports, WindowServer's, loginwindow's, the game's and Wine's
-names, and numbers. Every other word becomes `OTHER`, wherever it is: in a process list, a
-watchdog's or panic's text, a thread's or queue's name. The Mac's name goes from the file names
-(also an older one with dots in it), and the home folder and user name from the contents, as for
-the other files. `system-info.txt` and `session-report.txt` say *System reports of the last 48 h:
+At most 10 of each kind, the newest. No other app's name: every line of an extract (all but the
+GPU event) must have one of the forms Apple writes in these reports, with numbers only where a
+number belongs; a line of any other form is replaced by *(a line of an unknown form, left out)*.
+Where a form names a process, a service, a kext or a thread's or queue's name, the whole name is
+kept only if it is WindowServer's, loginwindow's, the kernel's, the game's, Wine's or the app's
+(exact names), or one of Apple's, Wine's and d9mt's thread names in those processes; any other
+name becomes `OTHER`. A GPU event or resource report of any other process is left out. The Mac's
+name goes from the file names (also an older one with dots in it); no form has a place for a
+user's or a Mac's name, and the files go through the same redaction as the other files. `system-info.txt` and `session-report.txt` say *System reports of the last 48 h:
 N GPU faults, N WindowServer watchdog restarts, N kernel panics*; `system-info.txt` lists the
 extracts and any report it left out (too large, malformed JSON, not readable). The folder belongs to
 root and the `_analyticsusers` group: what your account can't read is named, and when nothing is
