@@ -246,7 +246,7 @@ EOF
   "panicString" : "panic(cpu 2 caller 0x1): task UnlistedPanicApp failed in com.unlistedvendor.driver.UnlistedKext\nservice: UnlistedServiceApp, total successful checkins in 100 seconds: 10, last successful checkin: 0 seconds ago\nDebugger message: panic\n",
   "processByPid" : {
     "312" : {"pid" : 312, "procname" : "WindowServer", "processUptime" : 3000.0, "threadById" : {"1" : {"id" : 1, "name" : "com.UnlistedQueueApp.render"}}},
-    "4321" : {"pid" : 4321, "procname" : "swtor.exe", "processUptime" : 100.0, "threadById" : {"2" : {"id" : 2, "name" : "com.UnlistedOverlayApp.hook"}, "3" : {"id" : 3, "name" : "d9mt_present"}}}
+    "4321" : {"pid" : 4321, "procname" : "swtor.exe", "processUptime" : 100.0, "threadById" : {"2" : {"id" : 2, "name" : "com.UnlistedOverlayApp.queue"}, "3" : {"id" : 3, "name" : "d9mt_present"}}}
   }
 }
 EOF
@@ -282,7 +282,7 @@ EOF
   check "system reports, unlisted: the Mac's dotted former name gone from the names (spin, diag, kind suffix kept)" eval '[ "$(LC_ALL=C ls "$SR_OUT/$d" | tr "\n" " ")" = "OTHER_2026-11-01-100300.userspace_watchdog_timeout.spin.txt WindowServer-2026-11-01-100000.ips.txt WindowServer_2026-11-01-100200.userspace_watchdog_timeout.spin.txt panic-full-2026-11-01-100100.0004.panic.txt swtor.exe_2026-11-01-100400.cpu_resource.diag.txt wine64-preloader_2026-11-01-100500.diag.txt " ]'
   check "system reports, unlisted: no process list: indicator and details as OTHER, a null detail named, the rest kept" eval 'sr_has "$u" "indicator waiting on OTHER" && sr_has "$u" "  (not a text)" && sr_has "$u" "  waiting on OTHER" && sr_has "$u" "  40 seconds since last successful checkin"'
   check "system reports, unlisted: the panic string's task, kext and service as OTHER" eval 'sr_has "$up" "task OTHER failed in com.OTHER.driver.OTHER" && sr_has "$up" "  service: OTHER, total successful checkins"'
-  check "system reports, unlisted: queue and thread labels as OTHER, ours kept" eval 'sr_has "$up" "    com.OTHER.render" && sr_has "$up" "    com.OTHER.hook" && sr_has "$up" "    d9mt_present" && sr_has "$us" "DispatchQueue \"com.OTHER.event\"(5)" && sr_has "$us" "Thread name \"OTHER worker\""'
+  check "system reports, unlisted: queue and thread labels as OTHER, ours kept" eval 'sr_has "$up" "    com.OTHER.render" && sr_has "$up" "    com.OTHER.queue" && sr_has "$up" "    d9mt_present" && sr_has "$us" "DispatchQueue \"com.OTHER.event\"(5)" && sr_has "$us" "Thread name \"OTHER worker\""'
   check "system reports, unlisted: the spin's reason as OTHER, an unknown header line left out" eval 'sr_has "$us" "Reason:           (1 monitored services unresponsive): OTHER blocked" && ! sr_has "$us" "Computer name"'
   check "system reports, unlisted: the resource report's event as OTHER" sr_has "$ud" "Event:            cpu usage (OTHER)"
   check "system reports, unlisted: no planted name or former Mac name anywhere in the zip" eval '! grep -r -l -E "Unlisted|unlisted|Prior[.-]|Owner" "$SR_OUT" >/dev/null'
