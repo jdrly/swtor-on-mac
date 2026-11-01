@@ -58,7 +58,7 @@ EOF
   "pid" : 312,
   "bug_type" : "409",
   "procName" : "WindowServer",
-  "termination" : {"flags":0,"indicator":"monitoring timed out for service","code":1,"namespace":"WATCHDOG","details":["(1 monitored services unresponsive): checkin with service: WindowServer (0 induced crashes) returned not alive with context:","waiting on SecretAppAlpha for 40 seconds, home /Users/fxplayer/x","40 seconds since last successful checkin"]},
+  "termination" : {"flags":0,"indicator":"monitoring timed out for service","code":1,"namespace":"WATCHDOG","details":["(1 monitored services unresponsive): checkin with service: WindowServer (0 induced crashes) returned not alive with context:","waiting on SecretAppAlpha for 40 seconds since /Users/fxplayer/Library","40 seconds since last successful checkin"]},
   "uptime" : 15000,
   "thermalPressureLevel" : "ThermalPressureLevelNominal (0)",
   "displayState" : "OFF",
@@ -120,7 +120,7 @@ Num threads:      26
   12  ??? (SecretAppBeta + 1000) [0x180001000] 1-12
     12  waiting for SecretAppBeta [555] 1-12
 
-  Thread 0x19b5    Thread name "sync $me helper"    12 samples (1-12)    priority 79 (base 79)    cpu time 0.013s
+  Thread 0x19b5    Thread name "render $me queue"    12 samples (1-12)    priority 79 (base 79)    cpu time 0.013s
   12  ??? (SkyLight + 1) [0x1] 1-12
 
 Process:          SecretAppBeta [555]
@@ -156,7 +156,7 @@ EOF
     "0" : {"pid" : 0, "procname" : "kernel_task", "processUptime" : 12500.0, "threadById" : {"10" : {"id" : 10, "name" : "kernel-thread-x"}}},
     "312" : {"pid" : 312, "procname" : "WindowServer", "processUptime" : 9900.4, "threadById" : {"11" : {"id" : 11, "name" : "ws_main_thread"}, "12" : {"id" : 12, "name" : "com.apple.coreanimation.render-server"}, "13" : {"id" : 13}}},
     "313" : {"pid" : 313, "procname" : "loginwindow", "processUptime" : 12420.0, "threadById" : {"14" : {"id" : 14, "name" : "lw_main"}}},
-    "4321" : {"pid" : 4321, "procname" : "swtor.exe", "processUptime" : 169.7, "threadById" : {"15" : {"id" : 15, "name" : "d9mt_present"}, "16" : {"id" : 16, "name" : "sync $me helper"}}},
+    "4321" : {"pid" : 4321, "procname" : "swtor.exe", "processUptime" : 169.7, "threadById" : {"15" : {"id" : 15, "name" : "d9mt_present"}, "16" : {"id" : 16, "name" : "render $me queue"}}},
     "900" : {"pid" : 900, "procname" : "SecretAppAlpha", "processUptime" : 120.0, "threadById" : {"17" : {"id" : 17, "name" : "alpha-worker-thread"}}},
     "901" : {"pid" : 901, "procname" : "SecretDaemonGamma", "processUptime" : 99.0, "threadById" : {"18" : {"id" : 18, "name" : "gamma-thread"}}}
   }
@@ -195,17 +195,17 @@ EOF
   sr_zip planted
   check "system reports: the zip is written" eval '[ -s "$SR/planted/zip" ] && [ -f "$(cat "$SR/planted/zip")" ] && [ -n "$SR_OUT" ]'
   local d="system-reports"
-  check "system reports: the extracts, the Mac's name gone from the names" eval '[ "$(ls "$SR_OUT/$d" | tr "\n" " ")" = "WindowServer-2026-10-31-195329.ips.txt WindowServer-2026-10-31-234600.ips.txt WindowServer_2026-10-31-195334.userspace_watchdog_timeout.spin.txt gpuEvent-swtor.exe-2026-10-31-195244.ips panic-full-2026-11-01-000358.0002.panic.txt swtor.exe_2026-10-31-213115.diag.txt " ]'
+  check "system reports: the extracts, the Mac's name gone from the names" eval '[ "$(LC_ALL=C ls "$SR_OUT/$d" | tr "\n" " ")" = "WindowServer-2026-10-31-195329.ips.txt WindowServer-2026-10-31-234600.ips.txt WindowServer_2026-10-31-195334.userspace_watchdog_timeout.spin.txt gpuEvent-swtor.exe-2026-10-31-195244.ips panic-full-2026-11-01-000358.0002.panic.txt swtor.exe_2026-10-31-213115.diag.txt " ]'
   check "system reports: the GPU event whole" eval 'sr_has "$d/gpuEvent-swtor.exe-2026-10-31-195244.ips" "\"restart_reason_desc\":\"BIF0 page fault\"" && sr_has "$d/gpuEvent-swtor.exe-2026-10-31-195244.ips" "\"is_read\":true"'
   local ws="$d/WindowServer-2026-10-31-195329.ips.txt"
   # (timed, macOS's time daemon, is in its process list: "timed out" stays)
   check "system reports: WindowServer's termination and thermal pressure" eval 'sr_has "$ws" "Termination: namespace WATCHDOG, code 1, indicator monitoring timed out for service" && sr_has "$ws" "  40 seconds since last successful checkin" && sr_has "$ws" "Thermal pressure: ThermalPressureLevelNominal (0)" && sr_has "$ws" "Timestamp: 2026-10-31 19:53:29.00 +0100"'
-  check "system reports: WindowServer's details with another app's name as OTHER" sr_has "$ws" "  waiting on OTHER for 40 seconds, home /Users/USER/x"
+  check "system reports: WindowServer's details with another app's name as OTHER" sr_has "$ws" "  waiting on OTHER for 40 seconds since /Users/USER/Library"
   check "system reports: WindowServer's report without its stack shot or key" eval '! sr_has "$ws" ws_main_thread && ! sr_has "$ws" 0000000000aa'
   # (wc, sp, pn and dg are read in the checks' eval strings)
   # shellcheck disable=SC2034
   local wc="$d/WindowServer-2026-10-31-234600.ips.txt"
-  check "system reports: a cut-off WindowServer report: its first lines' fields, no details" eval 'sr_has "$wc" "(its JSON is cut off" && sr_has "$wc" "Termination: namespace WATCHDOG, code 1, indicator monitoring timed out for service" && sr_has "$wc" "Uptime: 9000 s" && ! sr_has "$wc" "waiting on" && grep -qF "WindowServer-2026-10-31-234600.ips.txt (" "$SR_OUT/system-info.txt"'
+  check "system reports: a cut-off WindowServer report: its first lines' fields, the details' names as OTHER" eval 'sr_has "$wc" "(its JSON is cut off" && sr_has "$wc" "Termination: namespace WATCHDOG, code 1, indicator monitoring timed out for service" && sr_has "$wc" "Uptime: 9000 s" && sr_has "$wc" "  waiting on OTHER" && grep -qF "WindowServer-2026-10-31-234600.ips.txt (" "$SR_OUT/system-info.txt"'
   # shellcheck disable=SC2034
   local sp="$d/WindowServer_2026-10-31-195334.userspace_watchdog_timeout.spin.txt"
   check "system reports: the spin's header" eval 'sr_has "$sp" "Event:            service process watchdog" && sr_has "$sp" "Duration:         5.50s" && ! sr_has "$sp" "Shared Cache:"'
@@ -220,14 +220,76 @@ EOF
   local dg="$d/swtor.exe_2026-10-31-213115.diag.txt"
   check "system reports: the resource report's event, limit and duration lines" eval 'sr_has "$dg" "Event:            disk writes" && sr_has "$dg" "Writes limit:     2150.00 MB" && sr_has "$dg" "Limit duration:   86400s" && sr_has "$dg" "Duration:         3200.00s" && ! sr_has "$dg" "Path:" && ! sr_has "$dg" "Heaviest"'
   check "system reports: no other app's name, home folder or Mac's name anywhere in the zip" eval '! grep -r -l -E "SecretApp|SecretDaemon|alpha-worker|beta-secret|gamma-thread|fxplayer|Fixture-Host-Mac" "$SR_OUT" >/dev/null'
-  check "system reports: this user's name is not in them (USER)" eval '! grep -r -w -F -- "$me" "$SR_OUT/$d" >/dev/null && sr_has "$sp" "Thread name \"sync USER helper\""'
+  check "system reports: this user's name is not in them (OTHER or USER)" eval '! grep -r -w -F -- "$me" "$SR_OUT/$d" >/dev/null && { sr_has "$sp" "Thread name \"render OTHER queue\"" || sr_has "$sp" "Thread name \"render USER queue\""; }'
   check "system reports: the malformed panic is named, not in the zip" eval 'grep -qF "panic-full-2026-11-01-010000.0003.panic (" "$SR_OUT/system-info.txt" && grep -qF "its JSON could not be read (malformed), left out" "$SR_OUT/system-info.txt"'
   check "system reports: the counts line in system-info.txt" grep -qxF "System reports of the last 48 h: 1 GPU faults, 2 WindowServer watchdog restarts, 2 kernel panics; 1 malformed; 1 cut off" "$SR_OUT/system-info.txt"
   check "system reports: the session report repeats it" eval '[ "$(sed -n 2p "$SR_OUT/session-report.txt")" = "System reports of the last 48 h: 1 GPU faults, 2 WindowServer watchdog restarts, 2 kernel panics; 1 malformed; 1 cut off" ]'
   check "system reports: nothing left out by the leak check" test ! -e "$SR_OUT/left-out.txt"
 
-  echo "  (run 2: an empty folder, the game started 3 days ago)"
+  # Names in no process list (a service gone before the snapshot, a kext, a queue's or thread's
+  # label, a report with no process list at all) and an older, dotted name of the Mac in file
+  # names: every one must come out as OTHER, or go
+  echo "  (run 1b: names in no process list, a dotted former Mac name)"
   mkdir -p "$SR/hold"; mv "$SYSD"/* "$SR/hold/"
+  sr_plant WindowServer-2026-11-01-100000.ips 15 <<'EOF'
+{"name":"WindowServer","timestamp":"2026-11-01 10:00:00.00 +0100","bug_type":"409"}
+{
+  "captureTime" : "2026-11-01 10:00:00.5000 +0100",
+  "termination" : {"code":1,"namespace":"WATCHDOG","indicator":"waiting on UnlistedIndicatorApp","details":[null,"waiting on UnlistedDetailsApp","40 seconds since last successful checkin"]},
+  "thermalPressureLevel" : "ThermalPressureLevelNominal (0)",
+  "uptime" : 3000
+}
+EOF
+  sr_plant panic-full-2026-11-01-100100.0004.panic 14 <<'EOF'
+{"bug_type":"210","timestamp":"2026-11-01 10:01:00.00 +0100"}
+{
+  "panicString" : "panic(cpu 2 caller 0x1): task UnlistedPanicApp failed in com.unlistedvendor.driver.UnlistedKext\nservice: UnlistedServiceApp, total successful checkins in 100 seconds: 10, last successful checkin: 0 seconds ago\nDebugger message: panic\n",
+  "processByPid" : {
+    "312" : {"pid" : 312, "procname" : "WindowServer", "processUptime" : 3000.0, "threadById" : {"1" : {"id" : 1, "name" : "com.UnlistedQueueApp.render"}}},
+    "4321" : {"pid" : 4321, "procname" : "swtor.exe", "processUptime" : 100.0, "threadById" : {"2" : {"id" : 2, "name" : "com.UnlistedOverlayApp.hook"}, "3" : {"id" : 3, "name" : "d9mt_present"}}}
+  }
+}
+EOF
+  sr_plant WindowServer_2026-11-01-100200_Prior.Owner.Mac.userspace_watchdog_timeout.spin 13 <<'EOF'
+Date/Time:        2026-11-01 10:01:55.000 +0100
+OS Version:       macOS 27.2 (Build 26B123)
+Computer name:    Prior-Owner-Mac
+Reason:           (1 monitored services unresponsive): UnlistedReasonApp blocked
+
+Event:            service process watchdog
+
+Process:          WindowServer [312]
+Num threads:      2
+
+  Thread 0x10    DispatchQueue "com.UnlistedQueueApp.event"(5)    Thread name "UnlistedThreadApp worker"    12 samples (1-12)    priority 79 (base 79)
+EOF
+  sr_plant UnlistedDaemonApp_2026-11-01-100300_Prior.Owner.Mac.userspace_watchdog_timeout.spin 12 <<'EOF'
+Date/Time:        2026-11-01 10:02:55.000 +0100
+Command:          UnlistedDaemonApp
+EOF
+  sr_plant swtor.exe_2026-11-01-100400_Prior.Owner.Mac.cpu_resource.diag 11 <<'EOF'
+Date/Time:        2026-11-01 09:00:00.000 +0100
+Command:          swtor.exe
+Event:            cpu usage (UnlistedEventApp)
+Duration:         100.00s
+EOF
+  sr_plant wine64-preloader_2026-11-01-100500_Prior.Owner.Mac.diag 10 <<'EOF'
+Event:            disk writes
+EOF
+  sr_zip unlisted
+  # shellcheck disable=SC2034
+  local u="$d/WindowServer-2026-11-01-100000.ips.txt" up="$d/panic-full-2026-11-01-100100.0004.panic.txt" us="$d/WindowServer_2026-11-01-100200.userspace_watchdog_timeout.spin.txt" ud="$d/swtor.exe_2026-11-01-100400.cpu_resource.diag.txt"
+  check "system reports, unlisted: the Mac's dotted former name gone from the names (spin, diag, kind suffix kept)" eval '[ "$(LC_ALL=C ls "$SR_OUT/$d" | tr "\n" " ")" = "OTHER_2026-11-01-100300.userspace_watchdog_timeout.spin.txt WindowServer-2026-11-01-100000.ips.txt WindowServer_2026-11-01-100200.userspace_watchdog_timeout.spin.txt panic-full-2026-11-01-100100.0004.panic.txt swtor.exe_2026-11-01-100400.cpu_resource.diag.txt wine64-preloader_2026-11-01-100500.diag.txt " ]'
+  check "system reports, unlisted: no process list: indicator and details as OTHER, a null detail named, the rest kept" eval 'sr_has "$u" "indicator waiting on OTHER" && sr_has "$u" "  (not a text)" && sr_has "$u" "  waiting on OTHER" && sr_has "$u" "  40 seconds since last successful checkin"'
+  check "system reports, unlisted: the panic string's task, kext and service as OTHER" eval 'sr_has "$up" "task OTHER failed in com.OTHER.driver.OTHER" && sr_has "$up" "  service: OTHER, total successful checkins"'
+  check "system reports, unlisted: queue and thread labels as OTHER, ours kept" eval 'sr_has "$up" "    com.OTHER.render" && sr_has "$up" "    com.OTHER.hook" && sr_has "$up" "    d9mt_present" && sr_has "$us" "DispatchQueue \"com.OTHER.event\"(5)" && sr_has "$us" "Thread name \"OTHER worker\""'
+  check "system reports, unlisted: the spin's reason as OTHER, an unknown header line left out" eval 'sr_has "$us" "Reason:           (1 monitored services unresponsive): OTHER blocked" && ! sr_has "$us" "Computer name"'
+  check "system reports, unlisted: the resource report's event as OTHER" sr_has "$ud" "Event:            cpu usage (OTHER)"
+  check "system reports, unlisted: no planted name or former Mac name anywhere in the zip" eval '! grep -r -l -E "Unlisted|unlisted|Prior[.-]|Owner" "$SR_OUT" >/dev/null'
+  check "system reports, unlisted: the counts line" grep -qxF "System reports of the last 48 h: 0 GPU faults, 1 WindowServer watchdog restarts, 1 kernel panics" "$SR_OUT/system-info.txt"
+  rm -f "$SYSD"/*
+
+  echo "  (run 2: an empty folder, the game started 3 days ago)"
   touch -t "$(date -v-72H +%Y%m%d%H%M)" "$logs/wine.log"
   sr_zip empty
   check "system reports, empty: the zip is written, no folder" eval '[ -f "$(cat "$SR/empty/zip")" ] && [ ! -e "$SR_OUT/system-reports" ]'

@@ -45,14 +45,15 @@ since these reports list every running process:
 |---|---|
 | `gpuEvent-swtor.exe*`, `gpuEvent-wine*` (a GPU fault in the game) | the whole file, about 1 KB: the GPU's analysis (`restart_reason_desc`, e.g. "BIF0 page fault", read or write, the address) |
 | `WindowServer*.ips` (a WindowServer watchdog restart) | timestamp, termination (namespace, code, indicator, details), thermal pressure, uptime |
-| `*.userspace_watchdog_timeout.spin` | the header, and the thread lines of WindowServer and the game (no stacks) |
+| `*.userspace_watchdog_timeout.spin` | the header's known lines, and the thread lines of WindowServer and the game (no stacks) |
 | `panic-full-*.panic` (a kernel panic) | timestamp, the panic string up to its "Debugger message", and WindowServer's, loginwindow's and the game's uptime and thread names |
 | `swtor.exe*.diag`, `wine*.diag` (resource reports, e.g. disk writes) | the event, limit and duration lines |
 
-At most 10 of each kind, the newest. No process name other than WindowServer, loginwindow,
-kernel_task, the game's and Wine's: any other process the report lists becomes `OTHER` (but
-timed, macOS's time daemon, whose name is in Apple's "monitoring timed out"). The
-Mac's name goes from the file names and the home folder and user name from the contents, as for
+At most 10 of each kind, the newest. No other app's name: an extract (all but the GPU event) keeps
+only the words Apple writes in these reports, WindowServer's, loginwindow's, the game's and Wine's
+names, and numbers. Every other word becomes `OTHER`, wherever it is: in a process list, a
+watchdog's or panic's text, a thread's or queue's name. The Mac's name goes from the file names
+(also an older one with dots in it), and the home folder and user name from the contents, as for
 the other files. `system-info.txt` and `session-report.txt` say *System reports of the last 48 h:
 N GPU faults, N WindowServer watchdog restarts, N kernel panics*; `system-info.txt` lists the
 extracts and any report it left out (too large, malformed JSON, not readable). The folder belongs to
