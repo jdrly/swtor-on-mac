@@ -11,7 +11,10 @@
 # memory, displays, versions, the state of the install, which crash reports are in the zip, when
 # macOS ended the launcher's leftovers in the last 7 days because it is not allowed in the
 # background, the GPU error count), gpu-errors.txt (the GPU errors of the game and Wine in macOS's unified log of
-# the last 2 hours, see gpu_errors) and
+# the last 2 hours, see gpu_errors), system-reports/ (extracts of macOS's own reports in
+# /Library/Logs/DiagnosticReports of the last 48 hours: GPU faults, WindowServer watchdog
+# restarts, kernel panics, the game's resource reports; no other process names, see
+# system_reports; their counts in system-info.txt and session-report.txt) and
 # crash-reports/: macOS's crash, hang and spin reports of the last 7 days for the game, Wine, the
 # official launcher and SWTOR on Mac (see crash_reports), so nobody has to look for them. Never
 # the game's command line (the launcher passes the account name and session on it), nor
@@ -345,6 +348,213 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
     }' "$work/gpu-log"
 }
 
+# System reports: macOS's own reports in /Library/Logs/DiagnosticReports (root:_analyticsusers;
+# what isn't readable is named, never asked for: no password prompt) of the last SYS_HOURS hours,
+# or since the game's last start (wine.log is written anew at each start) if that is longer.
+# They tell a GPU fault, a WindowServer watchdog restart (the Mac froze and logged out) and a
+# kernel panic (the Mac restarted) apart from a game crash. They are large and list every running
+# process, so only extracts go into system-reports/, the newest SYS_MAX of each kind:
+#   gpuEvent-swtor.exe*, gpuEvent-wine*  the whole file (the GPU's analysis, about 1 KB)
+#   WindowServer*.ips                    timestamp, termination and thermal pressure
+#   *.userspace_watchdog_timeout.spin    the header, WindowServer's and the game's stuck threads
+#   panic-full-*.panic                   the panic string's head, WindowServer's, loginwindow's
+#                                        and the game's uptime and thread names
+#   swtor.exe*.diag, wine*.diag          the event, limit and duration lines
+# No other process names: every name in a report's process list that is not WindowServer,
+# loginwindow, kernel_task, the game's or Wine's becomes OTHER, and the Mac's name in a file name
+# goes. The counts' line goes into $work/sys-summary, the list into $work/sys-index. In a sandbox
+# the folder is $ROOT/system-diagnostics (a test's; the real one is never read).
+SYS_DIAG=/Library/Logs/DiagnosticReports
+[ -z "$ROOT" ] || SYS_DIAG="$ROOT/system-diagnostics"
+SYS_HOURS=48
+SYS_MAX=10
+SYS_FILE_MAX=20000000
+SYS_THREADS=200
+# sys_scrub <names file>: stdin → stdout, every name in the file but ours as OTHER (whole words,
+# the case kept), and home folders as /Users/USER. Not timed, macOS's time daemon on every Mac:
+# Apple's watchdog text says "monitoring timed out"
+sys_scrub() {
+  LC_ALL=C awk -v namefile="$1" '
+    function ours(n) { return n ~ /^(WindowServer|loginwindow|kernel_task|timed)$/ || tolower(n) ~ /^(swtor|wine|mac_wine)/ }
+    BEGIN { while ((getline l < namefile) > 0) if (length(l) >= 2 && !ours(l) && !(l in seen)) { seen[l] = 1; other[++n] = l } }
+    { s = $0
+      for (i = 1; i <= n; i++) {
+        w = other[i]; res = ""; lw = length(w)
+        while ((p = index(s, w)) > 0) {
+          before = p > 1 ? substr(s, p - 1, 1) : ""; after = substr(s, p + lw, 1)
+          if (before !~ /[A-Za-z0-9_]/ && after !~ /[A-Za-z0-9_]/) res = res substr(s, 1, p - 1) "OTHER"
+          else res = res substr(s, 1, p - 1 + lw)
+          s = substr(s, p + lw)
+        }
+        s = res s
+      }
+      gsub("/Users/[^/ \"\047:]+", "/Users/USER", s)
+      print s }'
+}
+# sys_procs <names file> [thread limit]: of a processByPid's plist XML on stdin, every process
+# name into the file; WindowServer's, loginwindow's and the game's uptime and thread names to stdout
+sys_procs() {
+  LC_ALL=C awk -v names="$1" -v maxt="${2:-$SYS_THREADS}" '
+    function val(s) { sub(/^[ \t]*<[^>]*>/, "", s); sub(/<\/[^>]*>[ \t]*$/, "", s)
+      gsub(/&lt;/, "<", s); gsub(/&gt;/, ">", s); gsub(/&quot;/, "\"", s); gsub(/&apos;/, "\047", s); gsub(/&amp;/, "\\&", s); return s }
+    function flush(    i, t, list, c) {
+      if (pid == "") return
+      if (name != "") print name >names
+      if (name ~ /^(WindowServer|loginwindow)$/ || tolower(name) ~ /^(swtor|wine|mac_wine)/) {
+        n++; out[n] = name " (pid " pid "): up " (up == "" ? "?" : sprintf("%.0f s", up)) ", " nt " threads"
+        list = ""; c = 0; unnamed = 0
+        for (i = 1; i <= nt; i++) {
+          t = th[i]
+          if (t == "") { unnamed++; continue }
+          if (++c > maxt) { list = list "\n    (" nt - maxt " more)"; break }
+          list = list "\n    " t
+        }
+        if (unnamed) list = list "\n    (" unnamed " without a name)"
+        out[n] = out[n] list
+      }
+      pid = name = up = ""; nt = 0; delete th
+    }
+    { d = match($0, /[^\t]/) - 1 }
+    d == 1 && /<key>/ { flush(); pid = val($0); k2 = ""; next }
+    d == 2 && /<key>/ { k2 = val($0); k4 = ""; next }
+    d == 2 && k2 == "procname" && /<string>/ { name = val($0); next }
+    d == 2 && k2 == "processUptime" && /<(real|integer)>/ { up = val($0); next }
+    d == 3 && k2 == "threadById" && /<key>/ { nt++; th[nt] = ""; next }
+    d == 4 && /<key>/ { k4 = val($0); next }
+    d == 4 && k2 == "threadById" && k4 == "name" && /<string>/ { th[nt] = val($0); next }
+    END { flush(); for (i = 1; i <= n; i++) print out[i] }'
+}
+# sys_get <field> <json file>: a field's value (raw), or false
+sys_get() { plutil -extract "$1" raw -o - "$2" 2>/dev/null; }
+system_reports() {  # → $work/sys/<name in the zip>, $work/sys-index, $work/sys-summary
+  local mins s b label f base kind zname gpu=0 wd=0 ws=0 panics=0 diag=0 bad=0 cutn=0 unread=0 ns=0 nx=0 i ts x cut
+  local w="$work/sysr"
+  mkdir -p "$work/sys" "$w"
+  : >"$work/sys-index"
+  mins=$((SYS_HOURS * 60)) label="of the last $SYS_HOURS h"
+  if b=$(stat -f %B "$LOGS/wine.log" 2>/dev/null) && [ -n "$b" ]; then
+    s=$((($(date +%s) - b) / 60 + 1))
+    if [ "$s" -gt "$mins" ]; then mins=$s label="since the game's last start ($(((s + 59) / 60)) h)"; fi
+  fi
+  echo "$label" >"$work/sys-label"
+  if [ ! -d "$SYS_DIAG" ]; then
+    echo "not read (no $SYS_DIAG)" >"$work/sys-summary"; return 0
+  fi
+  if ! ls "$SYS_DIAG" >/dev/null 2>&1; then
+    echo "not read (no access to $SYS_DIAG)" >"$work/sys-summary"; return 0
+  fi
+  find "$SYS_DIAG" -maxdepth 1 -type f \( -name 'gpuEvent-swtor.exe*' -o -name 'gpuEvent-wine*' -o -name 'WindowServer*.ips' \
+    -o -name '*.userspace_watchdog_timeout.spin' -o -name 'panic-full-*.panic' \
+    -o \( \( -name 'swtor.exe*' -o -name 'wine*' \) -name '*.diag' \) \) -mmin "-$mins" \
+    -exec stat -f '%m %z %N' {} + 2>/dev/null | sort -rn >"$w/list"
+  while read -r _ s f; do
+    base=${f##*/}
+    case "$base" in
+      gpuEvent-*) kind=gpu ;; WindowServer*.ips) kind=ws ;; *.spin) kind=spin ;; panic-full-*) kind=panic ;; *) kind=diag ;;
+    esac
+    # the newest SYS_MAX of each kind
+    eval "x=\${count_$kind:-0}"; x=$((x + 1)); eval "count_$kind=$x"
+    # (the Mac's name follows the date in .spin and .diag names: it goes)
+    zname=$(printf '%s\n' "$base" | LC_ALL=C sed -E 's/^(.*_[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6})_[^.]+\./\1./')
+    if [ "$x" -gt "$SYS_MAX" ]; then echo "  left out: $zname (more than $SYS_MAX of its kind)" >>"$work/sys-index"; continue; fi
+    if [ "$s" -gt "$SYS_FILE_MAX" ]; then echo "  left out: $zname ($(((s + 999) / 1000)) KB, too large)" >>"$work/sys-index"; continue; fi
+    if [ ! -r "$f" ]; then
+      unread=$((unread + 1)); echo "  not readable: $zname" >>"$work/sys-index"; continue
+    fi
+    ts=$(stat -f '%Sm' -t '%F %R' "$f") cut=""
+    : >"$w/names"
+    case $kind in
+      gpu)
+        gpu=$((gpu + 1))
+        if [ "$s" -gt 65536 ]; then echo "  left out: $zname ($(((s + 999) / 1000)) KB, not a GPU event's size)" >>"$work/sys-index"; continue; fi
+        cp "$f" "$w/x"
+        ;;
+      diag)
+        diag=$((diag + 1))
+        # the header up to the stacks; Path and identifiers stay out
+        LC_ALL=C awk '/^Heaviest stack|^Powerstats|^Binary Images/ { exit }
+          /^(Date\/Time|End time|OS Version|Command|Event|Action taken|Duration|Duration Sampled|Steps|Limit duration|Writes[A-Za-z ]*|Wakeups[A-Za-z ]*|CPU[A-Za-z ]*|[A-Za-z ]*[Ll]imit[A-Za-z ]*):/' "$f" >"$w/raw"
+        LC_ALL=C sed -n -E 's/^Command: +//p' "$w/raw" >"$w/names"
+        sys_scrub "$w/names" <"$w/raw" >"$w/x"
+        ;;
+      spin)
+        # every process's name first (to hide them), then the header and WindowServer's and the
+        # game's thread lines (Thread 0x..., its queue and name, samples, priority, CPU)
+        LC_ALL=C sed -n -E 's/^(Process|Command): +(.*[^ ]) +\[[0-9]+\].*/\2/p; s/^Command: +([^[]*[^ []) *$/\1/p' "$f" >"$w/names"
+        LC_ALL=C awk -v maxt="$SYS_THREADS" '
+          function ours(n) { return n == "WindowServer" || tolower(n) ~ /^(swtor|wine|mac_wine)/ }
+          /^Process: / { hdr = 0; n = $0; sub(/^Process: +/, "", n); sub(/ +\[[0-9]+\].*$/, "", n); keep = ours(n); t = 0
+            if (keep) print "\nProcess: " n; next }
+          NR == 1 { hdr = 1 }
+          hdr && /^[A-Za-z][A-Za-z \/()-]*: / && !/^(Shared Cache|Path|Codesigning ID|UUID|Incident Identifier|OS Cryptex[A-Za-z ]*|Parent|Responsible|Resource Coalition):/ { print; next }
+          hdr { next }
+          keep && /^(Footprint|Time Since Fork|Num samples|CPU Time|Num threads|Note): / { print; next }
+          keep && /^  Thread 0x/ { if (++t <= maxt) print; else if (t == maxt + 1) print "  (more threads left out)" }' "$f" >"$w/raw"
+        sys_scrub "$w/names" <"$w/raw" >"$w/x"
+        ;;
+      ws|panic)
+        head -1 "$f" >"$w/head.json"; tail -n +2 "$f" >"$w/body.json"
+        if ! plutil -convert json -o /dev/null "$w/body.json" 2>/dev/null; then
+          # A WindowServer report cut off (written while the Mac went down) still has its
+          # termination and thermal pressure in its first lines, one line each: those alone,
+          # without the details (no process list to hide other names in them by)
+          if [ "$kind" = ws ] &&
+             LC_ALL=C awk '/^  "(termination|thermalPressureLevel|captureTime|uptime)" : / { l = $0; sub(/,[ \t]*$/, "", l); a[++n] = l }
+               END { print "{"; for (i = 1; i <= n; i++) print a[i] (i < n ? "," : ""); print "}" }' "$w/body.json" >"$w/cut.json" &&
+             plutil -convert json -o /dev/null "$w/cut.json" 2>/dev/null && sys_get termination.namespace "$w/cut.json" >/dev/null; then
+            cut=1; cutn=$((cutn + 1)); mv -f "$w/cut.json" "$w/body.json"
+          else
+            bad=$((bad + 1)); [ "$kind" = panic ] && panics=$((panics + 1))
+            echo "  $zname ($ts): its JSON could not be read (malformed), left out" >>"$work/sys-index"; continue
+          fi
+        fi
+        {
+          echo "Report: ${zname}"
+          [ -z "$cut" ] || echo "(its JSON is cut off: only the fields of its first lines, the termination's details left out)"
+          echo "Timestamp: $(sys_get timestamp "$w/head.json" || echo ?)"
+          echo "bug_type: $(sys_get bug_type "$w/head.json" || sys_get bug_type "$w/body.json" || echo ?)"
+          if [ "$kind" = ws ]; then
+            ws=$((ws + 1))
+            plutil -extract stackshot.processByPid xml1 -o - "$w/body.json" 2>/dev/null | sys_procs "$w/names" 0 >/dev/null
+            echo "Capture time: $(sys_get captureTime "$w/body.json" || echo ?)"
+            x=$(sys_get termination.namespace "$w/body.json")
+            [ "$x" != WATCHDOG ] || wd=$((wd + 1))
+            echo "Termination: namespace ${x:-none}, code $(sys_get termination.code "$w/body.json" || echo -), indicator $(sys_get termination.indicator "$w/body.json" || echo -)"
+            i=0
+            [ -z "$cut" ] || i=20
+            while [ "$i" -lt 20 ] && x=$(sys_get "termination.details.$i" "$w/body.json"); do
+              echo "  $x"; i=$((i + 1))
+            done
+            echo "Thermal pressure: $(sys_get thermalPressureLevel "$w/body.json" || echo ?)"
+            echo "Uptime: $(sys_get uptime "$w/body.json" || echo ?) s"
+          else
+            panics=$((panics + 1))
+            plutil -extract processByPid xml1 -o - "$w/body.json" 2>/dev/null | sys_procs "$w/names" >"$w/procs"
+            echo "Panic string (up to the Debugger message):"
+            sys_get panicString "$w/body.json" | LC_ALL=C awk '{ print "  " $0 } /^Debugger message/ || NR >= 40 { exit }'
+            echo
+            echo "WindowServer, loginwindow and the game's processes (uptime, thread names; no others):"
+            if [ -s "$w/procs" ]; then sed 's/^/  /' "$w/procs"; else echo "  none in the report"; fi
+          fi
+        } >"$w/raw"
+        sys_scrub "$w/names" <"$w/raw" >"$w/x"
+        ;;
+    esac
+    zname="$zname.txt"
+    [ "$kind" != gpu ] || zname="${zname%.ips.txt}.ips"
+    mv -f "$w/x" "$work/sys/$zname"
+    nx=$((nx + 1))
+    echo "  $zname ($ts${cut:+; cut off, only its first lines})" >>"$work/sys-index"
+  done <"$w/list"
+  ns=$(wc -l <"$w/list" | tr -d ' ')
+  s="$gpu GPU faults, $wd WindowServer watchdog restarts, $panics kernel panics"
+  [ "$ns" -gt 0 ] || s="$s (no reports)"
+  [ "$bad" = 0 ] || s="$s; $bad malformed"
+  [ "$cutn" = 0 ] || s="$s; $cutn cut off"
+  [ "$unread" = 0 ] || s="$s; $unread not readable (no access)"
+  echo "$s" >"$work/sys-summary"
+}
+
 for f in "$LOGS"/*; do
   case "$f" in
     *.zip) continue ;;
@@ -388,6 +598,19 @@ SWTOR_ON_MAC_BTM_TIMEOUT="$BTM_TIMEOUT" /bin/bash "$RES/som.sh" btm-check "${BTM
 btm_pid=$!
 set +m
 gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
+# (redacted on the way in like the rest; their names too)
+system_reports
+for f in "$work/sys"/*; do
+  [ -f "$f" ] || continue
+  mkdir -p "$out/system-reports"
+  redact <"$f" >"$out/system-reports/$(printf '%s\n' "${f##*/}" | redact)"
+done
+sys_line="System reports $(cat "$work/sys-label"): $(cat "$work/sys-summary")"
+# the session report's summary repeats it, after its first line
+if [ -f "$out/session-report.txt" ]; then
+  { sed -n 1p "$out/session-report.txt"; echo "$sys_line"; sed 1d "$out/session-report.txt"; } | redact >"$work/sr.txt" &&
+    mv -f "$work/sr.txt" "$out/session-report.txt"
+fi
 while kill -0 "$btm_pid" 2>/dev/null && [ $((SECONDS - btm_t0)) -lt $((BTM_TIMEOUT + 5)) ]; do sleep 1; done
 btm_late=0
 if kill -0 "$btm_pid" 2>/dev/null; then
@@ -488,6 +711,11 @@ esac
   echo
   echo "GPU errors of the last $GPU_HOURS hours (in gpu-errors.txt):"
   echo "  $(cat "$work/gpu-summary" 2>/dev/null || echo "not read")"
+  echo
+  # (macOS's own reports in $SYS_DIAG, see system_reports)
+  echo "$sys_line"
+  echo "  (extracts in system-reports/; GPU faults: gpuEvent, watchdog restarts: WindowServer .ips, panics: panic-full)"
+  [ ! -s "$work/sys-index" ] || cat "$work/sys-index"
   echo
   # Metal's caches of the engine's processes (macOS's, not the app's; nothing is changed here):
   # gpuarchiver grows by a folder per process that uses Metal, com.apple.metal holds the
