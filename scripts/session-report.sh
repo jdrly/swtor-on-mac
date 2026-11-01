@@ -415,14 +415,15 @@ analyze() {
       if (nw) {
         if (marklen > 0 && !marked) print "interval=the whole session" (skip ? sprintf(" after the first %d s", skip) : "") ": no mark (no return to the game window)"
         else if (ivempty) printf "interval=none: the session ended within %d s of the mark%s\n", settle, (retat != "" ? " at " retat : "")
-        else if (marked) printf "interval=STATS seconds %d-%d, %d s%s, from %d s after the mark%s\n", tof[ks], tof[ke], ke - ks + 1,
-          (ivshort ? sprintf(" of the %d asked (the session ended)", marklen) : ""), settle, (retat != "" ? " at " retat : "")
+        else if (marked) printf "interval=STATS seconds %d-%d (%d lines%s), from %d s after the mark%s\n", tof[ks], tof[ke], ke - ks + 1,
+          (ivshort ? sprintf(" of the %d asked: the session ended", marklen) : ""), settle, (retat != "" ? " at " retat : "")
         else print "interval=the whole session" (skip ? sprintf(" after the first %d s", skip) : "")
       }
       d = ""
       if (!header) d = d "; no SWTOR on Mac line at the start (the log'"'"'s start is missing, or SWTOR on Mac 0.0.x)"
       if (marklen > 0 && nw && !marked) d = d "; no mark"
       if (ivshort || ivempty) d = d "; the interval is short"
+      if (marked && hsecs) d = d sprintf("; %d s of the interval hidden or switching (left out)", hsecs)
       ng2 = marked ? ivgap : ngap; gmx = marked ? ivgapmax : gapmax
       if (ng2) d = d sprintf("; %d STATS window%s of 2 s or more (the longest %d s: a frame that long, or no Present)", ng2, (ng2 > 1 ? "s" : ""), gmx)
       if (nsupp) d = d sprintf("; %d visibility or throttle line%s suppressed by d9mt (those seconds left out)", nsupp, (nsupp > 1 ? "s" : ""))
@@ -734,7 +735,7 @@ aba() {
     same=0; echo "  the arms differ in Measurement: frame times compare only between instrumented arms"
   fi
   case "$(get interval "$a")|$(get interval "$b")|$(get interval "$c")" in
-    *"no mark"*|*"(the session ended)"*|*none:*) echo "  an arm has no mark or a short interval: the arms' intervals differ" ;;
+    *"no mark"*|*"the session ended"*|*hidden*) echo "  an arm has no mark or a short interval: the arms' intervals differ" ;;
   esac
   [ "$same" = 1 ] || return 0
   [ "$(get build "$a")|$(get d9mt_files "$a")|$(get ab "$a")|$(get settings "$a")" != \

@@ -61,15 +61,24 @@ fx_field_kit() {
   # 16-75, the loading and the
   # hitch before the mark left out
   "$SR" --mark 60 "$R/a.log" >"$R/a-mark.txt" 2>&1 || true
-  check "field: the interval after the mark" fk_in "$R/a-mark.txt" '^  Interval +STATS seconds 16-75, 60 s, from 5 s after the mark at 20:01:01\.500$'
+  check "field: the interval after the mark" fk_in "$R/a-mark.txt" '^  Interval +STATS seconds 16-75 \(60 lines\), from 5 s after the mark at 20:01:01\.500$'
   check "field: only the interval's seconds and frames" eval 'fk_in "$R/a-mark.txt" "^  Seconds with STATS lines +60$" && fk_in "$R/a-mark.txt" "^  Frames +3600$" && fk_in "$R/a-mark.txt" "^  Frame time: worst \(ms\) +17\.5$"'
   check "field: no hitch from before the mark" fk_in "$R/a-mark.txt" '^  Hitches \(frames over 50 ms\) +0$'
   check "field: PACE seconds of the interval only" fk_in "$R/a-mark.txt" '^  PACE seconds +60$'
   "$SR" --mark 100 "$R/a.log" >"$R/a-short.txt" 2>&1 || true
-  check "field: a short interval says so" eval 'fk_in "$R/a-short.txt" "^  Interval +STATS seconds 16-85, 70 s of the 100 asked \(the session ended\)" && fk_in "$R/a-short.txt" "^  Data +the interval is short$"'
+  check "field: a short interval says so" eval 'fk_in "$R/a-short.txt" "^  Interval +STATS seconds 16-85 \(70 lines of the 100 asked: the session ended\)" && fk_in "$R/a-short.txt" "^  Data +the interval is short$"'
   { fk_head 0.1.7-dev.3 73511be "2026-11-01 20:00:00"; for t in 1 2 3 4 5; do fk_st "$t" 60.0; done; } >"$R/nomark.log"
   "$SR" --mark 60 "$R/nomark.log" >"$R/nomark.txt" 2>&1 || true
   check "field: no mark: the whole session, and Data says so" eval 'fk_in "$R/nomark.txt" "^  Interval +the whole session: no mark" && fk_in "$R/nomark.txt" "^  Data +no mark$"'
+
+  # a return, then hidden again at once: the interval's hidden seconds named in Data
+  { fk_head 0.1.7-dev.3 73511be "2026-11-01 20:00:00"
+    for t in 1 2 3; do fk_st "$t" 60.0; done
+    fk_vis 3 0; fk_st 4 30.0; fk_vis 0 3 20:00:04.500; fk_vis 3 0 20:00:05.000
+    for t in $(seq 5 80); do fk_st "$t" 30.0; done
+  } >"$R/flicker.log"
+  "$SR" --mark 60 "$R/flicker.log" >"$R/flicker.txt" 2>&1 || true
+  check "field: hidden seconds in the interval named" eval 'fk_in "$R/flicker.txt" "^  Data +60 s of the interval hidden or switching \(left out\)$" && ! fk_in "$R/flicker.txt" "FPS: average"'
 
   # 3. Gaps: a STATS window of 4 s, visibility lines d9mt suppressed, a second device
   { fk_head 0.1.7-dev.3 73511be "2026-11-01 20:00:00"
@@ -158,7 +167,7 @@ PM
   check "collect: one zip" test -n "$zd"
   zd=${zd:-$R/none}
   check "collect: the kept starts side by side, the oldest first" eval 'fk_in "$zd/sessions-compared.txt" "^ +A: wine\.log\.3 +B: wine\.log\.2 +C: wine\.log\.1 +D: wine\.log$" && fk_in "$zd/sessions-compared.txt" "^    Game start +2026-11-01 19:00:00$"'
-  check "collect: each arm's interval from the mark" fk_in "$zd/sessions-compared.txt" '^    Interval +STATS seconds 16-75, 60 s, from 5 s after the mark at 20:01:01\.500$'
+  check "collect: each arm's interval from the mark" fk_in "$zd/sessions-compared.txt" '^    Interval +STATS seconds 16-75 \(60 lines\), from 5 s after the mark at 20:01:01\.500$'
   check "collect: the last three as A/B/A" fk_in "$zd/sessions-compared.txt" '^The last three as A/B/A \(B, C, D: wine\.log\.2, wine\.log\.1, wine\.log\):$'
   check "collect: a cut log keeps the wrapper's first lines" eval 'head -1 "$zd/logs/wine.log.3" | grep -qx "SWTOR on Mac 0.1.7-dev.2: engine cx26 cx-26.3.0-8, d9mt 1111111, started 2026-11-01 19:00:00" && sed -n 6p "$zd/logs/wine.log.3" | grep -q "^\[SWTOR on Mac: only the last 5 MB of wine.log.3\]$"'
   check "collect: the account name replaced in the logs and the comparison" eval '! grep -rqF "$acct" "$zd" && grep -q "something about ACCOUNT" "$zd/logs/wine.log.1"'
