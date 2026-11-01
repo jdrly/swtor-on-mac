@@ -96,14 +96,15 @@ performance. A setting you choose is kept through updates and Reinstall.
 settings and measurement in a block of its own; with 3 or more, the last three as an A/B/A:
 the drift between the two A arms and B against their mean (in percentage points for a
 percentage; no relative change from a mean of 0), which is no significance test. It gives
-numbers only when every arm names its build, d9mt files and settings (0.1.7 and later), has
+numbers only when every arm names its build, both d9mt files' hashes and settings (0.1.7 and later; not "unknown" or "missing"), has
 instrumented frame times and the whole `--mark` interval, and the first and the last ran the
 same build, d9mt files, switches and settings; else it names what is missing.
 `--skip <s>` leaves out the first seconds (loading). `--mark <s>` counts `<s>` seconds of
 elapsed time (STATS `t`) from 5 s after the last return to the game window: stand at the
 spot, Cmd-Tab away and back once (the mark), then wait. Lost STATS lines don't move it; they
 and windows of 2 s or more are named under Data. A session without a mark counts as a whole
-and says so; a second device before the interval ends leaves none. Collect Logs
+and says so; a second device before the interval ends leaves none. `--skip` and `--mark`
+don't go together. Collect Logs
 adds the report as `session-report.txt`, and with two or more kept starts
 `sessions-compared.txt` (`--mark 60 --compare`, the oldest first). Logs from 0.0.5 have no
 `STATS` lines: hitches, compile waits and memory still compare.

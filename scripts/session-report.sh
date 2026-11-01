@@ -91,6 +91,10 @@ while [ $# -gt 0 ]; do
 done
 case "$SKIP" in ''|*[!0-9]*) usage ;; esac
 case "$MARK" in ''|*[!0-9]*) usage ;; esac
+# (the mark sets the interval; --skip would take seconds out of it, unseen)
+if [ "$SKIP" -gt 0 ] && [ "$MARK" -gt 0 ]; then
+  echo "--skip and --mark don't go together: the mark sets the interval" >&2; exit 2
+fi
 
 LOGS="${SWTOR_ON_MAC_ROOT:+$SWTOR_ON_MAC_ROOT/home}"
 LOGS="${LOGS:-$HOME}/Library/Logs/SWTOR on Mac"
@@ -453,7 +457,8 @@ analyze() {
       if (nsupp) d = d sprintf("; %d visibility or throttle line%s suppressed by d9mt (those seconds left out)", nsupp, (nsupp > 1 ? "s" : ""))
       if (!marked && resets) d = d "; a second device (its seconds counted from 0 again)"
       # the interval is whole: every second of it in STATS windows of its own, shown, none lost
-      if (marklen > 0) print "interval_ok=" ((marked && !ivshort && !ivempty && !ivdev && ivcov == marklen && !ivgap && !ivsettlegap && !hsecs) ? "yes" : "no")
+      # (and every one of its STATS lines counted: nothing else took any out)
+      if (marklen > 0) print "interval_ok=" ((marked && !ivshort && !ivempty && !ivdev && ivcov == marklen && !ivgap && !ivsettlegap && !hsecs && nall == ke - ks + 1) ? "yes" : "no")
       print "data=" (d == "" ? "nothing left out or lost" : substr(d, 3))
       if (settings != "") print "settings=" settings
       if (conds != "") print "conditions=" conds
@@ -763,6 +768,13 @@ aba() {
     f=${AN[$j]} why="" miss=""
     for k in build settings d9mt_files; do [ -n "$(get "$k" "$f")" ] || miss="$miss, $k"; done
     [ -z "$miss" ] || why="; no ${miss#, } line (a log before 0.1.7, or its start is missing)"
+    # known, not just there: both d9mt files hashed (not the wrapper's "unknown" after its
+    # deadline, nor "missing"), and the build's version and d9mt named (not the wrapper's "?")
+    k=$(get d9mt_files "$f")
+    [ -z "$k" ] || printf '%s\n' "$k" | grep -qE '^d3d9\.dll [0-9a-f]{12}, winemetal\.so [0-9a-f]{12}$' ||
+      why="$why; the d9mt files not verified ($k)"
+    k=$(get build "$f")
+    case "$k" in "" ) ;; *"?"*) why="$why; the build not known ($k)" ;; esac
     case "$(get mode "$f")" in instrumented*) ;; *) why="$why; no frame times (Debug Logging off)" ;; esac
     case "$(get interval_ok "$f")" in
       yes) ;;
@@ -776,7 +788,7 @@ aba() {
     [ "$(sw "$k" "$a")" = "$(sw "$k" "$c")" ] || { ok=0; echo "  the first and the last differ in $k: not an A/B/A"; }
   done
   if [ "$ok" != 1 ]; then
-    echo "  no A/B/A numbers: each arm needs its build, d9mt files and settings, instrumented frame"
+    echo "  no A/B/A numbers: each arm needs its build, both d9mt files' hashes and settings, instrumented frame"
     echo "  times and the whole interval (all $MARK s), and the first and the last the same build"
     return 0
   fi

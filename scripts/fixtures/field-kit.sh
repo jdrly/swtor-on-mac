@@ -140,6 +140,20 @@ fx_field_kit() {
 warn:  STATS t=40 /' "$R/b.log" >"$R/b-hidden.log"
   "$SR" --mark 60 --compare "$R/a.log" "$R/b-hidden.log" "$R/a2.log" >"$R/hidden-aba.txt" 2>&1 || true
   check "field: an arm hidden in its interval: no numbers" eval 'fk_in "$R/hidden-aba.txt" "^  B \(b-hidden\.log\): the interval is not whole .*of the interval hidden or switching" && ! fk_in "$R/hidden-aba.txt" "drift"'
+  # the d9mt files not verified: the wrapper's "unknown" (its deadline) in both A arms, a
+  # missing file in B; the build's "?"
+  sed 's/^SWTOR on Mac d9mt files: .*/SWTOR on Mac d9mt files: unknown/' "$R/a.log" >"$R/a-unknown.log"
+  sed 's/^SWTOR on Mac d9mt files: .*/SWTOR on Mac d9mt files: unknown/' "$R/a2.log" >"$R/a2-unknown.log"
+  sed 's/^SWTOR on Mac d9mt files: .*/SWTOR on Mac d9mt files: d3d9.dll missing, winemetal.so ba9876543210/' "$R/b.log" >"$R/b-missing.log"
+  "$SR" --mark 60 --compare "$R/a-unknown.log" "$R/b-missing.log" "$R/a2-unknown.log" >"$R/unverified-aba.txt" 2>&1 || true
+  check "field: d9mt files unknown or missing: not verified, no numbers" eval 'fk_in "$R/unverified-aba.txt" "^  A \(a-unknown\.log\): the d9mt files not verified \(unknown\)$" && fk_in "$R/unverified-aba.txt" "^  B \(b-missing\.log\): the d9mt files not verified \(d3d9\.dll missing, winemetal\.so ba9876543210\)$" && fk_in "$R/unverified-aba.txt" "^  C \(a2-unknown\.log\): the d9mt files not verified" && fk_in "$R/unverified-aba.txt" "^  FPS: average +60\.0 +62\.0 +59\.0$" && ! fk_in "$R/unverified-aba.txt" "drift"'
+  sed 's/^SWTOR on Mac 0\.1\.7-dev\.4: engine cx26 cx-26\.3\.0-8, d9mt 9999999,/SWTOR on Mac ?: engine cx26 cx-26.3.0-8, d9mt ?,/' "$R/b.log" >"$R/b-nobuild.log"
+  "$SR" --mark 60 --compare "$R/a.log" "$R/b-nobuild.log" "$R/a2.log" >"$R/nobuild-aba.txt" 2>&1 || true
+  check "field: a build named ?: not known, no numbers" eval 'fk_in "$R/nobuild-aba.txt" "^  B \(b-nobuild\.log\): the build not known" && ! fk_in "$R/nobuild-aba.txt" "drift"'
+  # --skip with --mark: refused (the skip would take seconds out of the interval unseen)
+  t=0; "$SR" --skip 60 --mark 60 --compare "$R/a.log" "$R/b.log" "$R/a2.log" >"$R/skip-mark.txt" 2>&1 || t=$?
+  check "field: --skip with --mark refused ($t)" eval '[ "$t" = 2 ] && fk_in "$R/skip-mark.txt" "^--skip and --mark don.t go together" && ! fk_in "$R/skip-mark.txt" "drift"'
+
   # a zero baseline: no relative change, the difference in percentage points
   sed 's/fps=62\.0 ms=16\.7\/17\.0\/17\.5/fps=50.0 ms=20.0\/21.0\/21.0/' "$R/b.log" >"$R/b-slow.log"
   "$SR" --mark 60 --compare "$R/a.log" "$R/b-slow.log" "$R/a2.log" >"$R/zero-aba.txt" 2>&1 || true
@@ -183,13 +197,16 @@ PM
   # unknown, the d9mt files still hashed, nothing of the stand-in left
   cat >"$R/slow-pmset" <<'PM'
 #!/bin/bash
+[ "$1" != --warm ] || exit 0
 trap '' TERM
 echo $$ >>"$(dirname "$0")/slow.pids"
 sleep 30 &
 echo $! >>"$(dirname "$0")/slow.pids"
 wait
 PM
-  chmod 755 "$R/slow-pmset"; rm -f "$R/slow.pids"
+  # (run once first: macOS's first look at a new executable can take longer than the deadline,
+  # and the check would then not see the hang at all)
+  chmod 755 "$R/slow-pmset"; "$R/slow-pmset" --warm; rm -f "$R/slow.pids"
   local t0 t1 left=""
   t0=$(date +%s)
   line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$R/slow-pmset" SWTOR_DIAG_TIMEOUT=1 SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
