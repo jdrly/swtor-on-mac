@@ -370,15 +370,17 @@ if [ -f "$LOGS/wine.log" ] && [ -x "$RES/session-report.sh" ]; then
 fi
 # The game starts the wrapper kept, the oldest first, side by side (session-report.sh --mark 60
 # --compare; a before/after test's sessions, its A/B/A arms the last three), from the whole
-# logs: what each ran with, how it was measured and what is missing
-kept=()
+# logs: what each ran with, how it was measured and what is missing. A few seconds for long
+# logs: it runs beside the queries below, and the zip waits for it (cmp_pid).
+kept=() cmp_pid=""
 for f in "$LOGS/wine.log.4" "$LOGS/wine.log.3" "$LOGS/wine.log.2" "$LOGS/wine.log.1" "$LOGS/wine.log"; do
   [ -f "$f" ] && kept[${#kept[@]}]=$f
 done
 if [ ${#kept[@]} -ge 2 ] && [ -x "$RES/session-report.sh" ]; then
   { "$RES/session-report.sh" --mark 60 --compare "${kept[@]}" 2>&1
     [ ! -f "$LOGS/wine.log.4" ] || echo "(wine.log.4 is the oldest game start kept: the wrapper keeps the last 5, earlier ones are gone)"
-  } | redact >"$out/sessions-compared.txt"
+  } </dev/null | redact >"$out/sessions-compared.txt" &
+  cmp_pid=$!
 fi
 # (redacted like every other file; the list goes into system-info.txt)
 crash_reports >"$work/crash-list"
@@ -404,6 +406,7 @@ SWTOR_ON_MAC_BTM_TIMEOUT="$BTM_TIMEOUT" /bin/bash "$RES/som.sh" btm-check "${BTM
 btm_pid=$!
 set +m
 gpu_errors 2>&1 | redact >"$out/gpu-errors.txt"
+[ -z "$cmp_pid" ] || wait "$cmp_pid"
 while kill -0 "$btm_pid" 2>/dev/null && [ $((SECONDS - btm_t0)) -lt $((BTM_TIMEOUT + 5)) ]; do sleep 1; done
 btm_late=0
 if kill -0 "$btm_pid" 2>/dev/null; then
