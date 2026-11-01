@@ -7,7 +7,8 @@
 # In the zip: SWTOR on Mac's logs (the end of large ones; wine.log.1-4 are the game starts
 # before the last), its env, settings.conf, dxvk.conf,
 # install-manifest.json and d9mt-ab.env (a development build's A/B switches, if set), the app's VERSIONS, session-report.txt (the last game session in
-# short, scripts/session-report.sh), a fresh system-info.txt (macOS, chip,
+# short, scripts/session-report.sh), sessions-compared.txt (the kept game starts side by side:
+# a before/after test's arms), a fresh system-info.txt (macOS, chip, thermal warnings,
 # memory, displays, versions, the state of the install, which crash reports are in the zip, when
 # macOS ended the launcher's leftovers in the last 7 days because it is not allowed in the
 # background, the GPU error count), gpu-errors.txt (the GPU errors of the game and Wine in macOS's unified log of
@@ -209,13 +210,16 @@ add() {  # file [name in the zip]
   [ -f "$1" ] && redact <"$1" >"$out/${2:-${1##*/}}"
 }
 
-add_log() {  # file max-bytes [folder in the zip [launcher]]: the end of a log
+add_log() {  # file max-bytes [folder in the zip [launcher]]: the end of a log (of wine.log and
+  # wine.log.1-4 also the wrapper's "SWTOR on Mac ..." lines at its start: what the game start
+  # ran with, its build, settings and conditions)
   local f=$1 size dir="$out/${3:-logs}"
   [ -f "$f" ] || return 0
   mkdir -p "$dir"
   size=$(stat -f %z "$f")
   if [ "$size" -gt "$2" ]; then
-    { echo "[SWTOR on Mac: only the last $(($2 / 1000000)) MB of ${f##*/}]"
+    { case "${f##*/}" in wine.log|wine.log.[0-9]) head -n 12 "$f" | LC_ALL=C grep -a '^SWTOR on Mac ' ;; esac
+      echo "[SWTOR on Mac: only the last $(($2 / 1000000)) MB of ${f##*/}]"
       tail -c "$2" "$f" | awk 'NR > 1'; } | redact ${4:+"$4"} >"$dir/${f##*/}"
   else
     redact ${4:+"$4"} <"$f" >"$dir/${f##*/}"
@@ -364,6 +368,18 @@ add "$RES/VERSIONS"
 if [ -f "$LOGS/wine.log" ] && [ -x "$RES/session-report.sh" ]; then
   "$RES/session-report.sh" "$LOGS/wine.log" 2>&1 | redact >"$out/session-report.txt"
 fi
+# The game starts the wrapper kept, the oldest first, side by side (session-report.sh --mark 60
+# --compare; a before/after test's sessions, its A/B/A arms the last three), from the whole
+# logs: what each ran with, how it was measured and what is missing
+kept=()
+for f in "$LOGS/wine.log.4" "$LOGS/wine.log.3" "$LOGS/wine.log.2" "$LOGS/wine.log.1" "$LOGS/wine.log"; do
+  [ -f "$f" ] && kept[${#kept[@]}]=$f
+done
+if [ ${#kept[@]} -ge 2 ] && [ -x "$RES/session-report.sh" ]; then
+  { "$RES/session-report.sh" --mark 60 --compare "${kept[@]}" 2>&1
+    [ ! -f "$LOGS/wine.log.4" ] || echo "(wine.log.4 is the oldest game start kept: the wrapper keeps the last 5, earlier ones are gone)"
+  } | redact >"$out/sessions-compared.txt"
+fi
 # (redacted like every other file; the list goes into system-info.txt)
 crash_reports >"$work/crash-list"
 while IFS= read -r line; do
@@ -420,7 +436,12 @@ esac
     "($(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null)+$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null) cores)," \
     "$(($(sysctl -n hw.memsize) / 1073741824)) GB, macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
   echo "Rosetta: $([ -e /Library/Apple/usr/libexec/oah/libRosettaRuntime ] && echo installed || echo "not installed")"
-  echo "Power: $(pmset -g ps 2>/dev/null | sed -n "1s/.*'\(.*\)'.*/\1/p")$(pmset -g 2>/dev/null | awk '$1 == "lowpowermode" && $2 == 1 { print ", Low Power Mode" }')"
+  echo "Power: $(pmset -g ps 2>/dev/null | sed -n "1s/.*'\(.*\)'.*/\1/p")$(pmset -g 2>/dev/null | awk '($1 == "lowpowermode" || $1 == "powermode") && $2 == 1 { print ", Low Power Mode" } $1 == "powermode" && $2 == 2 { print ", High Power Mode" }')"
+  # (now; each game start's own is in its wine.log, "SWTOR on Mac conditions:")
+  echo "Thermal and performance warnings now (pmset -g therm): $(pmset -g therm 2>/dev/null | LC_ALL=C awk '
+    /^Note: No .* has been recorded/ { notes++; next }
+    /[A-Za-z]/ { w = w (w == "" ? "" : ", ") $0 }
+    END { if (w != "") print w; else if (notes) print "none"; else print "unknown" }')"
   echo "Free space: $(df -h "$H" 2>/dev/null | awk 'NR == 2 { print $4 " of " $2 }')"
   system_profiler SPDisplaysDataType 2>/dev/null | awk '
     function out() {

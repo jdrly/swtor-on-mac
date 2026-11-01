@@ -106,6 +106,46 @@ game_lang() {
   game_lang=${game_lang:-not given}
 }
 
+# What a game start ran with, for its wine.log (session-report.sh shows it; a before/after test
+# tells its sessions apart by it). Each looks once, when the game starts; nothing watches.
+# session_settings: Debug Logging, the Metal HUD, Game Mode and d9mt's, DXVK's and Metal's
+# environment (D9MT_*, DXVK_*, MTL_*; a path's value left out, the rest only its letters,
+# digits and , . ; : _ + = -)
+session_settings() {
+  printf 'debug-logging=%s hud=%s game-mode=%s' "$([ -n "$D9MT_PROFILE" ] && echo on || echo off)" \
+    "$([ "$MTL_HUD_ENABLED" = 1 ] && echo on || echo off)" "$([ -n "$SWTOR_GAMEMODE_APP" ] && echo on || echo off)"
+  env | LC_ALL=C grep -E '^(D9MT|DXVK|MTL)_[A-Za-z0-9_]*=' | LC_ALL=C sort | LC_ALL=C awk '{
+    n = $0; sub(/=.*/, "", n); v = substr($0, length(n) + 2)
+    if (v ~ /[\/\\]/) v = "(a path)"; else { gsub(/[^A-Za-z0-9,.;:_+=-]/, "", v); v = substr(v, 1, 80) }
+    printf " %s=%s", n, v }'
+  echo
+}
+# session_conditions: the power source, the energy mode (Low Power Mode) and macOS's thermal
+# and performance warnings (pmset -g therm; "none" when it has recorded none). (SWTOR_PMSET: a
+# stand-in for tests.)
+session_conditions() {
+  local pm="${SWTOR_PMSET:-/usr/bin/pmset}" ps em th
+  ps=$("$pm" -g ps 2>/dev/null | sed -n "1s/.*'\(.*\)'.*/\1/p")
+  # (macOS 26: "powermode 0/1/2", automatic, low power, high power; older: "lowpowermode 0/1")
+  em=$("$pm" -g 2>/dev/null | awk '$1 == "powermode" { print ($2 == 1 ? "low power" : $2 == 2 ? "high power" : "automatic"); exit }
+    $1 == "lowpowermode" { print ($2 == 1 ? "low power" : "automatic"); exit }')
+  th=$("$pm" -g therm 2>/dev/null | LC_ALL=C awk '
+    /^Note: No .* has been recorded/ { notes++; next }
+    /[A-Za-z]/ { gsub(/[^A-Za-z0-9 _=.-]/, ""); gsub(/  +/, " "); w = w (w == "" ? "" : ", ") $0 }
+    END { if (w != "") print w; else if (notes) print "none" }')
+  echo "power ${ps:-unknown}, energy mode ${em:-unknown}, thermal warnings ${th:-unknown}"
+}
+# d9mt_files: the first 12 hex digits of the SHA-256 of d9mt's d3d9.dll in the prefix and its
+# bridge in the engine (what ran, whatever the version label says)
+d9mt_files() {
+  local f h out=""
+  for f in "$SWTOR_PREFIX/drive_c/windows/system32/d3d9.dll" "$SWTOR_ENGINE/lib/wine/x86_64-unix/winemetal.so"; do
+    h=$(/usr/bin/shasum -a 256 "$f" 2>/dev/null | cut -c1-12)
+    out="$out${out:+, }${f##*/} ${h:-missing}"
+  done
+  echo "$out"
+}
+
 # wine.log is written anew at every game start: keep the last 4 sessions' as wine.log.1 (the
 # one before) to wine.log.4, so a failed start isn't lost to the next one.
 rotate_wine_log() {
@@ -188,6 +228,10 @@ if [ -n "$SWTOR_ENGINE" ]; then
         [ -z "$fps_note" ] || echo "SWTOR on Mac frame rate limit: $fps_note" >&2
         # the game's language and locale (after those: the A/B switches stay the second line)
         echo "SWTOR on Mac game language: $game_lang, LANG=${LANG:-}" >&2
+        # the settings, power and thermal state at the start, and the d9mt files' hashes
+        echo "SWTOR on Mac settings: $(session_settings)" >&2
+        echo "SWTOR on Mac conditions: $(session_conditions)" >&2
+        echo "SWTOR on Mac d9mt files: $(d9mt_files)" >&2
       else
         exec >/dev/null 2>/dev/null
       fi

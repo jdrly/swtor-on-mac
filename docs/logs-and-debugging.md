@@ -22,7 +22,9 @@ not allowed in the background (`som.sh btm-check 7d`, the times or *none*). `gpu
 of the last 2 hours (`IOGPUMetalError` counted per process, the last fault lines, the GPU
 driver's events by time and kind, Metal's other errors), since `wine.log` starts anew with every
 game start; other apps' errors are only counted, never named. `wine.log.1` to `wine.log.4` are
-the game starts before the last, and `system-info.txt` lists the last 10 starts from `hold.log`:
+the game starts before the last (a log cut to its last 5 MB keeps the wrapper's lines at its
+start: what that start ran with), `sessions-compared.txt` puts the kept starts side by side
+(below), and `system-info.txt` lists the last 10 starts from `hold.log`:
 how long each ran and how it ended (exit code or signal), with the game's language. With them
 come the official launcher's own logs (`launcher-logs/`, from `~/Library/Logs/Star Wars - The
 Old Republic Launcher`) and, in `system-info.txt`, a check of the launcher app: its version,
@@ -52,8 +54,20 @@ performance. A setting you choose is kept through updates and Reinstall.
 `~/Library/Logs/SWTOR on Mac/wine.log`:
 - the app version, Wine engine and d9mt the session ran on (0.1.0-dev.1 and later: the
   wrapper's first line in `wine.log`; also in `effective-env.txt`, and Collect Logs'
-  `system-info.txt` names the engine in place);
-- duration, median and 1%-low fps, the seconds below 58 fps;
+  `system-info.txt` names the engine in place); (0.1.7 and later) when it started, the
+  SHA-256 of the d9mt files that ran, the app's settings (Debug Logging, the HUD, Game Mode,
+  d9mt's and DXVK's environment, paths left out), and the power source, energy mode and
+  macOS's thermal warnings at the start;
+- **Measurement**: every frame time in the log comes from d9mt's profiling, which Debug
+  Logging turns on, so it is *instrumented*, not ordinary play's; with Debug Logging off the
+  log has no frame times (the Metal HUD shows them);
+- **Data**: what is left out or lost (a missing start of the log, STATS windows of 2 s or
+  more, lines d9mt's limiter suppressed, a second device, a short interval);
+- duration, median fps, the frame rate of the worst 1% of seconds, the seconds below 58 fps.
+  `STATS` lines have per-second numbers only (a second's average, 99th percentile and slowest
+  frame; at 100 frames a second or fewer the 99th percentile *is* the slowest frame), so the
+  session's 99th percentile frame time and the true 1% low (the slowest 1% of frames) are
+  reported as *missing*;
 - frames over 33 ms and 50 ms;
 - hitches, split into d9mt's and the game's, and d9mt's top causes;
 - the frame rate, frame times and hitches count only the seconds the game window showed the
@@ -78,9 +92,16 @@ performance. A setting you choose is kept through updates and Reinstall.
 
 `wine.log` starts afresh at every game start (the wrapper keeps the 4 before it as
 `wine.log.1` to `wine.log.4`, the newest first), so `--keep` saves a copy to `sessions/`.
-`--compare A.log B.log` puts two sessions side by side. `--skip <s>` leaves out the first
-seconds (loading). Collect Logs adds the report as `session-report.txt`. Logs from 0.0.5 have
-no `STATS` lines: hitches, compile waits and memory still compare.
+`--compare A.log B.log [C.log ...]` puts 2 to 5 sessions side by side, each one's build,
+settings and measurement in a block of its own; with 3 or more, the last three as an A/B/A
+(the first and the last must have run the same build, d9mt files, switches and settings): the
+drift between the two A arms and B against their mean, which is no significance test.
+`--skip <s>` leaves out the first seconds (loading). `--mark <s>` counts only `<s>` seconds
+from 5 s after the last return to the game window: stand at the spot, Cmd-Tab away and back
+once (the mark), then wait; a session without one counts as a whole and says so. Collect Logs
+adds the report as `session-report.txt`, and with two or more kept starts
+`sessions-compared.txt` (`--mark 60 --compare`, the oldest first). Logs from 0.0.5 have no
+`STATS` lines: hitches, compile waits and memory still compare.
 
 **Live d9mt flags.** With Debug Logging on, d9mt reads
 `~/Library/Application Support/SWTOR on Mac/prefix/drive_c/d9mt/flags.txt` (`C:\d9mt\flags.txt`)

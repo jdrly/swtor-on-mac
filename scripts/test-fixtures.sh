@@ -7,7 +7,9 @@
 #   scripts/test-fixtures.sh [path/to/SWTOR on Mac.app] [group...]
 #
 # Groups (default: all): session-report (the suite's section 6f: the packaged session-report.sh on
-# a sample log); job-sandbox (the suite's end under a job runner, on planted sandboxes, with copies
+# a sample log); field-kit (what a before/after field test reads: session-report.sh's
+# measurement, interval, missing percentiles and A/B/A, the wrapper's lines at a game start,
+# Collect Logs' comparison of the kept starts; only here); job-sandbox (the suite's end under a job runner, on planted sandboxes, with copies
 # that fail; only here, so the suite's counts stay); orphan-as (the suite's orphan_as: argv[0]
 # rewritten, and never on the rewriting shell's command line; only here, too); is-launcher (the
 # suite's section 2b call by executable isn't the running launcher to a process scan); eval-exit
@@ -44,11 +46,13 @@ pass=0 fail=0
 . scripts/fixtures/bridge.sh
 # shellcheck source=scripts/fixtures/self.sh
 . scripts/fixtures/self.sh
+# shellcheck source=scripts/fixtures/field-kit.sh
+. scripts/fixtures/field-kit.sh
 APP="dist/SWTOR on Mac.app"
 if [ $# -gt 0 ] && [ -d "$1" ]; then APP=$1; shift; fi
 APP="$(cd "$APP" 2>/dev/null && pwd)" || { echo "no app at $APP; run ./build.sh" >&2; exit 1; }
 [ -x "$APP/Contents/Resources/session-report.sh" ] || { echo "no session-report.sh in $APP" >&2; exit 1; }
-FX_ALL="session-report job-sandbox orphan-as is-launcher eval-exit bridge self"
+FX_ALL="session-report field-kit job-sandbox orphan-as is-launcher eval-exit bridge self"
 FX_GROUPS="${*:-$FX_ALL}"
 for g in $FX_GROUPS; do
   case " $FX_ALL " in *" $g "*) ;; *) echo "unknown group $g (groups: $FX_ALL)" >&2; exit 2 ;; esac
@@ -78,6 +82,7 @@ for g in $FX_GROUPS; do
   echo "== $g"
   case $g in
     session-report) fx_session_report "$APP/Contents/Resources/session-report.sh" "$ROOT/session-report" ;;
+    field-kit) fx_field_kit "$APP" "$APP/Contents/Resources/wine-wrapper.sh" "$ROOT/field-kit" ;;
     job-sandbox) fx_job_sandbox "$ROOT/job-sandbox" ;;
     orphan-as) fx_orphan_as "$ROOT/orphan-as" ;;
     is-launcher) fx_is_launcher ;;

@@ -162,8 +162,17 @@ code.
 
 **Session report**
 `session-report.sh`: a summary of the last game session from `wine.log` (frame rate, hitches,
-compile waits, memory, d9mt's pipeline state cache); `--compare` puts two sessions side by side
-(docs/logs-and-debugging.md).
+compile waits, memory, d9mt's pipeline state cache); `--compare` puts 2 to 5 sessions side by
+side, `--mark` counts a fixed interval after the mark (docs/logs-and-debugging.md).
+
+**Instrumented** / **ordinary play**
+Frame times from d9mt's profiling (Debug Logging on, `D9MT_PROFILE`) are *instrumented*; play
+with Debug Logging off is *ordinary play*, whose frame times only the Metal HUD shows. A report
+never calls instrumented numbers the player's frame rate.
+
+**Mark**
+In a before/after field test: one Cmd-Tab away from the game and back, standing at the spot; the
+session report's `--mark <s>` measures `<s>` seconds from 5 s after it.
 
 **Sandbox**
 A run of `som.sh` with `SWTOR_ON_MAC_ROOT=/abs/dir`: every path, the official install included,
