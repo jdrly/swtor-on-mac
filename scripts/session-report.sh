@@ -9,9 +9,9 @@
 #                                       sessions side by side (before/after; A/B/A: 3 arms)
 #
 #   --skip <s>  leave out the first <s> seconds (loading screens, character select)
-#   --mark <s>  count only <s> seconds, from 5 s after the last return to the game window
-#               (the mark: Cmd-Tab away and back once, standing at the spot); a session with
-#               no return counts as a whole, and says so
+#   --mark <s>  count only <s> seconds of elapsed time (STATS t), from 5 s after the last
+#               return to the game window (the mark: Cmd-Tab away and back once, standing at
+#               the spot); a session with no return counts as a whole, and says so
 #   --keep      also save the log as ~/Library/Logs/SWTOR on Mac/sessions/wine-<date>-<version>.log:
 #               wine.log starts afresh at every game start, so keep the sessions to compare
 #
@@ -192,18 +192,35 @@ analyze() {
       p2 = 1
       bad[nw + 1] = wbad || (wstart >= 0 && !shown(wstart)) || wmin
       for (vw = 1; vw <= nw + 1; vw++) hid[vw] = bad[vw] || bad[vw - 1] || bad[vw + 1]
-      # --mark <s>: windows ks..ke, from <settle> s after the second of the last return; the
-      # lines between the STATS line before ks and the one after ke
+      # --mark <s>: by elapsed time, not by lines. The return fell in window retk, which ends at
+      # t = tof[retk]; the interval is the seconds its0..ite (<settle> s later, <s> long) of
+      # the same device (a second device counts t from 0 again). Window k covers t from
+      # tof[k-1] to tof[k]: windows ks..ke are those wholly inside the interval. A window of 2 s
+      # or more (a frame that long, or no Present) is one line for several seconds: counted as
+      # time, and named in Data. Lines between the STATS line before ks and the one after ke
+      # belong to it.
       if (marklen > 0 && retk) {
-        marked = 1; ks = retk + settle; ke = ks + marklen - 1
-        if (ke > nw) { ivshort = 1; ke = nw }
-        if (ks > ke) { ivempty = 1; ks = nw + 1; ke = nw }
+        marked = 1; ks = 0; ke = -1
+        segend = nw; for (vw = retk + 1; vw <= nw; vw++) if (devof[vw]) { segend = vw - 1; break }
+        if (retk <= nw) {
+          its0 = tof[retk] + settle; ite = its0 + marklen - 1
+          for (vw = retk + 1; vw <= segend; vw++) {
+            pt = devof[vw] ? 0 : tof[vw - 1]
+            if (pt >= its0 - 1 && tof[vw] <= ite) { if (!ks) ks = vw; ke = vw }
+            # a gap in the seconds between the mark and the interval
+            else if (tof[vw] < its0 && tof[vw] - pt >= 2) ivsettlegap = 1
+          }
+          if (tof[segend] < ite) { if (segend < nw) ivdev = 1; else ivshort = 1 }
+        }
+        if (ivdev || !ks) { ivempty = !ivdev; ks = nw + 1; ke = nw }
+        else {
+          for (vw = ks; vw <= ke; vw++) {
+            ivcov += tof[vw] - tof[vw - 1]
+            if (tof[vw] - tof[vw - 1] >= 2) { ivgap++; ivgaps += tof[vw] - tof[vw - 1]; if (tof[vw] - tof[vw - 1] > ivgapmax) ivgapmax = tof[vw] - tof[vw - 1] }
+          }
+        }
         ivlo = ks > 1 ? lineof[ks - 1] : 0
         ivhi = ke < nw ? lineof[ke + 1] : FNR + 1e9
-        for (vw = ks + 1; vw <= ke; vw++) if (devof[vw]) ivdev = 1
-        for (vw = ks; vw <= ke; vw++) if (vw > 1 && tof[vw] - tof[vw - 1] >= 2 && !devof[vw]) {
-          ivgap++; if (tof[vw] - tof[vw - 1] > ivgapmax) ivgapmax = tof[vw] - tof[vw - 1]
-        }
       }
     }
     FNR <= 5 && /^SWTOR on Mac [^:]*: engine / { header = 1 }
@@ -414,20 +431,29 @@ analyze() {
       else print "mode=ordinary play (Debug Logging off): no frame times in the log, the Metal HUD only"
       if (nw) {
         if (marklen > 0 && !marked) print "interval=the whole session" (skip ? sprintf(" after the first %d s", skip) : "") ": no mark (no return to the game window)"
-        else if (ivempty) printf "interval=none: the session ended within %d s of the mark%s\n", settle, (retat != "" ? " at " retat : "")
-        else if (marked) printf "interval=STATS seconds %d-%d (%d lines%s), from %d s after the mark%s\n", tof[ks], tof[ke], ke - ks + 1,
-          (ivshort ? sprintf(" of the %d asked: the session ended", marklen) : ""), settle, (retat != "" ? " at " retat : "")
+        else if (ivdev) printf "interval=none: a second device started before the %d s after the mark%s ended\n", marklen, (retat != "" ? " at " retat : "")
+        else if (ivempty) printf "interval=none: the session ended within %d s of the mark%s\n", settle + marklen, (retat != "" ? " at " retat : "")
+        else if (ivshort) printf "interval=STATS t %d-%d, %d s of the %d asked (the session ended), from %d s after the mark%s; %d lines\n",
+          its0, tof[ke], ivcov, marklen, settle, (retat != "" ? " at " retat : ""), ke - ks + 1
+        else if (marked) printf "interval=STATS t %d-%d, %d s from %d s after the mark%s; %d lines\n", its0, ite, marklen, settle,
+          (retat != "" ? " at " retat : ""), ke - ks + 1
         else print "interval=the whole session" (skip ? sprintf(" after the first %d s", skip) : "")
       }
       d = ""
       if (!header) d = d "; no SWTOR on Mac line at the start (the log'"'"'s start is missing, or SWTOR on Mac 0.0.x)"
       if (marklen > 0 && nw && !marked) d = d "; no mark"
       if (ivshort || ivempty) d = d "; the interval is short"
+      if (ivdev) d = d "; no interval: a second device after the mark"
+      if (marked && !ivshort && !ivempty && !ivdev && ivcov < marklen) d = d sprintf("; %d s of the interval in a STATS window that began before it or ended after it (left out)", marklen - ivcov)
+      if (ivsettlegap) d = d sprintf("; a STATS window of 2 s or more in the %d s after the mark", settle)
       if (marked && hsecs) d = d sprintf("; %d s of the interval hidden or switching (left out)", hsecs)
       ng2 = marked ? ivgap : ngap; gmx = marked ? ivgapmax : gapmax
-      if (ng2) d = d sprintf("; %d STATS window%s of 2 s or more (the longest %d s: a frame that long, or no Present)", ng2, (ng2 > 1 ? "s" : ""), gmx)
+      if (ng2) d = d sprintf("; %d STATS window%s of 2 s or more%s (the longest %d s: a frame that long, or no Present)", ng2, (ng2 > 1 ? "s" : ""),
+        (marked ? sprintf(", %d s of the interval", ivgaps) : ""), gmx)
       if (nsupp) d = d sprintf("; %d visibility or throttle line%s suppressed by d9mt (those seconds left out)", nsupp, (nsupp > 1 ? "s" : ""))
-      if (marked ? ivdev : resets) d = d "; a second device" (marked ? " in the interval" : "") " (its seconds counted from 0 again)"
+      if (!marked && resets) d = d "; a second device (its seconds counted from 0 again)"
+      # the interval is whole: every second of it in STATS windows of its own, shown, none lost
+      if (marklen > 0) print "interval_ok=" ((marked && !ivshort && !ivempty && !ivdev && ivcov == marklen && !ivgap && !ivsettlegap && !hsecs) ? "yes" : "no")
       print "data=" (d == "" ? "nothing left out or lost" : substr(d, 3))
       if (settings != "") print "settings=" settings
       if (conds != "") print "conditions=" conds
@@ -721,42 +747,66 @@ causes() {
 }
 
 # aba <first>: the three sessions from column <first> on as A/B/A arms (with more than three,
-# the last three). The first and the last must have run the same build, d9mt
-# files, A/B switches and settings, and all three the same measurement; then, per number, the
-# drift between the two A arms and B against their mean. Arms of one sitting share the Mac's
-# state and the scene: their frames are no independent samples, and this is no test.
+# the last three). Numbers only when every arm qualifies, else the reasons (the columns above
+# stay): each arm names its build, d9mt files and settings (the wrapper's lines, 0.1.7 and
+# later; without them nothing tells the arms apart), has instrumented frame times, and has the
+# whole --mark interval (all <s> seconds in STATS windows of their own, shown, nothing short:
+# every arm the same length, no tolerance); the first and the last ran the same build, d9mt
+# files, A/B switches and settings. Then, per number, the drift between the two A arms and B
+# against their mean. Arms of one sitting share the Mac's state and the scene: their frames
+# are no independent samples, and this is no test.
 aba() {
-  local o=$1 a=${AN[$1]} b=${AN[$1 + 1]} c=${AN[$1 + 2]} k same=1 label key x y z
+  local o=$1 j f k ok=1 why miss label key unit x y z
+  local a=${AN[$1]} b=${AN[$1 + 1]} c=${AN[$1 + 2]}
   echo "The last three as A/B/A (${LETTERS:$o:1}, ${LETTERS:$o + 1:1}, ${LETTERS:$o + 2:1}: ${ARMS[$o]}, ${ARMS[$o + 1]}, ${ARMS[$o + 2]}):"
-  for k in build d9mt_files ab settings; do
-    [ "$(get "$k" "$a")" = "$(get "$k" "$c")" ] || { same=0; echo "  the first and the last differ in $k: not an A/B/A"; }
+  for ((j = o; j < o + 3; j++)); do
+    f=${AN[$j]} why="" miss=""
+    for k in build settings d9mt_files; do [ -n "$(get "$k" "$f")" ] || miss="$miss, $k"; done
+    [ -z "$miss" ] || why="; no ${miss#, } line (a log before 0.1.7, or its start is missing)"
+    case "$(get mode "$f")" in instrumented*) ;; *) why="$why; no frame times (Debug Logging off)" ;; esac
+    case "$(get interval_ok "$f")" in
+      yes) ;;
+      no) why="$why; the interval is not whole (Interval: $(get interval "$f" | grep . || echo "no STATS lines"); Data: $(get data "$f"))" ;;
+      *) why="$why; no --mark interval" ;;
+    esac
+    [ -z "$why" ] || { ok=0; echo "  ${LETTERS:$j:1} (${ARMS[$j]}): ${why#; }"; }
   done
-  if [ "$(get mode "$a")" != "$(get mode "$b")" ] || [ "$(get mode "$a")" != "$(get mode "$c")" ]; then
-    same=0; echo "  the arms differ in Measurement: frame times compare only between instrumented arms"
+  # the A/B switches: none when the log has the settings line but no d9mt-ab line
+  for k in build d9mt_files switches settings; do
+    [ "$(sw "$k" "$a")" = "$(sw "$k" "$c")" ] || { ok=0; echo "  the first and the last differ in $k: not an A/B/A"; }
+  done
+  if [ "$ok" != 1 ]; then
+    echo "  no A/B/A numbers: each arm needs its build, d9mt files and settings, instrumented frame"
+    echo "  times and the whole interval (all $MARK s), and the first and the last the same build"
+    return 0
   fi
-  case "$(get interval "$a")|$(get interval "$b")|$(get interval "$c")" in
-    *"no mark"*|*"the session ended"*|*hidden*) echo "  an arm has no mark or a short interval: the arms' intervals differ" ;;
-  esac
-  [ "$same" = 1 ] || return 0
-  [ "$(get build "$a")|$(get d9mt_files "$a")|$(get ab "$a")|$(get settings "$a")" != \
-    "$(get build "$b")|$(get d9mt_files "$b")|$(get ab "$b")|$(get settings "$b")" ] ||
+  [ "$(sw build "$a")|$(sw d9mt_files "$a")|$(sw switches "$a")|$(sw settings "$a")" != \
+    "$(sw build "$b")|$(sw d9mt_files "$b")|$(sw switches "$b")|$(sw settings "$b")" ] ||
     echo "  B ran the same build, d9mt files, switches and settings as A: an A/A"
-  while IFS='|' read -r label key; do
+  while IFS='|' read -r label key unit; do
     x=$(get "$key" "$a"); y=$(get "$key" "$b"); z=$(get "$key" "$c")
     [ -n "$x" ] && [ -n "$y" ] && [ -n "$z" ] || continue
-    awk -v l="$label" -v a="$x" -v b="$y" -v c="$z" 'BEGIN {
+    awk -v l="$label" -v a="$x" -v b="$y" -v c="$z" -v u="$unit" 'BEGIN {
       m = (a + c) / 2
-      printf "  %-36s A %s, A again %s (drift %+.2f); B %s: %+.2f against the A mean (%+.1f%%)\n",
-        l, a, c, c - a, b, b - m, m ? 100 * (b - m) / m : 0 }'
+      printf "  %-36s A %s, A again %s (drift %+.2f%s); B %s: %+.2f%s against the A mean (%s)\n",
+        l, a, c, c - a, u, b, b - m, u, (m != 0 ? sprintf("%+.1f%%", 100 * (b - m) / m) : "relative: n/a, the A mean is 0") }'
   done <<'ROWS'
-FPS: average|fps_avg
-Frame time: average (ms)|ft_avg
-Seconds below 58 fps (%)|below58
-Game process CPU (ms/s, median)|cpu_process_med
-Game thread CPU (ms/s, median)|pace_cpu_med
+FPS: average|fps_avg|
+Frame time: average (ms)|ft_avg|
+Seconds below 58 fps (%)|below58| pp
+Game process CPU (ms/s, median)|cpu_process_med|
+Game thread CPU (ms/s, median)|pace_cpu_med|
 ROWS
   echo "  (one sitting: no significance test. A difference no larger than the drift shows nothing;"
   echo "   a speed claim needs the same A/B/A again on another day)"
+}
+
+# sw <key> <analysis>: get, and for "switches" the A/B switches, "none" when the log has the
+# wrapper's settings line but no d9mt-ab line (unknown, empty, without the settings line)
+sw() {
+  if [ "$1" = switches ]; then
+    if [ -n "$(get ab "$2")" ]; then get ab "$2"; elif [ -n "$(get settings "$2")" ]; then echo none; fi
+  else get "$1" "$2"; fi
 }
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT

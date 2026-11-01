@@ -61,15 +61,29 @@ fx_field_kit() {
   # 16-75, the loading and the
   # hitch before the mark left out
   "$SR" --mark 60 "$R/a.log" >"$R/a-mark.txt" 2>&1 || true
-  check "field: the interval after the mark" fk_in "$R/a-mark.txt" '^  Interval +STATS seconds 16-75 \(60 lines\), from 5 s after the mark at 20:01:01\.500$'
+  check "field: the interval after the mark" fk_in "$R/a-mark.txt" '^  Interval +STATS t 16-75, 60 s from 5 s after the mark at 20:01:01\.500; 60 lines$'
   check "field: only the interval's seconds and frames" eval 'fk_in "$R/a-mark.txt" "^  Seconds with STATS lines +60$" && fk_in "$R/a-mark.txt" "^  Frames +3600$" && fk_in "$R/a-mark.txt" "^  Frame time: worst \(ms\) +17\.5$"'
   check "field: no hitch from before the mark" fk_in "$R/a-mark.txt" '^  Hitches \(frames over 50 ms\) +0$'
   check "field: PACE seconds of the interval only" fk_in "$R/a-mark.txt" '^  PACE seconds +60$'
   "$SR" --mark 100 "$R/a.log" >"$R/a-short.txt" 2>&1 || true
-  check "field: a short interval says so" eval 'fk_in "$R/a-short.txt" "^  Interval +STATS seconds 16-85 \(70 lines of the 100 asked: the session ended\)" && fk_in "$R/a-short.txt" "^  Data +the interval is short$"'
+  check "field: a short interval says so" eval 'fk_in "$R/a-short.txt" "^  Interval +STATS t 16-85, 70 s of the 100 asked \(the session ended\), from 5 s after the mark at 20:01:01\.500; 70 lines$" && fk_in "$R/a-short.txt" "^  Data +the interval is short$"'
   { fk_head 0.1.7-dev.3 73511be "2026-11-01 20:00:00"; for t in 1 2 3 4 5; do fk_st "$t" 60.0; done; } >"$R/nomark.log"
   "$SR" --mark 60 "$R/nomark.log" >"$R/nomark.txt" 2>&1 || true
   check "field: no mark: the whole session, and Data says so" eval 'fk_in "$R/nomark.txt" "^  Interval +the whole session: no mark" && fk_in "$R/nomark.txt" "^  Data +no mark$"'
+
+  # the interval by elapsed time, not by lines: STATS lines 12-14 missing (a 4 s window before
+  # the interval) leave it at t 16-75, Data names the gap after the mark; lines 30-32 missing
+  # inside it: still t 16-75, 57 lines, the gap's seconds named; a second device before its end
+  # (seconds 76-78 at 30 fps: an interval counted by lines would take them in)
+  grep -v -E " (STATS|PACE) t=1[234] " "$R/a.log" | sed -E 's/ STATS t=(7[678]) fps=60\.0 / STATS t=\1 fps=30.0 /' >"$R/settle-gap.log"
+  "$SR" --mark 60 "$R/settle-gap.log" >"$R/settle-gap.txt" 2>&1 || true
+  check "field: lines lost before the interval don't move it" eval 'fk_in "$R/settle-gap.txt" "^  Interval +STATS t 16-75, 60 s from 5 s after the mark at 20:01:01\.500; 60 lines$" && fk_in "$R/settle-gap.txt" "^  FPS: average +60\.0$" && fk_in "$R/settle-gap.txt" "^  Data +.*a STATS window of 2 s or more in the 5 s after the mark"'
+  grep -v -E " (STATS|PACE) t=3[012] " "$R/a.log" >"$R/inner-gap.log"
+  "$SR" --mark 60 "$R/inner-gap.log" >"$R/inner-gap.txt" 2>&1 || true
+  check "field: lines lost inside the interval: the same seconds, the gap named" eval 'fk_in "$R/inner-gap.txt" "^  Interval +STATS t 16-75, 60 s from 5 s after the mark at 20:01:01\.500; 57 lines$" && fk_in "$R/inner-gap.txt" "^  Data +1 STATS window of 2 s or more, 4 s of the interval \(the longest 4 s"'
+  { sed -n '1,/ STATS t=40 /p' "$R/a.log"; for t in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70; do fk_st "$t" 60.0; done; } >"$R/device.log"
+  "$SR" --mark 60 "$R/device.log" >"$R/device.txt" 2>&1 || true
+  check "field: a second device before the interval ends: no interval" eval 'fk_in "$R/device.txt" "^  Interval +none: a second device started before the 60 s after the mark at 20:01:01\.500 ended$" && fk_in "$R/device.txt" "^  Data +.*no interval: a second device after the mark" && ! fk_in "$R/device.txt" "FPS: average"'
 
   # a return, then hidden again at once: the interval's hidden seconds named in Data
   { fk_head 0.1.7-dev.3 73511be "2026-11-01 20:00:00"
@@ -113,7 +127,23 @@ fx_field_kit() {
   "$SR" --mark 60 --compare "$R/a.log" "$R/b.log" "$R/b.log" >"$R/notaba.txt" 2>&1 || true
   check "field: first and last differ: not an A/B/A, no numbers" eval 'fk_in "$R/notaba.txt" "the first and the last differ in build: not an A/B/A" && ! fk_in "$R/notaba.txt" "drift"'
   "$SR" --mark 60 --compare "$R/a.log" "$R/ordinary.log" "$R/a2.log" >"$R/mixed.txt" 2>&1 || true
-  check "field: an ordinary arm among instrumented ones" eval 'fk_in "$R/mixed.txt" "the arms differ in Measurement" && ! fk_in "$R/mixed.txt" "drift"'
+  check "field: an ordinary arm among instrumented ones" eval 'fk_in "$R/mixed.txt" "^  B \(ordinary\.log\): no frame times \(Debug Logging off\); the interval is not whole" && fk_in "$R/mixed.txt" "^  no A/B/A numbers" && ! fk_in "$R/mixed.txt" "drift"'
+  # arms the A/B/A can't use: no wrapper lines (headless), no mark, a short one, a hidden one
+  tail -n +6 "$R/a2.log" >"$R/a2-headless.log"
+  "$SR" --mark 60 --compare "$R/headless.log" "$R/b.log" "$R/a2-headless.log" >"$R/unknown-aba.txt" 2>&1 || true
+  check "field: arms without build, settings or files: no numbers" eval 'fk_in "$R/unknown-aba.txt" "^  A \(headless\.log\): no build, settings, d9mt_files line \(a log before 0\.1\.7, or its start is missing\)$" && fk_in "$R/unknown-aba.txt" "^  C \(a2-headless\.log\): no build, settings, d9mt_files line" && ! fk_in "$R/unknown-aba.txt" "drift"'
+  "$SR" --mark 60 --compare "$R/a.log" "$R/nomark.log" "$R/a2.log" >"$R/nomark-aba.txt" 2>&1 || true
+  check "field: an arm without a mark: no numbers" eval 'fk_in "$R/nomark-aba.txt" "^  B \(nomark\.log\): the interval is not whole \(Interval: the whole session: no mark" && ! fk_in "$R/nomark-aba.txt" "drift"'
+  "$SR" --mark 75 --compare "$R/a.log" "$R/b.log" "$R/a2.log" >"$R/short-aba.txt" 2>&1 || true
+  check "field: short arms: no numbers" eval 'fk_in "$R/short-aba.txt" "^  A \(a\.log\): the interval is not whole \(Interval: STATS t 16-85, 70 s of the 75 asked" && ! fk_in "$R/short-aba.txt" "drift"'
+  sed 's/^warn:  STATS t=40 /warn:  MtlPresenter: 20:01:40.000 visibility 0x3 -> 0x0 (visible=0 activeSpace=0 miniaturized=0)\
+warn:  STATS t=40 /' "$R/b.log" >"$R/b-hidden.log"
+  "$SR" --mark 60 --compare "$R/a.log" "$R/b-hidden.log" "$R/a2.log" >"$R/hidden-aba.txt" 2>&1 || true
+  check "field: an arm hidden in its interval: no numbers" eval 'fk_in "$R/hidden-aba.txt" "^  B \(b-hidden\.log\): the interval is not whole .*of the interval hidden or switching" && ! fk_in "$R/hidden-aba.txt" "drift"'
+  # a zero baseline: no relative change, the difference in percentage points
+  sed 's/fps=62\.0 ms=16\.7\/17\.0\/17\.5/fps=50.0 ms=20.0\/21.0\/21.0/' "$R/b.log" >"$R/b-slow.log"
+  "$SR" --mark 60 --compare "$R/a.log" "$R/b-slow.log" "$R/a2.log" >"$R/zero-aba.txt" 2>&1 || true
+  check "field: a zero A mean: relative n/a, percentage points" fk_in "$R/zero-aba.txt" '^  Seconds below 58 fps \(%\) +A 0\.0, A again 0\.0 \(drift \+0\.00 pp\); B 100\.0: \+100\.00 pp against the A mean \(relative: n/a, the A mean is 0\)$'
   "$SR" --mark 60 --compare "$R/nomark.log" "$R/a.log" "$R/a.log" "$R/b.log" "$R/a2.log" >"$R/five.txt" 2>&1 || true
   check "field: five sessions, the A/B/A over the last three, an arm without a mark named" eval 'fk_in "$R/five.txt" "^The last three as A/B/A \(C, D, E: a\.log, b\.log, a2\.log\):$" && fk_in "$R/five.txt" "^  FPS: average +60\.0 +60\.0 +60\.0 +62\.0 +59\.0$" && fk_in "$R/five.txt" "^    Data +no mark$"'
   "$SR" --mark 60 --compare "$R/a.log" "$R/a.log" "$R/a2.log" >"$R/aa.txt" 2>&1 || true
@@ -128,7 +158,7 @@ fx_field_kit() {
 
   # 6. The wrapper's lines, its functions on stand-ins: no path, no home folder
   local fns="$R/wrapper-fns.sh" pm="$R/pmset" pfx="$R/prefix" eng="$R/engine" line
-  sed -n '/^session_settings() {/,/^}/p; /^session_conditions() {/,/^}/p; /^d9mt_files() {/,/^}/p' "$wrapper" >"$fns"
+  sed -n '/^session_settings() {/,/^}/p; /^session_conditions() {/,/^}/p; /^d9mt_files() {/,/^}/p; /^session_diag() {/,/^}/p' "$wrapper" >"$fns"
   cat >"$pm" <<'PM'
 #!/bin/bash
 case "$*" in
@@ -147,7 +177,33 @@ PM
   check "wrapper: the settings line, paths left out" eval 'fk_in "$R/wrapper-lines.txt" "^debug-logging=on hud=on game-mode=on D9MT_AIR_CACHE=\(a path\) D9MT_DEBUG_FILE=\(a path\) D9MT_PROFILE=1 DXVK_CONFIG=d3d9\.presentInterval=0;d3d9\.x=1 MTL_HUD_ENABLED=1$" && ! grep -qF "$HOME" "$R/wrapper-lines.txt"'
   check "wrapper: the conditions line" fk_in "$R/wrapper-lines.txt" '^power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80$'
   check "wrapper: the d9mt files' hashes, a missing one named" fk_in "$R/wrapper-lines.txt" "^d3d9\.dll $(printf d9mt | /usr/bin/shasum -a 256 | cut -c1-12), winemetal\.so missing$"
-  check "wrapper: the lines go into wine.log after the language" eval 'grep -A3 "SWTOR on Mac game language:" "$wrapper" | grep -q "SWTOR on Mac settings: \$(session_settings)" && grep -q "SWTOR on Mac d9mt files: \$(d9mt_files)" "$wrapper"'
+  check "wrapper: the lines go into wine.log after the language" eval 'grep -A4 "SWTOR on Mac game language:" "$wrapper" | grep -q "SWTOR on Mac settings: \$(session_settings)" && grep -A4 "SWTOR on Mac game language:" "$wrapper" | grep -q "SWTOR on Mac d9mt files: \$diag_files"'
+  check "wrapper: the bounded probes run before wine.log takes stderr" eval 'grep -B3 "rotate_wine_log\$" "$wrapper" | grep -q "session_diag 2>/dev/null"'
+  # a pmset that hangs, ignores TERM and has a child: the probes end at the deadline, as
+  # unknown, the d9mt files still hashed, nothing of the stand-in left
+  cat >"$R/slow-pmset" <<'PM'
+#!/bin/bash
+trap '' TERM
+echo $$ >>"$(dirname "$0")/slow.pids"
+sleep 30 &
+echo $! >>"$(dirname "$0")/slow.pids"
+wait
+PM
+  chmod 755 "$R/slow-pmset"; rm -f "$R/slow.pids"
+  local t0 t1 left=""
+  t0=$(date +%s)
+  line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$R/slow-pmset" SWTOR_DIAG_TIMEOUT=1 SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
+    /bin/bash -c '. "$1"; session_diag 2>/dev/null; echo "$diag_conditions|$diag_files"' - "$fns" 2>&1)
+  t1=$(date +%s)
+  sleep 0.3
+  for p in $(cat "$R/slow.pids" 2>/dev/null); do kill -0 "$p" 2>/dev/null && left="$left $p"; done
+  [ -z "$left" ] || kill -KILL $left 2>/dev/null
+  printf '%s\n' "$line" >"$R/slow-diag.txt"
+  check "wrapper: a hanging pmset: unknown within the deadline ($((t1 - t0)) s), the files still hashed" eval 'fk_in "$R/slow-diag.txt" "^unknown\|d3d9\.dll [0-9a-f]{12}, winemetal\.so missing$" && [ $((t1 - t0)) -le 3 ]'
+  check "wrapper: nothing of the hanging probe left${left:+ (left:$left)}" eval '[ -s "$R/slow.pids" ] && [ -z "$left" ]'
+  line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$pm" SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
+    /bin/bash -c '. "$1"; session_diag 2>/dev/null; echo "$diag_conditions|$diag_files"' - "$fns" 2>&1)
+  check "wrapper: the probes within the deadline give their lines" eval '[ "$line" = "power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80|d3d9.dll $(printf d9mt | /usr/bin/shasum -a 256 | cut -c1-12), winemetal.so missing" ]'
 
   # 7. Collect Logs: three arms and an older start in one zip; the old start cut, its first
   # lines kept; an account name in a log line replaced; no home folder
@@ -167,7 +223,7 @@ PM
   check "collect: one zip" test -n "$zd"
   zd=${zd:-$R/none}
   check "collect: the kept starts side by side, the oldest first" eval 'fk_in "$zd/sessions-compared.txt" "^ +A: wine\.log\.3 +B: wine\.log\.2 +C: wine\.log\.1 +D: wine\.log$" && fk_in "$zd/sessions-compared.txt" "^    Game start +2026-11-01 19:00:00$"'
-  check "collect: each arm's interval from the mark" fk_in "$zd/sessions-compared.txt" '^    Interval +STATS seconds 16-75 \(60 lines\), from 5 s after the mark at 20:01:01\.500$'
+  check "collect: each arm's interval from the mark" fk_in "$zd/sessions-compared.txt" '^    Interval +STATS t 16-75, 60 s from 5 s after the mark at 20:01:01\.500; 60 lines$'
   check "collect: the last three as A/B/A" fk_in "$zd/sessions-compared.txt" '^The last three as A/B/A \(B, C, D: wine\.log\.2, wine\.log\.1, wine\.log\):$'
   check "collect: a cut log keeps the wrapper's first lines" eval 'head -1 "$zd/logs/wine.log.3" | grep -qx "SWTOR on Mac 0.1.7-dev.2: engine cx26 cx-26.3.0-8, d9mt 1111111, started 2026-11-01 19:00:00" && sed -n 6p "$zd/logs/wine.log.3" | grep -q "^\[SWTOR on Mac: only the last 5 MB of wine.log.3\]$"'
   check "collect: the account name replaced in the logs and the comparison" eval '! grep -rqF "$acct" "$zd" && grep -q "something about ACCOUNT" "$zd/logs/wine.log.1"'

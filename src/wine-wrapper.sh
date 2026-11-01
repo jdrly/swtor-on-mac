@@ -107,7 +107,8 @@ game_lang() {
 }
 
 # What a game start ran with, for its wine.log (session-report.sh shows it; a before/after test
-# tells its sessions apart by it). Each looks once, when the game starts; nothing watches.
+# tells its sessions apart by it). Each looks once, when the game starts; nothing watches;
+# the ones that ask the system or read files run under session_diag's deadline.
 # session_settings: Debug Logging, the Metal HUD, Game Mode and d9mt's, DXVK's and Metal's
 # environment (D9MT_*, DXVK_*, MTL_*; a path's value left out, the rest only its letters,
 # digits and , . ; : _ + = -)
@@ -144,6 +145,30 @@ d9mt_files() {
     out="$out${out:+, }${f##*/} ${h:-missing}"
   done
   echo "$out"
+}
+
+# session_diag: session_conditions and d9mt_files, each in a process group of its own, both
+# bounded by one deadline of SWTOR_DIAG_TIMEOUT s (default 2; they take about 70 ms): what isn't
+# done by then is "unknown", its group is ended (TERM, KILL 0.2 s later) and waited for, so a
+# stalled pmset or file read never holds the game's start longer, and nothing of it stays.
+# Sets diag_conditions and diag_files.
+session_diag() {
+  local d pc pf i=0 n
+  diag_conditions=unknown diag_files=unknown
+  d=$(mktemp -d "${TMPDIR:-/tmp}/som-diag.XXXXXX") || return 0
+  n=$((${SWTOR_DIAG_TIMEOUT:-2} * 20))
+  set -m
+  session_conditions </dev/null >"$d/c" 2>/dev/null & pc=$!
+  d9mt_files </dev/null >"$d/f" 2>/dev/null & pf=$!
+  set +m
+  while { kill -0 "$pc" || kill -0 "$pf"; } 2>/dev/null && [ "$i" -lt "$n" ]; do sleep 0.05; i=$((i + 1)); done
+  kill -TERM -- "-$pc" "-$pf" 2>/dev/null && sleep 0.2
+  kill -KILL -- "-$pc" "-$pf" 2>/dev/null
+  wait "$pc" "$pf" 2>/dev/null
+  # (each writes its one line at its end: a group ended before that leaves an empty file)
+  [ ! -s "$d/c" ] || diag_conditions=$(cat "$d/c")
+  [ ! -s "$d/f" ] || diag_files=$(cat "$d/f")
+  rm -rf "$d"
 }
 
 # wine.log is written anew at every game start: keep the last 4 sessions' as wine.log.1 (the
@@ -218,6 +243,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
       # the launcher quits (~30 s after starting the game).
       # SWTOR_LOG_FILTER set: keep the game's Wine/d9mt output in wine.log.
       if [ -n "$SWTOR_LOG_FILTER" ]; then
+        # (before stderr goes to wine.log: the job control's messages, if any, go nowhere)
+        session_diag 2>/dev/null
         rotate_wine_log
         exec >/dev/null 2>"$LOG_DIR/wine.log"
         # what this session runs on (session-report.sh shows it)
@@ -230,8 +257,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
         echo "SWTOR on Mac game language: $game_lang, LANG=${LANG:-}" >&2
         # the settings, power and thermal state at the start, and the d9mt files' hashes
         echo "SWTOR on Mac settings: $(session_settings)" >&2
-        echo "SWTOR on Mac conditions: $(session_conditions)" >&2
-        echo "SWTOR on Mac d9mt files: $(d9mt_files)" >&2
+        echo "SWTOR on Mac conditions: $diag_conditions" >&2
+        echo "SWTOR on Mac d9mt files: $diag_files" >&2
       else
         exec >/dev/null 2>/dev/null
       fi

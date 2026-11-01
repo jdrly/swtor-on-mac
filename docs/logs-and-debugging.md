@@ -93,12 +93,17 @@ performance. A setting you choose is kept through updates and Reinstall.
 `wine.log` starts afresh at every game start (the wrapper keeps the 4 before it as
 `wine.log.1` to `wine.log.4`, the newest first), so `--keep` saves a copy to `sessions/`.
 `--compare A.log B.log [C.log ...]` puts 2 to 5 sessions side by side, each one's build,
-settings and measurement in a block of its own; with 3 or more, the last three as an A/B/A
-(the first and the last must have run the same build, d9mt files, switches and settings): the
-drift between the two A arms and B against their mean, which is no significance test.
-`--skip <s>` leaves out the first seconds (loading). `--mark <s>` counts only `<s>` seconds
-from 5 s after the last return to the game window: stand at the spot, Cmd-Tab away and back
-once (the mark), then wait; a session without one counts as a whole and says so. Collect Logs
+settings and measurement in a block of its own; with 3 or more, the last three as an A/B/A:
+the drift between the two A arms and B against their mean (in percentage points for a
+percentage; no relative change from a mean of 0), which is no significance test. It gives
+numbers only when every arm names its build, d9mt files and settings (0.1.7 and later), has
+instrumented frame times and the whole `--mark` interval, and the first and the last ran the
+same build, d9mt files, switches and settings; else it names what is missing.
+`--skip <s>` leaves out the first seconds (loading). `--mark <s>` counts `<s>` seconds of
+elapsed time (STATS `t`) from 5 s after the last return to the game window: stand at the
+spot, Cmd-Tab away and back once (the mark), then wait. Lost STATS lines don't move it; they
+and windows of 2 s or more are named under Data. A session without a mark counts as a whole
+and says so; a second device before the interval ends leaves none. Collect Logs
 adds the report as `session-report.txt`, and with two or more kept starts
 `sessions-compared.txt` (`--mark 60 --compare`, the oldest first). Logs from 0.0.5 have no
 `STATS` lines: hitches, compile waits and memory still compare.
