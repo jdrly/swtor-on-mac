@@ -191,8 +191,8 @@ PM
   check "wrapper: the settings line, paths left out" eval 'fk_in "$R/wrapper-lines.txt" "^debug-logging=on hud=on game-mode=on D9MT_AIR_CACHE=\(a path\) D9MT_DEBUG_FILE=\(a path\) D9MT_PROFILE=1 DXVK_CONFIG=d3d9\.presentInterval=0;d3d9\.x=1 MTL_HUD_ENABLED=1$" && ! grep -qF "$HOME" "$R/wrapper-lines.txt"'
   check "wrapper: the conditions line" fk_in "$R/wrapper-lines.txt" '^power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80$'
   check "wrapper: the d9mt files' hashes, a missing one named" fk_in "$R/wrapper-lines.txt" "^d3d9\.dll $(printf d9mt | /usr/bin/shasum -a 256 | cut -c1-12), winemetal\.so missing$"
-  check "wrapper: the lines go into wine.log after the language" eval 'grep -A4 "SWTOR on Mac game language:" "$wrapper" | grep -q "SWTOR on Mac settings: \$(session_settings)" && grep -A4 "SWTOR on Mac game language:" "$wrapper" | grep -q "SWTOR on Mac d9mt files: \$diag_files"'
-  check "wrapper: the bounded probes run before wine.log takes stderr" eval 'grep -B3 "rotate_wine_log\$" "$wrapper" | grep -q "session_diag 2>/dev/null"'
+  check "wrapper: the lines go into wine.log after the language" eval 'grep -A4 "SWTOR on Mac game language:" "$wrapper" | piped "SWTOR on Mac settings: \$(session_settings)" && grep -A4 "SWTOR on Mac game language:" "$wrapper" | piped "SWTOR on Mac d9mt files: \$diag_files"'
+  check "wrapper: the bounded probes run before wine.log takes stderr" eval 'grep -B3 "rotate_wine_log\$" "$wrapper" | piped "session_diag 2>/dev/null"'
   # a pmset that hangs, ignores TERM and has a child: the probes end at the deadline, as
   # unknown, the d9mt files still hashed, nothing of the stand-in left
   cat >"$R/slow-pmset" <<'PM'
@@ -242,11 +242,11 @@ PM
   check "collect: the kept starts side by side, the oldest first" eval 'fk_in "$zd/sessions-compared.txt" "^ +A: wine\.log\.3 +B: wine\.log\.2 +C: wine\.log\.1 +D: wine\.log$" && fk_in "$zd/sessions-compared.txt" "^    Game start +2026-11-01 19:00:00$"'
   check "collect: each arm's interval from the mark" fk_in "$zd/sessions-compared.txt" '^    Interval +STATS t 16-75, 60 s from 5 s after the mark at 20:01:01\.500; 60 lines$'
   check "collect: the last three as A/B/A" fk_in "$zd/sessions-compared.txt" '^The last three as A/B/A \(B, C, D: wine\.log\.2, wine\.log\.1, wine\.log\):$'
-  check "collect: a cut log keeps the wrapper's first lines" eval 'head -1 "$zd/logs/wine.log.3" | grep -qx "SWTOR on Mac 0.1.7-dev.2: engine cx26 cx-26.3.0-8, d9mt 1111111, started 2026-11-01 19:00:00" && sed -n 6p "$zd/logs/wine.log.3" | grep -q "^\[SWTOR on Mac: only the last 5 MB of wine.log.3\]$"'
+  check "collect: a cut log keeps the wrapper's first lines" eval 'head -1 "$zd/logs/wine.log.3" | piped -x "SWTOR on Mac 0.1.7-dev.2: engine cx26 cx-26.3.0-8, d9mt 1111111, started 2026-11-01 19:00:00" && sed -n 6p "$zd/logs/wine.log.3" | piped "^\[SWTOR on Mac: only the last 5 MB of wine.log.3\]$"'
   check "collect: the account name replaced in the logs and the comparison" eval '! grep -rqF "$acct" "$zd" && grep -q "something about ACCOUNT" "$zd/logs/wine.log.1"'
   check "collect: no home folder, nothing left out" eval '! grep -rqF "$HOME/" "$zd" && ! grep -rqF "$H/" "$zd" && [ ! -e "$zd/left-out.txt" ]'
   check "collect: the thermal warnings now" fk_in "$zd/system-info.txt" '^Thermal and performance warnings now \(pmset -g therm\): '
   rm -f "$L/wine.log.3" "$L/wine.log.2" "$L/wine.log.1"; mkdir -p "$R/zip1"
   z=$(SWTOR_ON_MAC_GPU_TIMEOUT=5 SWTOR_ON_MAC_BTM_TIMEOUT=5 "$app/Contents/Resources/collect-logs.sh" "$R/zip1" 2>>"$R/collect.err" || true)
-  check "collect: one start, no comparison" eval '[ -f "$z" ] && ! unzip -l "$z" | grep -q sessions-compared.txt'
+  check "collect: one start, no comparison" eval '[ -f "$z" ] && ! unzip -l "$z" | piped sessions-compared.txt'
 }
