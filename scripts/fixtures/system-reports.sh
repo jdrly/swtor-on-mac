@@ -237,7 +237,7 @@ EOF
 {"name":"WindowServer","timestamp":"2026-11-01 10:00:00.00 +0100","bug_type":"409"}
 {
   "captureTime" : "2026-11-01 10:00:00.5000 +0100",
-  "termination" : {"code":1,"namespace":"WATCHDOG","indicator":"waiting on 隐私应用","details":[null,"(1 monitored services unresponsive): checkin with service: 隐私应用 (0 induced crashes) returned not alive with context:","(1 monitored services unresponsive): checkin with service: Fork (0 induced crashes) returned not alive with context:","service: 李明 on 私人电脑.local","waiting on winePrivateSentinel","waiting on Movie Maker","waiting on UnlistedDetailsApp","service: Fork returned not alive","task 2048 failed","40 seconds since last successful checkin"]},
+  "termination" : {"code":1,"namespace":"WATCHDOG","indicator":"waiting on 隐私应用","details":[null,"(1 monitored services unresponsive): checkin with service: 隐私应用 (0 induced crashes) returned not alive with context:","(1 monitored services unresponsive): checkin with service: Fork (0 induced crashes) returned not alive with context:","service: 李明 on 私人电脑.local","waiting on winePrivateSentinel","waiting on Movie Maker","waiting on UnlistedDetailsApp","service: Fork returned not alive","task 2048 failed","waiting on a service\nOS Version: macOS 27.2 (Build BuildLeakSentinel)","40 seconds since last successful checkin"]},
   "thermalPressureLevel" : "ThermalPressureLevelNominal (0)",
   "uptime" : 3000
 }
@@ -256,7 +256,7 @@ EOF
 EOF
   sr_plant WindowServer_2026-11-01-100200_Prior.Owner.Mac.userspace_watchdog_timeout.spin 13 <<'EOF'
 Date/Time:        2026-11-01 10:01:55.000 +0100
-OS Version:       macOS 27.2 (Build 26B123)
+OS Version:       macOS 27.2 (Build BuildLeakSentinel)
 Computer name:    Prior-Owner-Mac
 Reason:           (1 monitored services unresponsive): UnlistedReasonApp blocked  私人电脑.local blocked 李明
 
@@ -285,6 +285,10 @@ EOF
   sr_plant wine64-preloader_2026-11-01-100500_Prior.Owner.Mac.diag 10 <<'EOF'
 Event:            disk writes
 EOF
+  # (a former Mac name whose last part looks like a report type: not one of the known types)
+  sr_plant wine64-preloader_2026-11-01-100800_Prior.pastowner_resource.diag 7 <<'EOF'
+Event:            disk writes
+EOF
   # (another process whose name begins like Wine's: not the game's, left out by name)
   sr_plant winePrivateSentinel_2026-11-01-100600_Prior.Owner.Mac.diag 9 <<'EOF'
 Command:          winePrivateSentinel
@@ -296,14 +300,14 @@ EOF
   sr_zip unlisted
   # shellcheck disable=SC2034
   local u="$d/WindowServer-2026-11-01-100000.ips.txt" up="$d/panic-full-2026-11-01-100100.0004.panic.txt" us="$d/WindowServer_2026-11-01-100200.userspace_watchdog_timeout.spin.txt" uo="$d/OTHER_2026-11-01-100300.userspace_watchdog_timeout.spin.txt" ud="$d/swtor.exe_2026-11-01-100400.cpu_resource.diag.txt"
-  check "system reports, unlisted: the Mac's dotted former name gone from the names (spin, diag, kind suffix kept)" eval '[ "$(LC_ALL=C ls "$SR_OUT/$d" | tr "\n" " ")" = "OTHER_2026-11-01-100300.userspace_watchdog_timeout.spin.txt WindowServer-2026-11-01-100000.ips.txt WindowServer_2026-11-01-100200.userspace_watchdog_timeout.spin.txt panic-full-2026-11-01-100100.0004.panic.txt swtor.exe_2026-11-01-100400.cpu_resource.diag.txt wine64-preloader_2026-11-01-100500.diag.txt " ]'
+  check "system reports, unlisted: the Mac's dotted former name gone from the names (spin, diag, known kind suffix kept, an unknown one not)" eval '[ "$(LC_ALL=C ls "$SR_OUT/$d" | tr "\n" " ")" = "OTHER_2026-11-01-100300.userspace_watchdog_timeout.spin.txt WindowServer-2026-11-01-100000.ips.txt WindowServer_2026-11-01-100200.userspace_watchdog_timeout.spin.txt panic-full-2026-11-01-100100.0004.panic.txt swtor.exe_2026-11-01-100400.cpu_resource.diag.txt wine64-preloader_2026-11-01-100500.diag.txt wine64-preloader_2026-11-01-100800.diag.txt " ]'
   check "system reports, unlisted: another process like Wine's: its GPU event and resource report left out, named as OTHER" eval 'grep -qF "  left out: gpuEvent-OTHER-2026-11-01-100700.ips (not the game" "$SR_OUT/system-info.txt" && grep -qF "  left out: OTHER_2026-11-01-100600.diag (not the game" "$SR_OUT/system-info.txt"'
-  check "system reports, unlisted: no process list: services as OTHER (Fork too), lines of no known form left out, a null named, the rest kept" eval 'sr_has "$u" "  (not a text)" && [ "$(grep -c -F "checkin with service: OTHER (0 induced crashes)" "$SR_OUT/$u")" = 2 ] && [ "$(grep -c -F "(a line of an unknown form, left out)" "$SR_OUT/$u")" = 7 ] && sr_has "$u" "  40 seconds since last successful checkin"'
+  check "system reports, unlisted: no process list: services as OTHER (Fork too), lines of no known form left out (a text's second line too), a null named, the rest kept" eval 'sr_has "$u" "  (not a text)" && [ "$(grep -c -F "checkin with service: OTHER (0 induced crashes)" "$SR_OUT/$u")" = 2 ] && [ "$(grep -c -F "(a line of an unknown form, left out)" "$SR_OUT/$u")" = 9 ] && ! sr_has "$u" "OS Version" && sr_has "$u" "  40 seconds since last successful checkin"'
   check "system reports, unlisted: the panic string: its unknown rest left out, every service as OTHER" eval 'sr_has "$up" "  panic(cpu 2 caller 0x1): (the rest, of an unknown form, left out)" && [ "$(grep -c -F "  service: OTHER, total successful checkins in 100 seconds: 10" "$SR_OUT/$up")" = 6 ] && sr_has "$up" "(a line of an unknown form, left out)"'
   check "system reports, unlisted: thread and queue names as OTHER, known ones kept, other processes not listed" eval '[ "$(grep -c -x "      OTHER" "$SR_OUT/$up")" = 3 ] && sr_has "$up" "      d9mt-compile" && ! sr_has "$up" "(pid 77)" && ! sr_has "$up" "(pid 78)" && sr_has "$us" "DispatchQueue \"OTHER\"(5)    Thread name \"OTHER\"    12 samples (1-12)    priority 79 (base 79)    OTHER"'
-  check "system reports, unlisted: the spin: its reason left out, an unknown header line too, another process like Wine's not kept" eval 'sr_has "$us" "Reason:" && [ "$(grep -c -F "(a line of an unknown form, left out)" "$SR_OUT/$us")" = 2 ] && ! sr_has "$us" "Computer name" && ! sr_has "$us" "Process: OTHER" && sr_has "$uo" "Command:          OTHER"'
+  check "system reports, unlisted: the spin: its reason left out, an unknown header line and a build of no known form too, another process like Wine's not kept" eval 'sr_has "$us" "Reason:" && [ "$(grep -c -F "(a line of an unknown form, left out)" "$SR_OUT/$us")" = 3 ] && ! sr_has "$us" "OS Version" && ! sr_has "$us" "Computer name" && ! sr_has "$us" "Process: OTHER" && sr_has "$uo" "Command:          OTHER"'
   check "system reports, unlisted: the resource report's event of no known form left out" eval 'sr_has "$ud" "(a line of an unknown form, left out)" && sr_has "$ud" "Duration:         100.00s"'
-  check "system reports, unlisted: no planted name, number or former Mac or user name in the extracts or their list" eval '! grep -r -l -E "Unlisted|unlisted|Prior[.-]|Owner|Fork|Movie|2048|winePrivate|sentinel" "$SR_OUT/$d" >/dev/null && ! grep -E "^  (left out: |not readable: )?[A-Za-z]" "$SR_OUT/system-info.txt" | grep -q -E "Unlisted|Prior|Owner|winePrivate"'
+  check "system reports, unlisted: no planted name, number or former Mac or user name in the extracts or their list" eval '! grep -r -l -E "Unlisted|unlisted|Prior[.-]|Owner|pastowner|Fork|Movie|2048|winePrivate|sentinel|Sentinel" "$SR_OUT/$d" >/dev/null && ! grep -E "^  (left out: |not readable: )?[A-Za-z]" "$SR_OUT/system-info.txt" | grep -q -E "Unlisted|Prior|Owner|pastowner|winePrivate"'
   check "system reports, unlisted: no byte outside printable ASCII in the extracts" eval '! LC_ALL=C grep -r -l "[^ -~]" "$SR_OUT/$d" >/dev/null'
   check "system reports, unlisted: the counts line" grep -qxF "System reports of the last 48 h: 0 GPU faults, 1 WindowServer watchdog restarts, 1 kernel panics" "$SR_OUT/system-info.txt"
   rm -f "$SYSD"/*

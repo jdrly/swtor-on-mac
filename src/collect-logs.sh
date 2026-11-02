@@ -468,7 +468,7 @@ s#^ *$##
 t
 s#^(Date/Time|End time): +[0-9][0-9: .+-]*$#&#
 t
-s#^OS Version: +(macOS|Mac OS X) [0-9.]+ \(Build [0-9A-Za-z]+\)$#&#
+s#^OS Version: +(macOS|Mac OS X) [0-9.]+ \(Build [0-9][0-9][A-Z][0-9]{1,5}[a-z]?\)$#&#
 t
 s#^Architecture: +(arm64e|arm64|x86_64)$#&#
 t
@@ -592,6 +592,10 @@ sys_procs() {
 }
 # sys_get <field> <json file>: a field's value (raw; an array's: its count), or false
 sys_get() { plutil -extract "$1" raw -o - "$2" 2>/dev/null; }
+# sys_lines <label> [end]: a JSON value on stdin as "<label><value><end>"; the value's further
+# lines (a newline in a JSON text) start with "  | ", which no form has, so they are left out:
+# a JSON text can't pass for a line of another kind
+sys_lines() { LC_ALL=C awk -v l="$1" -v e="${2:-}" 'NR == 1 { print l $0 e; next } { print "  | " $0 }'; }
 # sys_zname <file name>: its name in the zip, or nothing if it has none of the known forms. The
 # process in it is kept only if it is one of SYS_IDS (else OTHER); the Mac's name (between the date
 # and the kind's suffix in .spin and .diag names, dots and all) goes
@@ -603,7 +607,7 @@ sys_zname() {
     -e 's#^panic-full-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}(\.[0-9]+)?\.panic$#&#p' -e t \
     -e "s#^gpuEvent-(.+)(-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}(\\.[0-9]+)?\\.ips)\$#gpuEvent-$a\\1$b\\2#p" -e t \
     -e "s#^(.+)($d)(_.*)?(\\.userspace_watchdog_timeout\\.spin)\$#$a\\1$b\\2\\4#p" -e t \
-    -e "s#^(.+)($d)(_.*)?(\\.[a-z]+_resource\\.diag)\$#$a\\1$b\\2\\4#p" -e t \
+    -e "s#^(.+)($d)(_.*)?(\\.(cpu|diskwrites|wakeups)_resource\\.diag)\$#$a\\1$b\\2\\4#p" -e t \
     -e "s#^(.+)($d)(_.*)?(\\.diag)\$#$a\\1$b\\2\\4#p" | sys_resolve
 }
 system_reports() {  # → $work/sys/<name in the zip>, $work/sys-index, $work/sys-summary
@@ -704,16 +708,16 @@ system_reports() {  # → $work/sys/<name in the zip>, $work/sys-index, $work/sy
         {
           echo "Report: ${zname}"
           [ -z "$cut" ] || echo "(its JSON is cut off: only the fields of its first lines)"
-          echo "Timestamp: $(sys_get timestamp "$w/head.json" || echo ?)"
-          echo "bug_type: $(sys_get bug_type "$w/head.json" || sys_get bug_type "$w/body.json" || echo ?)"
+          { sys_get timestamp "$w/head.json" || echo ?; } | sys_lines "Timestamp: "
+          { sys_get bug_type "$w/head.json" || sys_get bug_type "$w/body.json" || echo ?; } | sys_lines "bug_type: "
           if [ "$kind" = ws ]; then
             ws=$((ws + 1))
-            echo "Capture time: $(sys_get captureTime "$w/body.json" || echo ?)"
+            { sys_get captureTime "$w/body.json" || echo ?; } | sys_lines "Capture time: "
             x=$(sys_get termination.namespace "$w/body.json")
             [ "$x" != WATCHDOG ] || wd=$((wd + 1))
-            echo "Termination namespace: ${x:-none}"
-            echo "Termination code: $(sys_get termination.code "$w/body.json" || echo -)"
-            echo "Termination indicator: $(sys_get termination.indicator "$w/body.json" || echo -)"
+            printf '%s\n' "${x:-none}" | sys_lines "Termination namespace: "
+            { sys_get termination.code "$w/body.json" || echo -; } | sys_lines "Termination code: "
+            { sys_get termination.indicator "$w/body.json" || echo -; } | sys_lines "Termination indicator: "
             # details: a list of texts (one not a text, e.g. null, is named, the rest still go)
             echo "Termination details:"
             case $(plutil -extract termination.details json -o - "$w/body.json" 2>/dev/null) in
@@ -721,12 +725,12 @@ system_reports() {  # → $work/sys/<name in the zip>, $work/sys-index, $work/sy
                 n=$(sys_get termination.details "$w/body.json"); case $n in '' | *[!0-9]*) n=0 ;; esac
                 i=0
                 while [ "$i" -lt "$n" ] && [ "$i" -lt 20 ]; do
-                  echo "  $(sys_get "termination.details.$i" "$w/body.json" || echo "(not a text)")"; i=$((i + 1))
+                  { sys_get "termination.details.$i" "$w/body.json" || echo "(not a text)"; } | sys_lines "  "; i=$((i + 1))
                 done ;;
-              \"*) echo "  $(sys_get termination.details "$w/body.json")" ;;
+              \"*) sys_get termination.details "$w/body.json" | sys_lines "  " ;;
             esac
-            echo "Thermal pressure: $(sys_get thermalPressureLevel "$w/body.json" || echo ?)"
-            echo "Uptime: $(sys_get uptime "$w/body.json" || echo ?) s"
+            { sys_get thermalPressureLevel "$w/body.json" || echo ?; } | sys_lines "Thermal pressure: "
+            { sys_get uptime "$w/body.json" || echo ?; } | sys_lines "Uptime: " " s"
           else
             panics=$((panics + 1))
             plutil -extract processByPid xml1 -o - "$w/body.json" 2>/dev/null | sys_procs >"$w/procs"
