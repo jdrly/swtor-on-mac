@@ -13,11 +13,13 @@ fx_session_report() {
 SWTOR on Mac 0.1.1-dev.1: engine cx26 cx-26.3.0-8, d9mt 6fa5df7, started 2026-10-18 20:00:00
 SWTOR on Mac d9mt-ab: pfv vsync-off
 SWTOR on Mac frame rate limit: 30 fps (only on battery: on battery)
+SWTOR on Mac flush cap: on
 warn:  D9MT: 20:00:01.100 frame cap 30 fps: timer, cadence 33.33 ms (vsync off)
 info:  Found config env: d3d9.presentInterval=0
 info:  D9MT: PixelFormatView on every texture (D9MT_TEX_PFV=1): no lossless compression
 info:  D9MT: end-of-pass barrier before Fragment|Blit|Dispatch, vertex fences for vertex textures
 info:  D9MT: a clear that ends a pass skips the pass's store of what it clears
+info:  D9MT: flush cap ImplicitStrongHint (D9MT_FLUSH_CAP=1): weak flush hints don't submit
 warn:  D3D9 SM3 hazard: ps_1a2b PS crs-partial-mask:r2.yz
 warn:  D3D9 SM3 hazard: vs_3c4d VS packed-io:o1.xy=texcoord0+o1.zw=texcoord1 crs-partial-mask:r1.y
 info:  STATECACHE load path=/x/d9mt/state/swtor.exe.d9mtstate status=ok entries=40 session=2 prewarmable=39 readyAtLoad=0 corrupt=0 truncated=0 invalid=1 (first: layout stride) capped=0 max=1024 guard=tripped threads=2 ms=3.8
@@ -37,6 +39,8 @@ LOG
   check "report: DXVK_CONFIG" has "d3d9.presentInterval=0"
   check "report: the Frame Rate Limit" grep -qE '^  Frame Rate Limit +30 fps \(only on battery: on battery\)$' "$R/report.txt"
   check "report: d9mt's frame cap" grep -qE "^    d9mt's frame cap +30 fps: timer, cadence 33\.33 ms \(vsync off\)$" "$R/report.txt"
+  check "report: Fewer GPU Batches" grep -qE '^  Fewer GPU Batches \(flush cap\) +on$' "$R/report.txt"
+  check "report: d9mt's flush cap" grep -qE "^    d9mt's flush cap +ImplicitStrongHint \(D9MT_FLUSH_CAP=1\): weak flush hints don't submit$" "$R/report.txt"
   check "report: pass splits (frame-weighted)" has "6.0 (4.0 with a submit), 260 MiB loaded again"
   check "report: state cache loaded" has "ok, 40 entries, 39 to prewarm, 1 invalid dropped"
   check "report: prewarm" has "built 37, failed 1, skipped 0, done 0.8 s after the start (991 ms of builds, paused 201 ms)"
@@ -50,6 +54,7 @@ LOG
   echo 'info:  STATECACHE off (D9MT_STATE_CACHE=0)' >"$R/off.log"
   check "report: XFER-SUMMARY when the device was released" eval '"$REPORT_SH" "$R/wine.log" | grep -F "copy 9, resolve 1, blit 5 (scaled 5, linear 4, convert 1, msaa 0), left alone 1 (session total)" >/dev/null'
   check "report: state cache off" eval '"$REPORT_SH" "$R/off.log" | grep -F "off (D9MT_STATE_CACHE=0)" >/dev/null'
+  check "report: no flush cap rows without its lines" eval '! "$REPORT_SH" "$R/off.log" | grep -i "flush cap" >/dev/null'
   check "report: --compare with both" eval '"$REPORT_SH" --compare "$R/wine.log" "$R/off.log" | grep "Pipeline state cache.*ok, 40 entries.*off (D9MT_STATE_CACHE=0)" >/dev/null'
   check "report: no visibility lines, every second counts" eval '! has "window hidden" && ! has "with the hidden seconds" && grep -qE "^  FPS: average +60\.0$" "$R/report.txt"'
   fx_session_report_visibility

@@ -88,6 +88,22 @@ fps_limit() {
   export D9MT_FPS_CAP="$SWTOR_FPS_LIMIT"
 }
 
+# Fewer GPU Batches (Settings, experimental): d9mt's flush cap for the game, D9MT_FLUSH_CAP=1
+# (d9mt #113; d9mt's own line is an info line, in wine.log only with Debug Logging on). A
+# development build's $CONF reads d9mt-ab.env after its settings, so a D9MT_FLUSH_CAP set there
+# (d9mt-ab.sh flush-cap, flush-cap-off) wins over Settings: keep that order. Sets flush_note
+# for wine.log.
+flush_cap() {
+  flush_note=""
+  [ "$SWTOR_FLUSH_CAP" = 1 ] || return 0
+  if [ -n "${D9MT_FLUSH_CAP+set}" ] && [ "$D9MT_FLUSH_CAP" != 1 ]; then
+    flush_note="D9MT_FLUSH_CAP=$D9MT_FLUSH_CAP from d9mt-ab, over Settings' on"
+    return 0
+  fi
+  flush_note="on"
+  export D9MT_FLUSH_CAP=1
+}
+
 # The game's language, from its command line: the values of "-set lang" and "-set torsets"
 # only, their letters, digits and , . _ - (the line also holds the account name and session
 # token, which are never read). Sets game_lang ("lang=de-de torsets=..." or "not given").
@@ -104,6 +120,71 @@ game_lang() {
   done
   game_lang=${game_lang# }
   game_lang=${game_lang:-not given}
+}
+
+# What a game start ran with, for its wine.log (session-report.sh shows it; a before/after test
+# tells its sessions apart by it). Each looks once, when the game starts; nothing watches;
+# the ones that ask the system or read files run under session_diag's deadline.
+# session_settings: Debug Logging, the Metal HUD, Game Mode and d9mt's, DXVK's and Metal's
+# environment (D9MT_*, DXVK_*, MTL_*; a path's value left out, the rest only its letters,
+# digits and , . ; : _ + = -)
+session_settings() {
+  printf 'debug-logging=%s hud=%s game-mode=%s' "$([ -n "$D9MT_PROFILE" ] && echo on || echo off)" \
+    "$([ "$MTL_HUD_ENABLED" = 1 ] && echo on || echo off)" "$([ -n "$SWTOR_GAMEMODE_APP" ] && echo on || echo off)"
+  env | LC_ALL=C grep -E '^(D9MT|DXVK|MTL)_[A-Za-z0-9_]*=' | LC_ALL=C sort | LC_ALL=C awk '{
+    n = $0; sub(/=.*/, "", n); v = substr($0, length(n) + 2)
+    if (v ~ /[\/\\]/) v = "(a path)"; else { gsub(/[^A-Za-z0-9,.;:_+=-]/, "", v); v = substr(v, 1, 80) }
+    printf " %s=%s", n, v }'
+  echo
+}
+# session_conditions: the power source, the energy mode (Low Power Mode) and macOS's thermal
+# and performance warnings (pmset -g therm; "none" when it has recorded none). (SWTOR_PMSET: a
+# stand-in for tests.)
+session_conditions() {
+  local pm="${SWTOR_PMSET:-/usr/bin/pmset}" ps em th
+  ps=$("$pm" -g ps 2>/dev/null | sed -n "1s/.*'\(.*\)'.*/\1/p")
+  # (macOS 26: "powermode 0/1/2", automatic, low power, high power; older: "lowpowermode 0/1")
+  em=$("$pm" -g 2>/dev/null | awk '$1 == "powermode" { print ($2 == 1 ? "low power" : $2 == 2 ? "high power" : "automatic"); exit }
+    $1 == "lowpowermode" { print ($2 == 1 ? "low power" : "automatic"); exit }')
+  th=$("$pm" -g therm 2>/dev/null | LC_ALL=C awk '
+    /^Note: No .* has been recorded/ { notes++; next }
+    /[A-Za-z]/ { gsub(/[^A-Za-z0-9 _=.-]/, ""); gsub(/  +/, " "); w = w (w == "" ? "" : ", ") $0 }
+    END { if (w != "") print w; else if (notes) print "none" }')
+  echo "power ${ps:-unknown}, energy mode ${em:-unknown}, thermal warnings ${th:-unknown}"
+}
+# d9mt_files: the first 12 hex digits of the SHA-256 of d9mt's d3d9.dll in the prefix and its
+# bridge in the engine (what ran, whatever the version label says)
+d9mt_files() {
+  local f h out=""
+  for f in "$SWTOR_PREFIX/drive_c/windows/system32/d3d9.dll" "$SWTOR_ENGINE/lib/wine/x86_64-unix/winemetal.so"; do
+    h=$(/usr/bin/shasum -a 256 "$f" 2>/dev/null | cut -c1-12)
+    out="$out${out:+, }${f##*/} ${h:-missing}"
+  done
+  echo "$out"
+}
+
+# session_diag: session_conditions and d9mt_files, each in a process group of its own, both
+# bounded by one deadline of SWTOR_DIAG_TIMEOUT s (default 2; they take about 70 ms): what isn't
+# done by then is "unknown", its group is ended (TERM, KILL 0.2 s later) and waited for, so a
+# stalled pmset or file read never holds the game's start longer, and nothing of it stays.
+# Sets diag_conditions and diag_files.
+session_diag() {
+  local d pc pf i=0 n
+  diag_conditions=unknown diag_files=unknown
+  d=$(mktemp -d "${TMPDIR:-/tmp}/som-diag.XXXXXX") || return 0
+  n=$((${SWTOR_DIAG_TIMEOUT:-2} * 20))
+  set -m
+  session_conditions </dev/null >"$d/c" 2>/dev/null & pc=$!
+  d9mt_files </dev/null >"$d/f" 2>/dev/null & pf=$!
+  set +m
+  while { kill -0 "$pc" || kill -0 "$pf"; } 2>/dev/null && [ "$i" -lt "$n" ]; do sleep 0.05; i=$((i + 1)); done
+  kill -TERM -- "-$pc" "-$pf" 2>/dev/null && sleep 0.2
+  kill -KILL -- "-$pc" "-$pf" 2>/dev/null
+  wait "$pc" "$pf" 2>/dev/null
+  # (each writes its one line at its end: a group ended before that leaves an empty file)
+  [ ! -s "$d/c" ] || diag_conditions=$(cat "$d/c")
+  [ ! -s "$d/f" ] || diag_files=$(cat "$d/f")
+  rm -rf "$d"
 }
 
 # wine.log is written anew at every game start: keep the last 4 sessions' as wine.log.1 (the
@@ -165,6 +246,7 @@ if [ -n "$SWTOR_ENGINE" ]; then
       # Debug Logging: Wine debug channels for the game only (RAWMOUSE, THREADCPU lines)
       [ -z "$SWTOR_GAME_WINEDEBUG" ] || export WINEDEBUG="$SWTOR_GAME_WINEDEBUG"
       fps_limit
+      flush_cap
       game_lang "$@"
       # (and the locale the game gets: a German one once failed where English worked)
       { date; env | grep -E '^(WINE|DYLD_|SWTOR_|DXVK_|MTL_|D9MT_|LANG=|LC_)' | sort
@@ -178,6 +260,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
       # the launcher quits (~30 s after starting the game).
       # SWTOR_LOG_FILTER set: keep the game's Wine/d9mt output in wine.log.
       if [ -n "$SWTOR_LOG_FILTER" ]; then
+        # (before stderr goes to wine.log: the job control's messages, if any, go nowhere)
+        session_diag 2>/dev/null
         rotate_wine_log
         exec >/dev/null 2>"$LOG_DIR/wine.log"
         # what this session runs on (session-report.sh shows it)
@@ -186,8 +270,14 @@ if [ -n "$SWTOR_ENGINE" ]; then
         [ -z "$SWTOR_D9MT_AB" ] || echo "SWTOR on Mac d9mt-ab: $SWTOR_D9MT_AB" >&2
         # the Frame Rate Limit, if one is set (d9mt's own "frame cap" line follows)
         [ -z "$fps_note" ] || echo "SWTOR on Mac frame rate limit: $fps_note" >&2
+        # Fewer GPU Batches, if on (with Debug Logging, d9mt's "flush cap" line follows)
+        [ -z "$flush_note" ] || echo "SWTOR on Mac flush cap: $flush_note" >&2
         # the game's language and locale (after those: the A/B switches stay the second line)
         echo "SWTOR on Mac game language: $game_lang, LANG=${LANG:-}" >&2
+        # the settings, power and thermal state at the start, and the d9mt files' hashes
+        echo "SWTOR on Mac settings: $(session_settings)" >&2
+        echo "SWTOR on Mac conditions: $diag_conditions" >&2
+        echo "SWTOR on Mac d9mt files: $diag_files" >&2
       else
         exec >/dev/null 2>/dev/null
       fi

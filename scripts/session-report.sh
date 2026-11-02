@@ -3,11 +3,15 @@
 # frame rate, slow frames, hitches (d9mt's share vs the game's), shader/pipeline compile waits,
 # memory peak, render passes and the attachment traffic d9mt's load/store optimization saved.
 #
-#   session-report.sh [--skip <s>] [--keep] [wine.log]   one session (default: the current
-#                                                        ~/Library/Logs/SWTOR on Mac/wine.log)
-#   session-report.sh [--skip <s>] --compare A.log B.log  two sessions side by side (before/after)
+#   session-report.sh [--skip <s>] [--mark <s>] [--keep] [wine.log]   one session (default:
+#                                       the current ~/Library/Logs/SWTOR on Mac/wine.log)
+#   session-report.sh [--skip <s>] [--mark <s>] --compare A.log B.log [C.log...]   2 to 5
+#                                       sessions side by side (before/after; A/B/A: 3 arms)
 #
 #   --skip <s>  leave out the first <s> seconds (loading screens, character select)
+#   --mark <s>  count only <s> seconds of elapsed time (STATS t), from 5 s after the last
+#               return to the game window (the mark: Cmd-Tab away and back once, standing at
+#               the spot); a session with no return counts as a whole, and says so
 #   --keep      also save the log as ~/Library/Logs/SWTOR on Mac/sessions/wine-<date>-<version>.log:
 #               wine.log starts afresh at every game start, so keep the sessions to compare
 #
@@ -52,17 +56,35 @@
 #   the wrapper's "frame rate limit:" line (0.1.3 and later): the Frame Rate Limit setting and,
 #             with "Only on battery", the power source at the start; d9mt's "frame cap" line:
 #             how it caps (every Nth refresh, the timer, or off because vsync caps already)
+#   the wrapper's "flush cap:" line (0.1.7 and later): Settings' Fewer GPU Batches when it is on
+#             (or the d9mt-ab switch that wins over it); d9mt's "flush cap" line (Debug Logging
+#             only): the cap d9mt applies
 #   D3D9 SM3 hazard  (d9mt 6fa5df7 and later) a shader with the patterns its converter fix
 #             covers, once per shader
-# Also in Collect Logs (session-report.txt). Runs under macOS's /bin/bash 3.2 and awk.
+#   the wrapper's "settings:", "conditions:" and "d9mt files:" lines (0.1.7 and later): the
+#             app's settings the game started with (Debug Logging, HUD, Game Mode, d9mt's and
+#             DXVK's environment, paths left out), the power source, Low Power Mode and
+#             macOS's thermal warning at the start, and the d9mt files' SHA-256
+#
+# What the numbers are. Every frame time comes from d9mt's profiling (STATS, PACE, HITCH: Debug
+# Logging on, D9MT_PROFILE), so it is instrumented, not ordinary play's: "Measurement" says
+# which. STATS has per-second numbers only: a second's average, 99th percentile and slowest
+# frame (at 100 frames a second or fewer the 99th percentile is the slowest frame), so a
+# session's 99th percentile and its true 1% low (the slowest 1% of frames) are not in the log,
+# and the report says "missing" for them; "worst 1% of seconds" is the frame rate of the slowest
+# seconds. "Data" names what is left out or lost: seconds hidden, gaps between STATS lines,
+# lines d9mt's limiter suppressed, a second device, a missing header, a short interval.
+# Also in Collect Logs (session-report.txt; sessions-compared.txt: the kept game starts side by
+# side, --mark 60). Runs under macOS's /bin/bash 3.2 and awk.
 set -euo pipefail
 
-usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,/^# Sources/p' "$0" | sed '$d; s/^# \{0,1\}//' >&2; exit 2; }
 
-SKIP=0 KEEP="" COMPARE=""
+SKIP=0 MARK=0 KEEP="" COMPARE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --skip) [ $# -ge 2 ] || usage; SKIP=$2; shift 2 ;;
+    --mark) [ $# -ge 2 ] || usage; MARK=$2; shift 2 ;;
     --keep) KEEP=1; shift ;;
     --compare) COMPARE=1; shift ;;
     -h|--help) usage ;;
@@ -71,13 +93,18 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$SKIP" in ''|*[!0-9]*) usage ;; esac
+case "$MARK" in ''|*[!0-9]*) usage ;; esac
+# (the mark sets the interval; --skip would take seconds out of it, unseen)
+if [ "$SKIP" -gt 0 ] && [ "$MARK" -gt 0 ]; then
+  echo "--skip and --mark don't go together: the mark sets the interval" >&2; exit 2
+fi
 
 LOGS="${SWTOR_ON_MAC_ROOT:+$SWTOR_ON_MAC_ROOT/home}"
 LOGS="${LOGS:-$HOME}/Library/Logs/SWTOR on Mac"
 
 # analyze <log>: key=value lines
 analyze() {
-  LC_ALL=C awk -v skip="$SKIP" '
+  LC_ALL=C awk -v skip="$SKIP" -v marklen="$MARK" -v settle=5 '
     function num(s) { return s + 0 }
     # value of key=... in this line ("" if none); stops at space
     function field(key,    p, s) {
@@ -87,19 +114,34 @@ analyze() {
       sub(/[ |].*/, "", s)
       return s
     }
-    # quicksort a[1..n]
-    function qs(a, lo, hi,    i, last, t) {
-      if (lo >= hi) return
-      t = a[lo]; a[lo] = a[int((lo + hi) / 2)]; a[int((lo + hi) / 2)] = t
-      last = lo
-      for (i = lo + 1; i <= hi; i++) if (a[i] < a[lo]) { last++; t = a[last]; a[last] = a[i]; a[i] = t }
-      t = a[lo]; a[lo] = a[last]; a[last] = t
-      qs(a, lo, last - 1); qs(a, last + 1, hi)
+    # sort a[lo..hi] (heapsort: no recursion; the quicksort before it recursed once per equal
+    # value, and a long session of steady 60 fps seconds crashed awk)
+    function qs(a, lo, hi,    n, i, t) {
+      n = hi - lo + 1
+      if (n < 2) return
+      for (i = int(n / 2); i >= 1; i--) sift(a, lo - 1, i, n)
+      for (i = n; i > 1; i--) { t = a[lo]; a[lo] = a[lo + i - 1]; a[lo + i - 1] = t; sift(a, lo - 1, 1, i - 1) }
+    }
+    # the heap a[o+1..o+n]: moves a[o+i] down to its place
+    function sift(a, o, i, n,    c, t) {
+      while ((c = 2 * i) <= n) {
+        if (c < n && a[o + c + 1] > a[o + c]) c++
+        if (a[o + i] >= a[o + c]) return
+        t = a[o + i]; a[o + i] = a[o + c]; a[o + c] = t; i = c
+      }
     }
     function pct(a, n, p,    k) { if (!n) return ""; k = int((n - 1) * p + 0.5) + 1; return a[k] }
     function hex(s,    i, n) { n = 0; s = tolower(s); for (i = 1; i <= length(s); i++) n = n * 16 + index("0123456789abcdef", substr(s, i, 1)) - 1; return n }
     # the presenter shows the game: visible, on the active Space, not in the Dock (d9mt'"'"'s isVisible)
     function shown(v) { return v % 2 == 1 && int(v / 2) % 2 == 1 && int(v / 4) % 2 == 0 }
+    # "[3 earlier lines suppressed]": 3
+    function suppressed(    l) { l = $0; if (!sub(/.*\[/, "", l) || l !~ /^[0-9]+ earlier lines suppressed/) return 0; sub(/ .*/, "", l); return num(l) }
+    # the wall-clock stamp after "<prefix>" ("20:13:05.120"), or ""
+    function stamp(prefix,    l) { l = $0; if (!sub(".*" prefix, "", l)) return ""; sub(/ .*/, "", l); return l ~ /^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]/ ? l : "" }
+    # --mark: window k (by its STATS line) is in the interval; a line with t=: in it by line
+    # and second (a second device counts t afresh)
+    function ink(k) { return !marked || (k >= ks && k <= ke) }
+    function int_t(t) { return !marked || (FNR > ivlo && FNR < ivhi && t >= tof[ks] && t <= tof[ke]) }
     BEGIN { vs = -1; wstart = -1; useg = 1; lastmw = 1 }
 
     # Pass 1 (the log is read twice): which STATS seconds the window was hidden or switching in.
@@ -111,9 +153,14 @@ analyze() {
     # ("window minimized, throttling Present to 10 fps", logged at every change of the throttle,
     # from Present as well).
     NR == FNR {
+      if ($0 ~ / (STATS|PACE) t=| HITCH frame=| COMPILE frame=| THREADCPU [0-9.]+ s: /) prof = 1
       if ($0 ~ / STATS t=/) {
-        t1 = num(field("t")); reset = nw && t1 < p1T; p1T = t1
+        t1 = num(field("t")); reset = nw && t1 < p1T
+        # a window of 2 s or more: a frame that long, or Present not called (no STATS between)
+        if (nw && !reset && t1 - p1T >= 2) { ngap++; if (t1 - p1T > gapmax) gapmax = t1 - p1T }
+        p1T = t1
         nw++
+        lineof[nw] = FNR; tof[nw] = t1; if (reset) devof[nw] = 1
         bad[nw] = wbad || (wstart >= 0 && !shown(wstart)) || wmin
         if (wstart < 0) unk[nw] = 1
         wbad = 0
@@ -125,6 +172,9 @@ analyze() {
         l = $0; sub(/.*visibility 0x/, "", l)
         pv = l; sub(/[^0-9a-fA-F].*/, "", pv); pv = hex(pv)
         nv = l; sub(/^[^>]*> 0x/, "", nv); sub(/[^0-9a-fA-F].*/, "", nv); nv = hex(nv)
+        nsupp += suppressed()
+        # back to the game (the mark: the last one counts)
+        if (shown(nv) && !shown(pv)) { retk = nw + 1; retat = stamp("MtlPresenter: ") }
         if (vs < 0) {
           # the state since the start (or the device'"'"'s start) was this line'"'"'s "from"
           for (vw = useg; vw <= nw; vw++) if (unk[vw] && !shown(pv)) bad[vw] = 1
@@ -136,6 +186,8 @@ analyze() {
         vs = nv; wbad = 1; lastvw = nw + 1
       } else if ($0 ~ /D9MT: .*(, throttling Present to [0-9]+ fps|presenting normally again)/) {
         m1 = index($0, " window minimized, throttling Present") > 0
+        nsupp += suppressed()
+        if (mn && !m1) { retk = nw + 1; retat = stamp("D9MT: ") }
         if (index($0, "earlier lines suppressed")) for (vw = lastmw; vw <= nw; vw++) bad[vw] = 1
         if (m1 != mn) wbad = 1
         mn = m1; lastmw = nw + 1
@@ -147,13 +199,49 @@ analyze() {
       p2 = 1
       bad[nw + 1] = wbad || (wstart >= 0 && !shown(wstart)) || wmin
       for (vw = 1; vw <= nw + 1; vw++) hid[vw] = bad[vw] || bad[vw - 1] || bad[vw + 1]
+      # --mark <s>: by elapsed time, not by lines. The return fell in window retk, which ends at
+      # t = tof[retk]; the interval is the seconds its0..ite (<settle> s later, <s> long) of
+      # the same device (a second device counts t from 0 again). Window k covers t from
+      # tof[k-1] to tof[k]: windows ks..ke are those wholly inside the interval. A window of 2 s
+      # or more (a frame that long, or no Present) is one line for several seconds: counted as
+      # time, and named in Data. Lines between the STATS line before ks and the one after ke
+      # belong to it.
+      if (marklen > 0 && retk) {
+        marked = 1; ks = 0; ke = -1
+        segend = nw; for (vw = retk + 1; vw <= nw; vw++) if (devof[vw]) { segend = vw - 1; break }
+        if (retk <= nw) {
+          its0 = tof[retk] + settle; ite = its0 + marklen - 1
+          for (vw = retk + 1; vw <= segend; vw++) {
+            pt = devof[vw] ? 0 : tof[vw - 1]
+            if (pt >= its0 - 1 && tof[vw] <= ite) { if (!ks) ks = vw; ke = vw }
+            # a gap in the seconds between the mark and the interval
+            else if (tof[vw] < its0 && tof[vw] - pt >= 2) ivsettlegap = 1
+          }
+          if (tof[segend] < ite) { if (segend < nw) ivdev = 1; else ivshort = 1 }
+        }
+        if (ivdev || !ks) { ivempty = !ivdev; ks = nw + 1; ke = nw }
+        else {
+          for (vw = ks; vw <= ke; vw++) {
+            ivcov += tof[vw] - tof[vw - 1]
+            if (tof[vw] - tof[vw - 1] >= 2) { ivgap++; ivgaps += tof[vw] - tof[vw - 1]; if (tof[vw] - tof[vw - 1] > ivgapmax) ivgapmax = tof[vw] - tof[vw - 1] }
+          }
+        }
+        ivlo = ks > 1 ? lineof[ks - 1] : 0
+        ivhi = ke < nw ? lineof[ke + 1] : FNR + 1e9
+      }
     }
+    FNR <= 5 && /^SWTOR on Mac [^:]*: engine / { header = 1 }
+    /^SWTOR on Mac settings: / { settings = $0; sub(/^SWTOR on Mac settings: /, "", settings) }
+    /^SWTOR on Mac conditions: / { conds = $0; sub(/^SWTOR on Mac conditions: /, "", conds) }
+    /^SWTOR on Mac d9mt files: / { dfiles = $0; sub(/^SWTOR on Mac d9mt files: /, "", dfiles) }
 
     /D9MT: pipeline wait budget/ { budget = $0; sub(/.*budget /, "", budget); sub(/ per frame.*/, "", budget) }
     /D9MT: attachment load\/store optimization off/ { attoff = 1 }
     /D9MT: memory profile/ { mp = $0; sub(/.*memory profile /, "", mp); sub(/:.*/, "", mp) }
     /^SWTOR on Mac d9mt-ab: / { ab = $0; sub(/^SWTOR on Mac d9mt-ab: /, "", ab) }
     /^SWTOR on Mac frame rate limit: / { fpsl = $0; sub(/^SWTOR on Mac frame rate limit: /, "", fpsl) }
+    /^SWTOR on Mac flush cap: / { flc = $0; sub(/^SWTOR on Mac flush cap: /, "", flc) }
+    /D9MT: flush cap / { dflc = $0; sub(/.*D9MT: flush cap /, "", dflc) }
     # d9mt'"'"'s plan, logged again when the refresh rate or vsync changes: the last one counts
     /D9MT: .* frame cap [0-9]+ fps: / { fcap = $0; sub(/.* frame cap /, "", fcap); sub(/ \[[0-9]+ earlier lines suppressed\]$/, "", fcap) }
     # d9mt'"'"'s GPU path (d9mt 6fa5df7 and later; d9mt-ab.sh switches it back to the old one)
@@ -199,7 +287,7 @@ analyze() {
     # StretchRect and ColorFill by path: " | stretch copy=2 ... skip=0 | fill rt=1 ... skip=0"
     / XFER t=/ || / XFER-SUMMARY / {
       summary = index($0, "XFER-SUMMARY") > 0
-      if (!summary) { if (num(field("t")) <= skip) next; nxs++ } else if (skip) next
+      if (!summary) { if (num(field("t")) <= skip || !int_t(num(field("t")))) next; nxs++ } else if (skip || marked) next
       nseg = split($0, seg, / \| /)
       for (i = 2; i <= nseg; i++) {
         kind = seg[i]; sub(/ .*/, "", kind)
@@ -219,7 +307,7 @@ analyze() {
       if (t < lastT) { resets++ }        # a second device: counted on
       lastT = t
       kw++
-      if (t <= skip) next
+      if (t <= skip || !ink(kw)) next
       fps = num(field("fps")); split(field("ms"), ms, "/")
       nall++; frames += fps
       # the frame rate and frame times: seconds the window showed the game only
@@ -249,7 +337,7 @@ analyze() {
       next
     }
     / HITCH frame=/ {
-      if (hid[kw + 1]) next    # in the second the next STATS line closes
+      if (hid[kw + 1] || !ink(kw + 1)) next    # in the second the next STATS line closes
       nh++
       dt = num(field("dtMs")); hitchMs += dt
       in9 = num(field("inD9mtMs"))
@@ -272,6 +360,7 @@ analyze() {
       next
     }
     / COMPILE frame=/ {
+      if (!ink(kw + 1)) next
       nco++
       dt = num(field("dtMs")); if (dt > 33.4) c33++; if (dt > 50) c50++
       split(field("renderWait"), w, "/"); cwaits += num(w[1]); v = w[2]; sub(/ms/, "", v); cwaitMs += num(v)
@@ -280,7 +369,7 @@ analyze() {
       next
     }
     / RESTORE t=/ {
-      if (num(field("t")) <= skip) next
+      if (num(field("t")) <= skip || !int_t(num(field("t")))) next
       nrl++
       # " | 120x 2048x2048 Depth32Float_Stencil8 s sample@Draw | ... | +3 other"
       rl = $0; sub(/^[^|]*\| /, "", rl)
@@ -299,7 +388,7 @@ analyze() {
       next
     }
     / PACE t=/ {
-      if (num(field("t")) <= skip) next
+      if (num(field("t")) <= skip || !int_t(num(field("t")))) next
       np++
       split(field("present"), pr, "/"); psd[np] = num(field("sd")); pmax[np] = num(pr[3])
       split(field("d9mt"), dm, "/"); pd9[np] = num(dm[2])
@@ -309,6 +398,7 @@ analyze() {
       next
     }
     / THREADCPU [0-9.]+ s: / {
+      if (!ink(kw + 1)) next
       ntc++
       l = $0; sub(/.* THREADCPU /, "", l)
       v = l; sub(/.*: process /, "", v); sub(/ ms.*/, "", v); tcp[ntc] = num(v)
@@ -324,6 +414,7 @@ analyze() {
       next
     }
     / RAWMOUSE [0-9.]+ s: / {
+      if (!ink(kw + 1)) next
       nrm++
       l = $0
       v = l; sub(/.*gcmouse /, "", v); sub(/ events.*/, "", v); gce = num(v); rmg += gce
@@ -337,12 +428,46 @@ analyze() {
       next
     }
     / DIAG MEM frame=/ {
+      if (!ink(kw + 1)) next
       a = num(field("allocatedMiB")); if (a > diagPeak) diagPeak = a
       fr = num(field("frame")); if (fr > lastFrame) lastFrame = fr
       next
     }
     END {
       print "stats=" nall + 0
+      # what the numbers are, and what is left out or lost
+      if (prof) print "mode=instrumented: Debug Logging on (d9mt profiling): not ordinary play'"'"'s frame times"
+      else print "mode=ordinary play (Debug Logging off): no frame times in the log, the Metal HUD only"
+      if (nw) {
+        if (marklen > 0 && !marked) print "interval=the whole session" (skip ? sprintf(" after the first %d s", skip) : "") ": no mark (no return to the game window)"
+        else if (ivdev) printf "interval=none: a second device started before the %d s after the mark%s ended\n", marklen, (retat != "" ? " at " retat : "")
+        else if (ivempty) printf "interval=none: the session ended within %d s of the mark%s\n", settle + marklen, (retat != "" ? " at " retat : "")
+        else if (ivshort) printf "interval=STATS t %d-%d, %d s of the %d asked (the session ended), from %d s after the mark%s; %d lines\n",
+          its0, tof[ke], ivcov, marklen, settle, (retat != "" ? " at " retat : ""), ke - ks + 1
+        else if (marked) printf "interval=STATS t %d-%d, %d s from %d s after the mark%s; %d lines\n", its0, ite, marklen, settle,
+          (retat != "" ? " at " retat : ""), ke - ks + 1
+        else print "interval=the whole session" (skip ? sprintf(" after the first %d s", skip) : "")
+      }
+      d = ""
+      if (!header) d = d "; no SWTOR on Mac line at the start (the log'"'"'s start is missing, or SWTOR on Mac 0.0.x)"
+      if (marklen > 0 && nw && !marked) d = d "; no mark"
+      if (ivshort || ivempty) d = d "; the interval is short"
+      if (ivdev) d = d "; no interval: a second device after the mark"
+      if (marked && !ivshort && !ivempty && !ivdev && ivcov < marklen) d = d sprintf("; %d s of the interval in a STATS window that began before it or ended after it (left out)", marklen - ivcov)
+      if (ivsettlegap) d = d sprintf("; a STATS window of 2 s or more in the %d s after the mark", settle)
+      if (marked && hsecs) d = d sprintf("; %d s of the interval hidden or switching (left out)", hsecs)
+      ng2 = marked ? ivgap : ngap; gmx = marked ? ivgapmax : gapmax
+      if (ng2) d = d sprintf("; %d STATS window%s of 2 s or more%s (the longest %d s: a frame that long, or no Present)", ng2, (ng2 > 1 ? "s" : ""),
+        (marked ? sprintf(", %d s of the interval", ivgaps) : ""), gmx)
+      if (nsupp) d = d sprintf("; %d visibility or throttle line%s suppressed by d9mt (those seconds left out)", nsupp, (nsupp > 1 ? "s" : ""))
+      if (!marked && resets) d = d "; a second device (its seconds counted from 0 again)"
+      # the interval is whole: every second of it in STATS windows of its own, shown, none lost
+      # (and every one of its STATS lines counted: nothing else took any out)
+      if (marklen > 0) print "interval_ok=" ((marked && !ivshort && !ivempty && !ivdev && ivcov == marklen && !ivgap && !ivsettlegap && !hsecs && nall == ke - ks + 1) ? "yes" : "no")
+      print "data=" (d == "" ? "nothing left out or lost" : substr(d, 3))
+      if (settings != "") print "settings=" settings
+      if (conds != "") print "conditions=" conds
+      if (dfiles != "") print "d9mt_files=" dfiles
       if (nall) {
         printf "duration=%d\n", nall
         if (hsecs) printf "hidden=%d s, not counted below (%.1f fps)\n", hsecs, hframes / hsecs
@@ -357,6 +482,8 @@ analyze() {
           printf "ft_avg=%.2f\n", ftime / (vframes ? vframes : 1)
           printf "ft_p99_median=%.1f\n", pct(p99, ns, 0.5)
           printf "ft_max=%.1f\n", maxft
+          print "ft_p99_session=missing (see below)"
+          print "fps_low1=missing (see below)"
           printf "slow33=%d\nslow50=%d\n", s33, s50
         }
         if (frames) {
@@ -415,6 +542,8 @@ analyze() {
       if (ab != "") print "ab=" ab
       if (fpsl != "") print "fps_limit=" fpsl
       if (fcap != "") print "fps_cap=" fcap
+      if (flc != "") print "flush_cap=" flc
+      if (dflc != "") print "flush_cap_d9mt=" dflc
       if (gpfv != "" || gbar != "" || gclr != "") {
         g = gpfv
         if (gbar != "") g = g (g == "" ? "" : ", ") gbar
@@ -451,12 +580,14 @@ analyze() {
         if (npc) {
           qs(pcpu, 1, npc); qs(pbusy, 1, npc); qs(pgc, 1, npc)
           printf "pace_cpu=%d ms/s median (d9mt %d, game %d), %d p90\n", pct(pcpu, npc, 0.5), pct(pbusy, npc, 0.5), pct(pgc, npc, 0.5), pct(pcpu, npc, 0.9)
+          printf "pace_cpu_med=%d\n", pct(pcpu, npc, 0.5)
         }
       }
       if (ntc) {
         qs(tcp, 1, ntc); qs(tcw, 1, ntc); qs(top1, 1, ntop1)
         printf "threadcpu_seconds=%d\n", ntc
         printf "cpu_process=%d ms/s median, %d p90, %d max\n", pct(tcp, ntc, 0.5), pct(tcp, ntc, 0.9), tcp[ntc]
+        printf "cpu_process_med=%d\n", pct(tcp, ntc, 0.5)
         printf "cpu_busiest=%d ms/s median, %d p90, %d max\n", pct(top1, ntop1, 0.5), pct(top1, ntop1, 0.9), top1[ntop1]
         printf "cpu_wineserver=%d ms/s median, %d p90, %d max\n", pct(tcw, ntc, 0.5), pct(tcw, ntc, 0.9), tcw[ntc]
         top = ""
@@ -482,37 +613,58 @@ analyze() {
 get() { sed -n "s/^$1=//p" "$2" | head -1; }
 
 # build_of <log>: "0.1.0-dev.1 cx-26.3.0-8 d9mt 68c7190" (app, Wine engine, d9mt) from the
-# wrapper's first line in wine.log (none in logs of 0.0.x)
+# wrapper's first line in wine.log (none in logs of 0.0.x); started_of <log>: its start time
 build_of() {
   sed -n '1,5s/^SWTOR on Mac \([^:]*\): engine [^ ]* \([^,]*\), d9mt \([^,]*\), started .*/\1 \2 d9mt \3/p' "$1" | head -1
 }
+started_of() {
+  sed -n '1,5s/^SWTOR on Mac [^:]*: engine .*, started \(.*\)$/\1/p' "$1" | head -1
+}
 
-# label key [unit]: one line of the report from the analysis files A (and B)
-row() {  # (left out when no log has it)
-  local label=$1 key=$2 a b=""
-  a=$(get "$key" "$A")
-  [ -z "${B:-}" ] || b=$(get "$key" "$B")
-  [ -n "$a$b" ] || return 0
-  if [ -n "${B:-}" ]; then
-    printf '  %-38s %-36s %s\n' "$label" "${a:-n/a}" "${b:-n/a}"
-  else
-    printf '  %-38s %s\n' "$label" "$a"
-  fi
+# The analysis files, one per session (AN[0] alone, or 2 to 5 side by side), the logs' names;
+# W: the width of a column but the last
+AN=() ARMS=() W=36 HEADLINE=""
+LETTERS=ABCDE
+# label key: one line of the report from the analysis files (left out when no log has it)
+row() {
+  local label=$1 key=$2 i n=${#AN[@]} v any="" line
+  local vals=()
+  for ((i = 0; i < n; i++)); do v=$(get "$key" "${AN[$i]}"); vals[$i]=$v; any="$any$v"; done
+  [ -n "$any" ] || return 0
+  if [ "$n" -eq 1 ]; then printf '  %-38s %s\n' "$label" "${vals[0]}"; return 0; fi
+  line=$(printf '  %-38s' "$label")
+  for ((i = 0; i < n; i++)); do
+    v=${vals[$i]:-n/a}
+    if [ "$i" -lt $((n - 1)) ]; then line="$line $(printf "%-${W}s" "$v")"; else line="$line $v"; fi
+  done
+  printf '%s\n' "$line"
 }
 
 report() {
+  local i n=${#AN[@]} per=""
   [ "$SKIP" -gt 0 ] && echo "  (first $SKIP s left out)"
-  row "SWTOR on Mac, Wine engine, d9mt" build
+  # what each session ran on and how it was measured: in a block of its own per session when
+  # there are more (too long for columns)
+  if [ "$n" -eq 1 ]; then ident "${AN[0]}" "  %-38s %s\n"
+  else
+    for ((i = 0; i < n; i++)); do
+      echo "  ${LETTERS:$i:1}: ${ARMS[$i]}"
+      ident "${AN[$i]}" "    %-36s %s\n"
+    done
+    printf '%s\n' "$HEADLINE"
+  fi
   row "Seconds with STATS lines" duration
   row "  window hidden or switching" hidden
   row "Frames" frames
   row "FPS: average" fps_avg
   row "  with the hidden seconds" fps_avg_all
   row "FPS: median second" fps_median
-  row "FPS: 1% low (worst seconds)" fps_p1
+  row "FPS: worst 1% of seconds" fps_p1
+  row "FPS: 1% low (slowest 1% of frames)" fps_low1
   row "Seconds below 58 fps (%)" below58
   row "Frame time: average (ms)" ft_avg
-  row "Frame time: median 99th pct (ms)" ft_p99_median
+  row "Frame time: median second's p99 (ms)" ft_p99_median
+  row "Frame time: the session's p99" ft_p99_session
   row "Frame time: worst (ms)" ft_max
   row "Frames over 33 ms" slow33
   row "Frames over 50 ms" slow50
@@ -541,6 +693,8 @@ report() {
   row "A/B switches (d9mt-ab.sh)" ab
   row "Frame Rate Limit" fps_limit
   row "  d9mt's frame cap" fps_cap
+  row "Fewer GPU Batches (flush cap)" flush_cap
+  row "  d9mt's flush cap" flush_cap_d9mt
   row "GPU path" gpu_path
   row "DXVK_CONFIG" config_env
   row "Pass splits per frame" split
@@ -565,8 +719,31 @@ report() {
   row "  moves" rawmouse_events
   row "  GCMouse moves" rawmouse_gc_rate
   row "  speed" rawmouse_calibration
-  causes "$A" "${B:+A: }"
-  [ -z "${B:-}" ] || causes "$B" "B: "
+  if [ "$n" -eq 1 ]; then causes "${AN[0]}" ""
+  else for ((i = 0; i < n; i++)); do causes "${AN[$i]}" "${LETTERS:$i:1}: "; done; fi
+  for ((i = 0; i < n; i++)); do per="$per$(get ft_p99_session "${AN[$i]}")"; done
+  if [ -n "$per" ]; then
+    echo "  (STATS lines have per-second numbers: a second's 99th percentile is its slowest frame at"
+    echo "   100 frames a second or fewer, and the session's p99 and true 1% low are not in the log)"
+  fi
+}
+
+# ident <analysis> <format>: the session's build, start, settings, measurement and data
+ident() {
+  local label key v
+  while IFS='|' read -r label key; do
+    v=$(get "$key" "$1")
+    [ -z "$v" ] || printf "$2" "$label" "$v"
+  done <<'ROWS'
+SWTOR on Mac, Wine engine, d9mt|build
+Game start|started
+d9mt files (SHA-256)|d9mt_files
+Settings at the start|settings
+Power, thermal at the start|conditions
+Measurement|mode
+Interval|interval
+Data|data
+ROWS
 }
 
 # causes <analysis> <prefix>: the re-clears by cause, from the RESTORE lines
@@ -583,33 +760,118 @@ causes() {
   [ -z "$line" ] || echo "    session total at device release: $line"
 }
 
+# aba <first>: the three sessions from column <first> on as A/B/A arms (with more than three,
+# the last three). Numbers only when every arm qualifies, else the reasons (the columns above
+# stay): each arm names its build, d9mt files and settings (the wrapper's lines, 0.1.7 and
+# later; without them nothing tells the arms apart), has instrumented frame times, and has the
+# whole --mark interval (all <s> seconds in STATS windows of their own, shown, nothing short:
+# every arm the same length, no tolerance); the first and the last ran the same build, d9mt
+# files, A/B switches and settings. Then, per number, the drift between the two A arms and B
+# against their mean. Arms of one sitting share the Mac's state and the scene: their frames
+# are no independent samples, and this is no test.
+aba() {
+  local o=$1 j f k ok=1 why miss label key unit x y z
+  local a=${AN[$1]} b=${AN[$1 + 1]} c=${AN[$1 + 2]}
+  echo "The last three as A/B/A (${LETTERS:$o:1}, ${LETTERS:$o + 1:1}, ${LETTERS:$o + 2:1}: ${ARMS[$o]}, ${ARMS[$o + 1]}, ${ARMS[$o + 2]}):"
+  for ((j = o; j < o + 3; j++)); do
+    f=${AN[$j]} why="" miss=""
+    for k in build settings d9mt_files; do [ -n "$(get "$k" "$f")" ] || miss="$miss, $k"; done
+    [ -z "$miss" ] || why="; no ${miss#, } line (a log before 0.1.7, or its start is missing)"
+    # known, not just there: both d9mt files hashed (not the wrapper's "unknown" after its
+    # deadline, nor "missing"), and the build's version and d9mt named (not the wrapper's "?")
+    k=$(get d9mt_files "$f")
+    [ -z "$k" ] || printf '%s\n' "$k" | grep -qE '^d3d9\.dll [0-9a-f]{12}, winemetal\.so [0-9a-f]{12}$' ||
+      why="$why; the d9mt files not verified ($k)"
+    k=$(get build "$f")
+    case "$k" in "" ) ;; *"?"*) why="$why; the build not known ($k)" ;; esac
+    case "$(get mode "$f")" in instrumented*) ;; *) why="$why; no frame times (Debug Logging off)" ;; esac
+    case "$(get interval_ok "$f")" in
+      yes) ;;
+      no) why="$why; the interval is not whole (Interval: $(get interval "$f" | grep . || echo "no STATS lines"); Data: $(get data "$f"))" ;;
+      *) why="$why; no --mark interval" ;;
+    esac
+    [ -z "$why" ] || { ok=0; echo "  ${LETTERS:$j:1} (${ARMS[$j]}): ${why#; }"; }
+  done
+  # the A/B switches: none when the log has the settings line but no d9mt-ab line
+  for k in build d9mt_files switches settings; do
+    [ "$(sw "$k" "$a")" = "$(sw "$k" "$c")" ] || { ok=0; echo "  the first and the last differ in $k: not an A/B/A"; }
+  done
+  if [ "$ok" != 1 ]; then
+    echo "  no A/B/A numbers: each arm needs its build, both d9mt files' hashes and settings, instrumented frame"
+    echo "  times and the whole interval (all $MARK s), and the first and the last the same build"
+    return 0
+  fi
+  [ "$(sw build "$a")|$(sw d9mt_files "$a")|$(sw switches "$a")|$(sw settings "$a")" != \
+    "$(sw build "$b")|$(sw d9mt_files "$b")|$(sw switches "$b")|$(sw settings "$b")" ] ||
+    echo "  B ran the same build, d9mt files, switches and settings as A: an A/A"
+  while IFS='|' read -r label key unit; do
+    x=$(get "$key" "$a"); y=$(get "$key" "$b"); z=$(get "$key" "$c")
+    [ -n "$x" ] && [ -n "$y" ] && [ -n "$z" ] || continue
+    awk -v l="$label" -v a="$x" -v b="$y" -v c="$z" -v u="$unit" 'BEGIN {
+      m = (a + c) / 2
+      printf "  %-36s A %s, A again %s (drift %+.2f%s); B %s: %+.2f%s against the A mean (%s)\n",
+        l, a, c, c - a, u, b, b - m, u, (m != 0 ? sprintf("%+.1f%%", 100 * (b - m) / m) : "relative: n/a, the A mean is 0") }'
+  done <<'ROWS'
+FPS: average|fps_avg|
+Frame time: average (ms)|ft_avg|
+Seconds below 58 fps (%)|below58| pp
+Game process CPU (ms/s, median)|cpu_process_med|
+Game thread CPU (ms/s, median)|pace_cpu_med|
+ROWS
+  echo "  (one sitting: no significance test. A difference no larger than the drift shows nothing;"
+  echo "   a speed claim needs the same A/B/A again on another day)"
+}
+
+# sw <key> <analysis>: get, and for "switches" the A/B switches, "none" when the log has the
+# wrapper's settings line but no d9mt-ab line (unknown, empty, without the settings line)
+sw() {
+  if [ "$1" = switches ]; then
+    if [ -n "$(get ab "$2")" ]; then get ab "$2"; elif [ -n "$(get settings "$2")" ]; then echo none; fi
+  else get "$1" "$2"; fi
+}
+
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
+# analysis <log> <file>: the analysis and the wrapper's first line
+analysis() {
+  analyze "$1" >"$2"
+  { echo "build=$(build_of "$1")"; echo "started=$(started_of "$1")"; } >>"$2"
+}
+
 if [ -n "$COMPARE" ]; then
-  [ $# -eq 2 ] || usage
-  for f in "$1" "$2"; do [ -r "$f" ] || { echo "Cannot read $f" >&2; exit 1; }; done
-  analyze "$1" >"$tmp/a"; analyze "$2" >"$tmp/b"
-  echo "build=$(build_of "$1")" >>"$tmp/a"; echo "build=$(build_of "$2")" >>"$tmp/b"
-  A="$tmp/a" B="$tmp/b"
+  [ $# -ge 2 ] && [ $# -le 5 ] || usage
+  for f in "$@"; do [ -r "$f" ] || { echo "Cannot read $f" >&2; exit 1; }; done
+  i=0 ns0=""
+  for f in "$@"; do
+    analysis "$f" "$tmp/$i"; AN[$i]="$tmp/$i"; ARMS[$i]=${f##*/}
+    [ "$(get stats "$tmp/$i")" != 0 ] || ns0=1
+    i=$((i + 1))
+  done
+  [ $# -eq 2 ] || W=28
   echo "SWTOR on Mac session report: comparison"
-  printf '  %-38s %-36s %s\n' "" "A: ${1##*/}" "B: ${2##*/}"
+  # the columns' heading, above the numbers (report)
+  HEADLINE=$(printf '  %-38s' "")
+  for ((i = 0; i < $#; i++)); do
+    if [ "$i" -lt $(($# - 1)) ]; then HEADLINE="$HEADLINE $(printf "%-${W}s" "${LETTERS:$i:1}: ${ARMS[$i]}")"
+    else HEADLINE="$HEADLINE ${LETTERS:$i:1}: ${ARMS[$i]}"; fi
+  done
   report
-  if [ "$(get stats "$A")" = 0 ] || [ "$(get stats "$B")" = 0 ]; then
+  if [ -n "$ns0" ]; then
     echo "  (n/a: no STATS lines in that log: Debug Logging was off, or the session ran a build"
     echo "   before 0.0.6-dev. Hitches and compile waits still compare.)"
   fi
+  [ $# -lt 3 ] || { echo; aba $(($# - 3)); }
   exit 0
 fi
 
 [ $# -le 1 ] || usage
 LOG="${1:-$LOGS/wine.log}"
 [ -r "$LOG" ] || { echo "Cannot read $LOG" >&2; exit 1; }
-analyze "$LOG" >"$tmp/a"
-echo "build=$(build_of "$LOG")" >>"$tmp/a"
-A="$tmp/a" B=""
+analysis "$LOG" "$tmp/a"
+AN=("$tmp/a")
 echo "SWTOR on Mac session report: $LOG"
 report
-if [ "$(get stats "$A")" = 0 ]; then
+if [ "$(get stats "${AN[0]}")" = 0 ]; then
   echo "  (no STATS lines: Debug Logging was off, or the session ran a build before 0.0.6-dev;"
   echo "   frame numbers from HITCH/COMPILE/DIAG MEM lines only)"
 fi

@@ -140,6 +140,12 @@ _Avoid_: “raw input” (SWTOR has none).
 The game sees every key by its position on a US keyboard (`PhysicalKeyboard=y`), for layouts whose
 keys type something else (docs/settings.md).
 
+**Fewer GPU Batches**
+The experimental Graphics setting that gives the game d9mt's flush cap (`D9MT_FLUSH_CAP=1`): a
+frame goes to the GPU in fewer command buffers, with fewer mid-frame submits. Off by default; for
+testers on Macs with less memory bandwidth (docs/settings.md).
+_Avoid_: “flush cap” in the window's text and release notes; it is fine in code and logs.
+
 **Debug Logging**
 The Troubleshooting setting that makes d9mt and the Mac driver log in detail (`STATS`, `PACE`,
 `THREADCPU`, `RAWMOUSE` lines) for the next game start; it costs a little performance (docs/settings.md;
@@ -162,8 +168,17 @@ code.
 
 **Session report**
 `session-report.sh`: a summary of the last game session from `wine.log` (frame rate, hitches,
-compile waits, memory, d9mt's pipeline state cache); `--compare` puts two sessions side by side
-(docs/logs-and-debugging.md).
+compile waits, memory, d9mt's pipeline state cache); `--compare` puts 2 to 5 sessions side by
+side, `--mark` counts a fixed interval after the mark (docs/logs-and-debugging.md).
+
+**Instrumented** / **ordinary play**
+Frame times from d9mt's profiling (Debug Logging on, `D9MT_PROFILE`) are *instrumented*; play
+with Debug Logging off is *ordinary play*, whose frame times only the Metal HUD shows. A report
+never calls instrumented numbers the player's frame rate.
+
+**Mark**
+In a before/after field test: one Cmd-Tab away from the game and back, standing at the spot; the
+session report's `--mark <s>` measures `<s>` seconds from 5 s after it.
 
 **Sandbox**
 A run of `som.sh` with `SWTOR_ON_MAC_ROOT=/abs/dir`: every path, the official install included,
