@@ -52,6 +52,9 @@
 #   the wrapper's "frame rate limit:" line (0.1.3 and later): the Frame Rate Limit setting and,
 #             with "Only on battery", the power source at the start; d9mt's "frame cap" line:
 #             how it caps (every Nth refresh, the timer, or off because vsync caps already)
+#   the wrapper's "flush cap:" line (0.1.7 and later): Settings' Fewer GPU Batches when it is on
+#             (or the d9mt-ab switch that wins over it); d9mt's "flush cap" line (Debug Logging
+#             only): the cap d9mt applies
 #   D3D9 SM3 hazard  (d9mt 6fa5df7 and later) a shader with the patterns its converter fix
 #             covers, once per shader
 # Also in Collect Logs (session-report.txt). Runs under macOS's /bin/bash 3.2 and awk.
@@ -154,6 +157,8 @@ analyze() {
     /D9MT: memory profile/ { mp = $0; sub(/.*memory profile /, "", mp); sub(/:.*/, "", mp) }
     /^SWTOR on Mac d9mt-ab: / { ab = $0; sub(/^SWTOR on Mac d9mt-ab: /, "", ab) }
     /^SWTOR on Mac frame rate limit: / { fpsl = $0; sub(/^SWTOR on Mac frame rate limit: /, "", fpsl) }
+    /^SWTOR on Mac flush cap: / { flc = $0; sub(/^SWTOR on Mac flush cap: /, "", flc) }
+    /D9MT: flush cap / { dflc = $0; sub(/.*D9MT: flush cap /, "", dflc) }
     # d9mt'"'"'s plan, logged again when the refresh rate or vsync changes: the last one counts
     /D9MT: .* frame cap [0-9]+ fps: / { fcap = $0; sub(/.* frame cap /, "", fcap); sub(/ \[[0-9]+ earlier lines suppressed\]$/, "", fcap) }
     # d9mt'"'"'s GPU path (d9mt 6fa5df7 and later; d9mt-ab.sh switches it back to the old one)
@@ -415,6 +420,8 @@ analyze() {
       if (ab != "") print "ab=" ab
       if (fpsl != "") print "fps_limit=" fpsl
       if (fcap != "") print "fps_cap=" fcap
+      if (flc != "") print "flush_cap=" flc
+      if (dflc != "") print "flush_cap_d9mt=" dflc
       if (gpfv != "" || gbar != "" || gclr != "") {
         g = gpfv
         if (gbar != "") g = g (g == "" ? "" : ", ") gbar
@@ -541,6 +548,8 @@ report() {
   row "A/B switches (d9mt-ab.sh)" ab
   row "Frame Rate Limit" fps_limit
   row "  d9mt's frame cap" fps_cap
+  row "Fewer GPU Batches (flush cap)" flush_cap
+  row "  d9mt's flush cap" flush_cap_d9mt
   row "GPU path" gpu_path
   row "DXVK_CONFIG" config_env
   row "Pass splits per frame" split

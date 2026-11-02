@@ -58,7 +58,8 @@ they differ from releases in four ways:
   frame cap, its timer without vsync alignment, and DXVK's limiter as before 0.1.3, for
   comparison; Settings' Frame Rate Limit wins over `cap=` while it is on), `unwritten-off`
   (`D9MT_UNWRITTEN_NULL=0`: d9mt #105 off), the switches that are off by default for an A/B:
-  `pso-async` (`D9MT_PSO_ASYNC_FLUSH=1`, d9mt #114), `flush-cap` (`D9MT_FLUSH_CAP=1`, #113) and
+  `pso-async` (`D9MT_PSO_ASYNC_FLUSH=1`, d9mt #114), `flush-cap` and `flush-cap-off`
+  (`D9MT_FLUSH_CAP=1` or `0`, #113; they win over Settings' Fewer GPU Batches) and
   `compile-maxconc` (`D9MT_COMPILE_MAXCONC=1`, #117), and `cold=<name>` (an empty shader cache and pipeline
   archives of their own in `~/Library/Caches/SWTOR on Mac/d9mt-ab/<name>`, d9mt's own caches
   untouched). Each call sets exactly the switches it names; `d9mt-ab.sh` alone shows them,
