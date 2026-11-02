@@ -216,7 +216,10 @@ PM
   for p in $(cat "$R/slow.pids" 2>/dev/null); do kill -0 "$p" 2>/dev/null && left="$left $p"; done
   [ -z "$left" ] || kill -KILL $left 2>/dev/null
   printf '%s\n' "$line" >"$R/slow-diag.txt"
-  check "wrapper: a hanging pmset: unknown within the deadline ($((t1 - t0)) s), the files still hashed" eval 'fk_in "$R/slow-diag.txt" "^unknown\|d3d9\.dll [0-9a-f]{12}, winemetal\.so missing$" && [ $((t1 - t0)) -le 3 ]'
+  # (the deadline is 1 s of 50 ms polls plus the 0.2 s TERM grace; a loaded Mac, such as a CI
+  # runner, stretches the polls: 4 s seen there. The hang is 30 s, so 10 s still tells a bounded
+  # probe from one that was waited for, with room for the load)
+  check "wrapper: a hanging pmset: unknown within the deadline ($((t1 - t0)) s, limit 10 s; the hang is 30 s), the files still hashed" eval 'fk_in "$R/slow-diag.txt" "^unknown\|d3d9\.dll [0-9a-f]{12}, winemetal\.so missing$" && [ $((t1 - t0)) -le 10 ]'
   check "wrapper: nothing of the hanging probe left${left:+ (left:$left)}" eval '[ -s "$R/slow.pids" ] && [ -z "$left" ]'
   line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$pm" SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
     /bin/bash -c '. "$1"; session_diag 2>/dev/null; echo "$diag_conditions|$diag_files"' - "$fns" 2>&1)
