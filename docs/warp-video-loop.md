@@ -1,7 +1,8 @@
 # The warp as a video loop (parked)
 
-A design note, not built. The main window's warp (`src/native/Warp.swift`) is drawn by SwiftUI,
-a `Canvas` in a `TimelineView` at 24 frames a second. Measured with `scripts/ui-snapshot.sh`
+A design note, not built. Since 0.1.4 the main window's warp (`src/native/Warp.swift`) is shown
+still (`Tuning.animated` off); this note is about animating it again. Animated, it is drawn by
+SwiftUI, a `Canvas` in a `TimelineView` at 24 frames a second. Measured with `scripts/ui-snapshot.sh`
 (2026-10-21, a 960 × 680 window on the virtual display, the app's own GPU time from the GPU
 driver's AppUsage):
 
@@ -48,7 +49,7 @@ with no app frames at all.
 
 ## Measurement plan
 
-- Its own branch, off feat/app-redesign once that is merged; A/B against the Canvas warp.
+- Its own branch, off main (the app redesign, #18, is merged); A/B against the Canvas warp.
 - `scripts/ui-snapshot.sh` with a `WARP=video` variant: the app's GPU, CPU (instructions) and
   WindowServer's GPU, several rounds, on an unlocked Mac with the display awake.
 - And on Jan's screen, with Jan: Activity Monitor's GPU column, and the look side by side (the

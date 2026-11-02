@@ -25,7 +25,7 @@
 #   scripts/release.sh --no-notarize sign, package and build the feed, without notarizing or a
 #                                    GitHub release (local dry runs and update tests)
 #   scripts/release.sh --no-release  sign, notarize, staple and build the feed, without a GitHub
-#                                    release (before the repository exists, or to look first)
+#                                    release (to look first)
 #   scripts/release.sh --dev         development builds (version X.Y.Z-dev.N, build.sh): sign,
 #                                    notarize and staple the DMG, then a GitHub pre-release with
 #                                    the DMG only. No feed: releases/latest (the appcast every
