@@ -696,7 +696,13 @@ system_reports() {  # → $work/sys/<name in the zip>, $work/sys-index, $work/sy
         ;;
       ws|panic)
         head -1 "$f" >"$w/head.json"; tail -n +2 "$f" >"$w/body.json"
-        if ! plutil -convert json -o /dev/null "$w/body.json" 2>/dev/null; then
+        # A panic-full report of macOS 27 goes on after its JSON with a plain-text "System
+        # Profile:" (networks, devices): the JSON alone, up to the brace that closes it at the
+        # start of a line (a text in JSON has no line break, so no earlier line is one); the
+        # rest stays out
+        if ! plutil -convert json -o /dev/null "$w/body.json" 2>/dev/null &&
+           ! { LC_ALL=C awk '{ print } /^}[ \t\r]*$/ { e = 1; exit } END { exit !e }' "$w/body.json" >"$w/json.json" &&
+               plutil -convert json -o /dev/null "$w/json.json" 2>/dev/null && mv -f "$w/json.json" "$w/body.json"; }; then
           # A WindowServer report cut off (written while the Mac went down) still has its
           # termination and thermal pressure in its first lines, one line each: those alone
           if [ "$kind" = ws ] &&

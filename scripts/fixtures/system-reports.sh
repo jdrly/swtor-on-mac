@@ -145,6 +145,7 @@ Num threads:      140
 Binary Images:
        0x1000 -     0x2000 SecretAppBeta <00000000-0000-4000-8000-000000000005> /Applications/SecretAppBeta.app
 EOF
+  # (macOS 27's form: the JSON, then a plain-text System Profile, a brace pair in it too)
   sr_plant panic-full-2026-11-01-000358.0002.panic 20 <<EOF
 {"bug_type":"210","timestamp":"2026-11-01 00:03:58.00 +0100","os_version":"macOS 27.2 (26B123)","roots_installed":0,"incident_id":"00000000-0000-4000-8000-000000000006"}
 {
@@ -160,6 +161,14 @@ EOF
     "900" : {"pid" : 900, "procname" : "SecretAppAlpha", "processUptime" : 120.0, "threadById" : {"17" : {"id" : 17, "name" : "alpha-worker-thread"}}},
     "901" : {"pid" : 901, "procname" : "SecretDaemonGamma", "processUptime" : 99.0, "threadById" : {"18" : {"id" : 18, "name" : "gamma-thread"}}}
   }
+}
+
+System Profile:
+Network Service: SecretAppEpsilon Network, Wi-Fi, en0
+Thunderbolt Device: SecretAppEpsilon Dock, Fixture-Host-Mac, 1, 45.1
+Boot Volume File System Type: apfs
+Model: Mac99,1, BootROM 1.0, 18 processors, 128 GB
+{
 }
 EOF
   # a panic whose JSON is cut off: named, left out, the zip still written
@@ -216,6 +225,7 @@ EOF
   check "system reports: the panic string's head, up to the Debugger message" eval 'sr_has "$pn" "userspace watchdog timeout: no successful checkins from WindowServer (2 induced crashes) in 120 seconds" && sr_has "$pn" "  service: OTHER, total successful checkins" && sr_has "$pn" "  service: WindowServer (2 induced crashes), total successful checkins in 9900 seconds: 990, last successful checkin: 120 seconds ago" && sr_has "$pn" "Debugger message: panic" && ! sr_has "$pn" "secret-after-debugger"'
   check "system reports: the panic's WindowServer, loginwindow and game (uptime, threads)" eval 'sr_has "$pn" "WindowServer (pid 312): up 9900 s, 3 threads" && sr_has "$pn" "      com.apple.coreanimation.render-server" && sr_has "$pn" "      (1 without a name)" && sr_has "$pn" "loginwindow (pid 313): up 12420 s, 1 threads" && sr_has "$pn" "swtor.exe (pid 4321): up 170 s, 2 threads" && sr_has "$pn" "      d9mt-compile"'
   check "system reports: the panic without kernel_task's or other processes' threads" eval '! sr_has "$pn" kernel-thread-x && ! sr_has "$pn" gamma-thread && ! sr_has "$pn" 0000000000bb'
+  check "system reports: the panic read up to its JSON's end, its System Profile left out" eval '! sr_has "$pn" "System Profile" && ! sr_has "$pn" "Network Service" && ! sr_has "$pn" "Boot Volume" && ! grep -qF "panic-full-2026-11-01-000358.0002.panic (" "$SR_OUT/system-info.txt" && grep -qF "  panic-full-2026-11-01-000358.0002.panic.txt (" "$SR_OUT/system-info.txt"'
   # shellcheck disable=SC2034
   local dg="$d/swtor.exe_2026-10-31-213115.diag.txt"
   check "system reports: the resource report's event, limit and duration lines" eval 'sr_has "$dg" "Event:            disk writes" && sr_has "$dg" "Writes limit:     2150.00 MB" && sr_has "$dg" "Limit duration:   86400s" && sr_has "$dg" "Duration:         3200.00s" && ! sr_has "$dg" "Path:" && ! sr_has "$dg" "Heaviest"'
