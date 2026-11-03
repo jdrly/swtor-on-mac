@@ -200,7 +200,7 @@ PM
 [ "$1" != --warm ] || exit 0
 trap '' TERM
 echo $$ >>"$(dirname "$0")/slow.pids"
-sleep 30 &
+/bin/sleep 30 &
 echo $! >>"$(dirname "$0")/slow.pids"
 wait
 PM
@@ -218,9 +218,27 @@ PM
   printf '%s\n' "$line" >"$R/slow-diag.txt"
   # (the deadline is 1 s of 50 ms polls plus the 0.2 s TERM grace; a loaded Mac, such as a CI
   # runner, stretches the polls: 4 s seen there. The hang is 30 s, so 10 s still tells a bounded
-  # probe from one that was waited for, with room for the load)
+  # probe from one that was waited for, with room for the load; the deadline itself is checked
+  # below, by the waits it asks for)
   check "wrapper: a hanging pmset: unknown within the deadline ($((t1 - t0)) s, limit 10 s; the hang is 30 s), the files still hashed" eval 'fk_in "$R/slow-diag.txt" "^unknown\|d3d9\.dll [0-9a-f]{12}, winemetal\.so missing$" && [ $((t1 - t0)) -le 10 ]'
   check "wrapper: nothing of the hanging probe left${left:+ (left:$left)}" eval '[ -s "$R/slow.pids" ] && [ -z "$left" ]'
+  # the deadline it sets itself, independent of the Mac's load: the same run with a sleep that
+  # logs each wait it's asked for (then waits it); with SWTOR_DIAG_TIMEOUT=1 the waits add up to
+  # the 1 s deadline plus the 0.2 s TERM grace, however long they really took
+  mkdir -p "$R/sleep-log-bin"
+  cat >"$R/sleep-log-bin/sleep" <<'SL'
+#!/bin/bash
+echo "$1" >>"$FK_SLEEP_LOG"
+exec /bin/sleep "$@"
+SL
+  chmod 755 "$R/sleep-log-bin/sleep"; rm -f "$R/slow.pids" "$R/sleeps.txt"
+  local asked
+  env -i PATH="$R/sleep-log-bin:/usr/bin:/bin" FK_SLEEP_LOG="$R/sleeps.txt" HOME="$HOME" SWTOR_PMSET="$R/slow-pmset" SWTOR_DIAG_TIMEOUT=1 SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
+    /bin/bash -c '. "$1"; session_diag 2>/dev/null' - "$fns" >/dev/null 2>&1
+  sleep 0.3
+  for p in $(cat "$R/slow.pids" 2>/dev/null); do kill -0 "$p" 2>/dev/null && kill -KILL "$p" 2>/dev/null; done
+  asked=$(awk '{ s += $1 } END { printf "%.2f", s }' "$R/sleeps.txt" 2>/dev/null)
+  check "wrapper: a hanging pmset: the waits asked for add up to the deadline (${asked:-none} s for 1 s + 0.2 s)" eval '[ -s "$R/sleeps.txt" ] && awk -v s="$asked" "BEGIN { exit !(s >= 1.1 && s <= 1.3) }"'
   line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$pm" SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
     /bin/bash -c '. "$1"; session_diag 2>/dev/null; echo "$diag_conditions|$diag_files"' - "$fns" 2>&1)
   check "wrapper: the probes within the deadline give their lines" eval '[ "$line" = "power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80|d3d9.dll $(printf d9mt | /usr/bin/shasum -a 256 | cut -c1-12), winemetal.so missing" ]'
