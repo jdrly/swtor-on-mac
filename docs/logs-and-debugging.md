@@ -38,6 +38,34 @@ those names, a home folder or a token is left out of the zip, and `left-out.txt`
 **Settings > Debug Logging** only when asked: it makes the logs much more detailed for the next
 game start, at some cost in performance, so turn it off again afterwards.
 
+`system-reports/` has extracts of macOS's own reports in `/Library/Logs/DiagnosticReports` of the
+last 48 hours (or since the game's last start, if that is longer). They tell "the Mac froze and
+logged me out" and "the Mac restarted" apart from a game crash. Only extracts, never whole files,
+since these reports list every running process:
+
+| report | what goes into the zip |
+|---|---|
+| `gpuEvent-swtor.exe*`, `gpuEvent-wine*` (a GPU fault in the game) | the whole file, about 1 KB: the GPU's analysis (`restart_reason_desc`, e.g. "BIF0 page fault", read or write, the address) |
+| `WindowServer*.ips` (a WindowServer watchdog restart) | timestamp, termination (namespace, code, indicator, details), thermal pressure, uptime |
+| `*.userspace_watchdog_timeout.spin` | the header's known lines, and the thread lines of WindowServer and the game (no stacks) |
+| `panic-full-*.panic` (a kernel panic) | timestamp, the panic string up to its "Debugger message", and WindowServer's, loginwindow's and the game's uptime and thread names |
+| `swtor.exe*.diag`, `wine*.diag` (resource reports, e.g. disk writes) | the event, limit and duration lines |
+
+At most 10 of each kind, the newest. No other app's name: every line of an extract (all but the
+GPU event) must have one of the forms Apple writes in these reports, with numbers only where a
+number belongs; a line of any other form is replaced by *(a line of an unknown form, left out)*.
+Where a form names a process, a service, a kext or a thread's or queue's name, the whole name is
+kept only if it is WindowServer's, loginwindow's, the kernel's, the game's, Wine's or the app's
+(exact names), or one of Apple's, Wine's and d9mt's thread names in those processes; any other
+name becomes `OTHER`. A GPU event or resource report of any other process is left out. The Mac's
+name goes from the file names (also an older one with dots in it); no form has a place for a
+user's or a Mac's name, and the files go through the same redaction as the other files. `system-info.txt` and `session-report.txt` say *System reports of the last 48 h:
+N GPU faults, N WindowServer watchdog restarts, N kernel panics*; `system-info.txt` lists the
+extracts and any report it left out (too large, malformed JSON, not readable). The folder belongs to
+root and the `_analyticsusers` group: what your account can't read is named, and when nothing is
+readable `system-info.txt` says *not read (no access to /Library/Logs/DiagnosticReports)*. Collect
+Logs never asks for a password.
+
 `D9MT-GPU-HUNG` in `wine.log` means that submitted GPU work didn't complete for about 10 seconds
 and d9mt ended the game (`D9MT_GPU_HUNG=continue` keeps the old behaviour, a frozen game). Collect
 Logs before starting the game again, which replaces `wine.log`.
