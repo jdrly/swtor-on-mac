@@ -77,35 +77,32 @@ Uninstall and every Settings pane.
 
 ## Current version
 
-The current release is [0.1.6](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.6),
-published on 30 October 2026. Every release lists its changes on the
+The current release is [0.1.7](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.7),
+published on 3 November 2026. Every release lists its changes on the
 [releases page](https://github.com/jdrly/swtor-on-mac/releases) and on
 [swonmac.com](https://swonmac.com).
 
-0.1.6's graphics driver, d9mt
-[`b532e9c`](https://github.com/jdrly/d9mt/tree/b532e9c0f04b36913b8fe43bd9580c238d177e11), fixes
-three problems:
+0.1.7's graphics driver, d9mt
+[`1d33ea4`](https://github.com/jdrly/d9mt/tree/1d33ea43785a56de329c5ff6583cca65ed3e9cf0), brings:
 
-- A black screen on macOS 26. d9mt tagged its compiled shaders with a Metal shader format version
-  that only macOS 27 accepts, so macOS 26 rejected every shader. d9mt now tags them with the
-  version each macOS expects, see [jdrly/d9mt#110](https://github.com/jdrly/d9mt/pull/110).
-  Nobody has confirmed the fix in the game on a macOS 26 Mac yet.
-- Magenta icons, seen on an M4 Mac. A texture the game sampled before it ever wrote to it showed
-  whatever was in that memory. d9mt now reads such a texture as empty, see
-  [jdrly/d9mt#105](https://github.com/jdrly/d9mt/pull/105).
-- A frozen game after a GPU hang. When the GPU never finishes submitted work, d9mt writes
-  `D9MT-GPU-HUNG` to `wine.log` after about 10 seconds and ends the game. Before, the game stayed
-  frozen until you force quit it. See [jdrly/d9mt#53](https://github.com/jdrly/d9mt/pull/53).
+- Fewer ways for the GPU to fault: empty texture slots get an empty texture of the kind the shader
+  expects, vertex reads and draw counts stay inside the game's buffers, every pipeline is resident,
+  and a copy after a render pass waits for its vertex work. None of these is proven to be the cause
+  of the GPU faults a few players saw.
+- No flickering anti-aliasing lines on M1–M4 Macs: lossless texture compression is off for
+  anti-aliased textures there, see [jdrly/d9mt#140](https://github.com/jdrly/d9mt/pull/140).
+- A suspected fix for a startup crash on an M1 Mac with macOS 26.1: pipelines are described to
+  Metal without unused vertex buffer slots and colour outputs, see
+  [jdrly/d9mt#156](https://github.com/jdrly/d9mt/pull/156) and
+  [#157](https://github.com/jdrly/d9mt/pull/157).
+- Clearer logs: a `D9MT-GPU-ERROR` line when the GPU fails a frame and a `D9MT-FATAL` line that names
+  where a crash happened, see [jdrly/d9mt#134](https://github.com/jdrly/d9mt/pull/134) and
+  [#155](https://github.com/jdrly/d9mt/pull/155).
 
-Updating from 0.1.5.1 keeps your compiled shaders on macOS 27: d9mt now keys its shader cache on
-the code that compiles them, and 0.1.6 compiles them to the same bytes, see
-[jdrly/d9mt#122](https://github.com/jdrly/d9mt/pull/122). On macOS 26 the shaders compile once
-more, because 0.1.5.1's were the ones macOS 26 rejected.
-
-0.1.6 also carries 0.1.5.1's background activity check: when macOS doesn't allow the launcher to
-run in the background, macOS ends the game's Wine once the launcher quits, and SWTOR on Mac names
-the setting that fixes it. See [Troubleshooting](#troubleshooting). Collect Logs now keeps failed
-game starts, the run time and exit status of the last 10 game starts and the launcher's own logs.
+Updating from 0.1.6 keeps your compiled shaders: the code that compiles them is unchanged (AIR
+codegen `38243f7b`, lineage 0.1.5.1). Metal rebuilds some of its own pipelines once after the
+update. The app adds the *Fewer GPU Batches (Experimental)* setting, and Collect Logs adds
+extracts of macOS's system reports and a side-by-side view of the last few game starts.
 
 ## Install
 
@@ -434,7 +431,7 @@ that holds its EdDSA key, which never leaves that Mac. [docs/building.md](docs/b
 | Wine sources for the Mac driver and `ntdll.so`, athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), codeload tar.gz | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006, only to configure that build | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
-Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
+Release 0.1.7 was built from `main` with d9mt `1d33ea4`. Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
 `release/0.1.5` branch with the d9mt build it shipped.
 
 ## Documentation
