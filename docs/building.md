@@ -86,9 +86,8 @@ creates the GitHub pre-release `v<version>` with the DMG and
 `release-notes/<version>.md`, and no feed. The tag starts the Release workflow, which stops
 at its version check; cancel the run. The other modes and the workflow refuse dev versions.
 
-For the first release that is `git tag v0.0.1 && git push origin main v0.0.1`, then
-`scripts/release.sh --feed 0.0.1` (no deltas: there is no older version). Without CI,
-`./build.sh && scripts/release.sh` does everything on the Mac (sign, notarize, feed, draft).
+Without CI, `./build.sh && scripts/release.sh` does everything on the Mac (sign, notarize, feed,
+draft).
 
 ## d9mt pin
 
