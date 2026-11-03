@@ -322,6 +322,36 @@ EOF
   check "system reports, unlisted: the counts line" grep -qxF "System reports of the last 48 h: 0 GPU faults, 1 WindowServer watchdog restarts, 1 kernel panics" "$SR_OUT/system-info.txt"
   rm -f "$SYSD"/*
 
+  # macOS 27's panic with a System Profile after its JSON, in shapes Apple's own don't have (yet):
+  # a nested object closed at the start of a line (the first such brace isn't the JSON's end), and
+  # CRLF line ends; each read, nothing of the System Profile in the zip
+  echo "  (run 1c: panics with a System Profile: a nested object's brace at the start of a line; CRLF)"
+  sr_plant panic-full-2026-11-01-110000.0005.panic 6 <<'EOF'
+{"bug_type":"210","timestamp":"2026-11-01 11:00:00.00 +0100"}
+{
+  "panicString" : "panic(cpu 6 caller 0xfffffe0000c0ffee): userspace watchdog timeout: no successful checkins from WindowServer (2 induced crashes) in 120 seconds\nDebugger message: panic\n",
+  "processByPid" : {
+    "312" : {"pid" : 312, "procname" : "WindowServer", "processUptime" : 500.0, "threadById" : {"1" : {"id" : 1, "name" : "ws_main_thread"}}}
+}
+}
+
+System Profile:
+Network Service: SecretAppZeta Network, Wi-Fi, en0
+}
+EOF
+  printf '%s\r\n' '{"bug_type":"210","timestamp":"2026-11-01 11:01:00.00 +0100"}' '{' \
+    '  "panicString" : "panic(cpu 6 caller 0xfffffe0000c0ffee): userspace watchdog timeout: no successful checkins from WindowServer (2 induced crashes) in 120 seconds\nDebugger message: panic\n",' \
+    '  "processByPid" : {' \
+    '    "4321" : {"pid" : 4321, "procname" : "swtor.exe", "processUptime" : 60.0, "threadById" : {"2" : {"id" : 2, "name" : "d9mt-compile"}}}' \
+    '  }' '}' '' 'System Profile:' 'Network Service: SecretAppZeta Network, Wi-Fi, en0' | sr_plant panic-full-2026-11-01-110100.0006.panic 5
+  sr_zip trailers
+  # shellcheck disable=SC2034
+  local tn="$d/panic-full-2026-11-01-110000.0005.panic.txt" tc="$d/panic-full-2026-11-01-110100.0006.panic.txt"
+  check "system reports, trailers: the nested-brace panic read (WindowServer from its process list)" eval 'sr_has "$tn" "userspace watchdog timeout: no successful checkins from WindowServer" && sr_has "$tn" "WindowServer (pid 312): up 500 s, 1 threads"'
+  check "system reports, trailers: the CRLF panic read (the game from its process list)" eval 'sr_has "$tc" "Debugger message: panic" && sr_has "$tc" "swtor.exe (pid 4321): up 60 s, 1 threads" && sr_has "$tc" "      d9mt-compile"'
+  check "system reports, trailers: both counted, none malformed, nothing of the System Profile in the zip" eval 'grep -qxF "System reports of the last 48 h: 0 GPU faults, 0 WindowServer watchdog restarts, 2 kernel panics" "$SR_OUT/system-info.txt" && ! grep -r -l -E "SecretApp|System Profile|Network Service" "$SR_OUT" >/dev/null'
+  rm -f "$SYSD"/*
+
   echo "  (run 2: an empty folder, the game started 3 days ago)"
   touch -t "$(date -v-72H +%Y%m%d%H%M)" "$logs/wine.log"
   sr_zip empty
