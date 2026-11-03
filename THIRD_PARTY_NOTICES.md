@@ -15,7 +15,7 @@ SWTOR on Mac: they come from the official install from [swtor.com](https://www.s
 
 | Component | Where in the app | License | License text in the app |
 |---|---|---|---|
-| **d9mt** `73511be`, <https://github.com/jdrly/d9mt> (Jan Drlý's fork of neo773's [d9mt-v2](https://github.com/neo773/d9mt-v2), with code from DXVK) | `Contents/Resources/d9mt/d3d9.dll` | zlib/libpng | `Resources/Licenses/d9mt/LICENSE` |
+| **d9mt** `1d33ea4`, <https://github.com/jdrly/d9mt> (Jan Drlý's fork of neo773's [d9mt-v2](https://github.com/neo773/d9mt-v2), with code from DXVK) | `Contents/Resources/d9mt/d3d9.dll` | zlib/libpng | `Resources/Licenses/d9mt/LICENSE` |
 | **d9mt's winemetal bridge** (derived from [DXMT](https://github.com/3Shain/dxmt)'s `src/winemetal`; includes Wine's `unixlib.h`) | `Contents/Resources/d9mt/winemetal.so`, `winemetal.dll` | LGPL-2.1-or-later. Complete source: [`bridge/` at d9mt `73511be`](https://github.com/jdrly/d9mt/tree/73511bed36cf9264d8421f880e7d1bdde32952d9/bridge) | `Resources/Licenses/d9mt/bridge/LICENSE`, `COPYING.LIB` |
 | Inside d9mt's binaries: DXVK (zlib/libpng), dxbc-spirv (MIT), LLVM 15.0.7 (Apache-2.0 WITH LLVM-exception, with its regex and ConvertUTF notices), mingw-w64 runtime and winpthreads (ZPL-2.1 / MIT-style / BSD) | as above | see d9mt's notices | `Resources/Licenses/d9mt/THIRD_PARTY_NOTICES.md`, `Resources/Licenses/d9mt/LICENSES/` |
 | **Sparkle** 2.10.0, <https://sparkle-project.org> (app updates; with bsdiff, sais, and other notices) | `Contents/Frameworks/Sparkle.framework` | MIT | `Resources/Licenses/sparkle/LICENSE` |
