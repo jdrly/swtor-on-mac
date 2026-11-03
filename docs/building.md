@@ -91,10 +91,13 @@ draft).
 
 ## d9mt pin
 
-`main` pins d9mt `73511be`, main after jdrly/d9mt#125: a StretchRect of a sub-rect of a
-multisampled surface is resolved at its offset, not the whole source at (0,0). It changes only
-`d3d9.dll`; `winemetal.so` and `winemetal.dll` are byte for byte `b532e9c`'s, with the same AIR
-codegen id, so players keep 0.1.6's shader cache. `b532e9c`, main after jdrly/d9mt#122, keeps
+`main` pins d9mt `1d33ea4`, d9mt main after jdrly/d9mt#155: the driver of 0.1.7. Since `73511be` (#125, a
+StretchRect sub-rect resolved at its offset) it adds the GPU-fault fixes #133, #135 to #137, #147, #148
+and #151, the DXVK hang fixes #138 and #139, the anti-aliasing compression fix for M1–M4 #140, the
+pipeline descriptor changes #156 and #157, and the diagnostics #134, #141, #154 and #155. The bridge
+changed, but its AIR codegen id is still `38243f7b…` (lineage 0.1.5.1), so players keep 0.1.6's
+shader cache. #156 and #157 change how render pipelines are described to Metal, so Metal's own
+pipeline archive misses once for those pipelines. `b532e9c`, main after jdrly/d9mt#122, keeps
 the shaders players compiled with 0.1.5.1 on macOS 27 (#122: the AIR cache keyed on the shader
 compiler's code, with 0.1.5.1's cache adopted; AIR codegen id `38243f7b…`, lineage 0.1.5.1). It
 brings shaders
