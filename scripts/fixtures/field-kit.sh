@@ -239,6 +239,7 @@ SL
   for p in $(cat "$R/slow.pids" 2>/dev/null); do kill -0 "$p" 2>/dev/null && kill -KILL "$p" 2>/dev/null; done
   asked=$(awk '{ s += $1 } END { printf "%.2f", s }' "$R/sleeps.txt" 2>/dev/null)
   local in_budget
+  # shellcheck disable=SC2034 # (used in the check's eval string)
   in_budget=$(awk -v s="${asked:-0}" 'BEGIN { print (s >= 1.1 && s <= 1.3) ? "yes" : "no" }')
   check "wrapper: a hanging pmset: the waits asked for add up to the deadline (${asked:-none} s for 1 s + 0.2 s)" eval '[ -s "$R/sleeps.txt" ] && [ "$in_budget" = yes ]'
   line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$pm" SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
