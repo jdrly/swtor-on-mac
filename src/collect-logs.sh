@@ -600,6 +600,19 @@ sys_get() { plutil -extract "$1" raw -o - "$2" 2>/dev/null; }
 # lines (a newline in a JSON text) start with "  | ", which no form has, so they are left out:
 # a JSON text can't pass for a line of another kind
 sys_lines() { LC_ALL=C awk -v l="$1" -v e="${2:-}" 'NR == 1 { print l $0 e; next } { print "  | " $0 }'; }
+# sys_json_prefix <file>: a panic-full report of macOS 27 goes on after its JSON with a
+# plain-text "System Profile:" (networks, devices). The JSON alone: the shortest part up to a
+# brace at the start of a line (a text in JSON has no line break, so a JSON text never makes such
+# a line; a nested object may close there too, so each one is tried in turn) that is valid JSON,
+# before any "System Profile:" line and at most 20 tries. It replaces the file; the rest stays out
+sys_json_prefix() {
+  local l
+  for l in $(LC_ALL=C awk '/^System Profile:/ { exit } /^}[ \t\r]*$/ { print NR; if (++n >= 20) exit }' "$1"); do
+    head -n "$l" "$1" >"$1.prefix"
+    if plutil -convert json -o /dev/null "$1.prefix" 2>/dev/null; then mv -f "$1.prefix" "$1"; return 0; fi
+  done
+  rm -f "$1.prefix"; return 1
+}
 # sys_zname <file name>: its name in the zip, or nothing if it has none of the known forms. The
 # process in it is kept only if it is one of SYS_IDS (else OTHER); the Mac's name (between the date
 # and the kind's suffix in .spin and .diag names, dots and all) goes
@@ -696,7 +709,8 @@ system_reports() {  # → $work/sys/<name in the zip>, $work/sys-index, $work/sy
         ;;
       ws|panic)
         head -1 "$f" >"$w/head.json"; tail -n +2 "$f" >"$w/body.json"
-        if ! plutil -convert json -o /dev/null "$w/body.json" 2>/dev/null; then
+        # (a JSON text with something after it: its JSON alone, see sys_json_prefix)
+        if ! plutil -convert json -o /dev/null "$w/body.json" 2>/dev/null && ! sys_json_prefix "$w/body.json"; then
           # A WindowServer report cut off (written while the Mac went down) still has its
           # termination and thermal pressure in its first lines, one line each: those alone
           if [ "$kind" = ws ] &&

@@ -145,6 +145,7 @@ Num threads:      140
 Binary Images:
        0x1000 -     0x2000 SecretAppBeta <00000000-0000-4000-8000-000000000005> /Applications/SecretAppBeta.app
 EOF
+  # (macOS 27's form: the JSON, then a plain-text System Profile, a brace pair in it too)
   sr_plant panic-full-2026-11-01-000358.0002.panic 20 <<EOF
 {"bug_type":"210","timestamp":"2026-11-01 00:03:58.00 +0100","os_version":"macOS 27.2 (26B123)","roots_installed":0,"incident_id":"00000000-0000-4000-8000-000000000006"}
 {
@@ -160,6 +161,14 @@ EOF
     "900" : {"pid" : 900, "procname" : "SecretAppAlpha", "processUptime" : 120.0, "threadById" : {"17" : {"id" : 17, "name" : "alpha-worker-thread"}}},
     "901" : {"pid" : 901, "procname" : "SecretDaemonGamma", "processUptime" : 99.0, "threadById" : {"18" : {"id" : 18, "name" : "gamma-thread"}}}
   }
+}
+
+System Profile:
+Network Service: SecretAppEpsilon Network, Wi-Fi, en0
+Thunderbolt Device: SecretAppEpsilon Dock, Fixture-Host-Mac, 1, 45.1
+Boot Volume File System Type: apfs
+Model: Mac99,1, BootROM 1.0, 18 processors, 128 GB
+{
 }
 EOF
   # a panic whose JSON is cut off: named, left out, the zip still written
@@ -216,6 +225,7 @@ EOF
   check "system reports: the panic string's head, up to the Debugger message" eval 'sr_has "$pn" "userspace watchdog timeout: no successful checkins from WindowServer (2 induced crashes) in 120 seconds" && sr_has "$pn" "  service: OTHER, total successful checkins" && sr_has "$pn" "  service: WindowServer (2 induced crashes), total successful checkins in 9900 seconds: 990, last successful checkin: 120 seconds ago" && sr_has "$pn" "Debugger message: panic" && ! sr_has "$pn" "secret-after-debugger"'
   check "system reports: the panic's WindowServer, loginwindow and game (uptime, threads)" eval 'sr_has "$pn" "WindowServer (pid 312): up 9900 s, 3 threads" && sr_has "$pn" "      com.apple.coreanimation.render-server" && sr_has "$pn" "      (1 without a name)" && sr_has "$pn" "loginwindow (pid 313): up 12420 s, 1 threads" && sr_has "$pn" "swtor.exe (pid 4321): up 170 s, 2 threads" && sr_has "$pn" "      d9mt-compile"'
   check "system reports: the panic without kernel_task's or other processes' threads" eval '! sr_has "$pn" kernel-thread-x && ! sr_has "$pn" gamma-thread && ! sr_has "$pn" 0000000000bb'
+  check "system reports: the panic read up to its JSON's end, its System Profile left out" eval '! sr_has "$pn" "System Profile" && ! sr_has "$pn" "Network Service" && ! sr_has "$pn" "Boot Volume" && ! grep -qF "panic-full-2026-11-01-000358.0002.panic (" "$SR_OUT/system-info.txt" && grep -qF "  panic-full-2026-11-01-000358.0002.panic.txt (" "$SR_OUT/system-info.txt"'
   # shellcheck disable=SC2034
   local dg="$d/swtor.exe_2026-10-31-213115.diag.txt"
   check "system reports: the resource report's event, limit and duration lines" eval 'sr_has "$dg" "Event:            disk writes" && sr_has "$dg" "Writes limit:     2150.00 MB" && sr_has "$dg" "Limit duration:   86400s" && sr_has "$dg" "Duration:         3200.00s" && ! sr_has "$dg" "Path:" && ! sr_has "$dg" "Heaviest"'
@@ -310,6 +320,36 @@ EOF
   check "system reports, unlisted: no planted name, number or former Mac or user name in the extracts or their list" eval '! grep -r -l -E "Unlisted|unlisted|Prior[.-]|Owner|pastowner|Fork|Movie|2048|winePrivate|sentinel|Sentinel" "$SR_OUT/$d" >/dev/null && ! grep -E "^  (left out: |not readable: )?[A-Za-z]" "$SR_OUT/system-info.txt" | piped -E "Unlisted|Prior|Owner|pastowner|winePrivate"'
   check "system reports, unlisted: no byte outside printable ASCII in the extracts" eval '! LC_ALL=C grep -r -l "[^ -~]" "$SR_OUT/$d" >/dev/null'
   check "system reports, unlisted: the counts line" grep -qxF "System reports of the last 48 h: 0 GPU faults, 1 WindowServer watchdog restarts, 1 kernel panics" "$SR_OUT/system-info.txt"
+  rm -f "$SYSD"/*
+
+  # macOS 27's panic with a System Profile after its JSON, in shapes Apple's own don't have (yet):
+  # a nested object closed at the start of a line (the first such brace isn't the JSON's end), and
+  # CRLF line ends; each read, nothing of the System Profile in the zip
+  echo "  (run 1c: panics with a System Profile: a nested object's brace at the start of a line; CRLF)"
+  sr_plant panic-full-2026-11-01-110000.0005.panic 6 <<'EOF'
+{"bug_type":"210","timestamp":"2026-11-01 11:00:00.00 +0100"}
+{
+  "panicString" : "panic(cpu 6 caller 0xfffffe0000c0ffee): userspace watchdog timeout: no successful checkins from WindowServer (2 induced crashes) in 120 seconds\nDebugger message: panic\n",
+  "processByPid" : {
+    "312" : {"pid" : 312, "procname" : "WindowServer", "processUptime" : 500.0, "threadById" : {"1" : {"id" : 1, "name" : "ws_main_thread"}}}
+}
+}
+
+System Profile:
+Network Service: SecretAppZeta Network, Wi-Fi, en0
+}
+EOF
+  printf '%s\r\n' '{"bug_type":"210","timestamp":"2026-11-01 11:01:00.00 +0100"}' '{' \
+    '  "panicString" : "panic(cpu 6 caller 0xfffffe0000c0ffee): userspace watchdog timeout: no successful checkins from WindowServer (2 induced crashes) in 120 seconds\nDebugger message: panic\n",' \
+    '  "processByPid" : {' \
+    '    "4321" : {"pid" : 4321, "procname" : "swtor.exe", "processUptime" : 60.0, "threadById" : {"2" : {"id" : 2, "name" : "d9mt-compile"}}}' \
+    '  }' '}' '' 'System Profile:' 'Network Service: SecretAppZeta Network, Wi-Fi, en0' | sr_plant panic-full-2026-11-01-110100.0006.panic 5
+  sr_zip trailers
+  # shellcheck disable=SC2034
+  local tn="$d/panic-full-2026-11-01-110000.0005.panic.txt" tc="$d/panic-full-2026-11-01-110100.0006.panic.txt"
+  check "system reports, trailers: the nested-brace panic read (WindowServer from its process list)" eval 'sr_has "$tn" "userspace watchdog timeout: no successful checkins from WindowServer" && sr_has "$tn" "WindowServer (pid 312): up 500 s, 1 threads"'
+  check "system reports, trailers: the CRLF panic read (the game from its process list)" eval 'sr_has "$tc" "Debugger message: panic" && sr_has "$tc" "swtor.exe (pid 4321): up 60 s, 1 threads" && sr_has "$tc" "      d9mt-compile"'
+  check "system reports, trailers: both counted, none malformed, nothing of the System Profile in the zip" eval 'grep -qxF "System reports of the last 48 h: 0 GPU faults, 0 WindowServer watchdog restarts, 2 kernel panics" "$SR_OUT/system-info.txt" && ! grep -r -l -E "SecretApp|System Profile|Network Service" "$SR_OUT" >/dev/null'
   rm -f "$SYSD"/*
 
   echo "  (run 2: an empty folder, the game started 3 days ago)"
