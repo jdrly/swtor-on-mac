@@ -78,12 +78,18 @@ Uninstall and every Settings pane.
 
 ## Current version
 
-The current release is [0.1.7](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.7),
-published on 3 November 2026. Every release lists its changes on the
+The current release is [0.1.7.1](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.7.1),
+published on 11 November 2026. Every release lists its changes on the
 [releases page](https://github.com/jdrly/swtor-on-mac/releases) and on
 [swonmac.com](https://swonmac.com).
 
-0.1.7's graphics driver, d9mt
+0.1.7.1 makes new installs work again. athei's release of the Wine engine went offline, so Install
+stopped at the engine's download. The same file, byte for byte, now comes from
+[jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/tag/cx-26.3.0-8), see
+[ADR 0006](docs/adr/0006-engine-downloaded-from-jdrly-wine-engine.md). Collect Logs now also reads
+macOS 27's kernel panic reports, which have a plain-text System Profile after their JSON.
+
+Everything else is 0.1.7. Its graphics driver, d9mt
 [`1d33ea4`](https://github.com/jdrly/d9mt/tree/1d33ea43785a56de329c5ff6583cca65ed3e9cf0), brings:
 
 - Fewer ways for the GPU to fault: empty texture slots get an empty texture of the kind the shader
@@ -433,7 +439,7 @@ that holds its EdDSA key, which never leaves that Mac. [docs/building.md](docs/b
 | Wine sources for the Mac driver and `ntdll.so`, athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), codeload tar.gz; the same archive in [jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-d23b39774528237cafe49f9a073286f854b779c0-source.tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006, only to configure that build | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
-Release 0.1.7 was built from `main` with d9mt `1d33ea4`. Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
+Release 0.1.7.1 was built from `main` with d9mt `1d33ea4`, as was release 0.1.7. Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
 `release/0.1.5` branch with the d9mt build it shipped.
 
 ## Documentation
