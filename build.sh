@@ -18,8 +18,9 @@
 #                                      patches/), for the engine; and its ntdll.so with the
 #                                      msync alert_fd fix (scripts/build-ntdll.sh)
 #   Contents/Resources/Licenses/       licenses of the app and the bundled components
-# The Wine engine is not bundled: som.sh downloads it at install time from athei's wine-build
-# releases (CrossOver 26.3, the engine SWGL on Mac uses; pinned URL + sha256 in src/som.sh).
+# The Wine engine is not bundled: som.sh downloads it at install time from jdrly/wine-engine,
+# the same file athei built and published before (CrossOver 26.3, the engine SWGL on Mac uses;
+# pinned URL + sha256 in src/som.sh).
 # Only the engine's Mac driver comes in a patched build of its own (Resources/wine).
 #
 # Built with the macOS 27 SDK (Xcode 27; the design follows the SDK the app links against)
@@ -35,7 +36,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # SWTOR_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.7}
+APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.8}
 
 # Development builds: a version with a prerelease suffix, X.Y.Z-dev.N. They are published only
 # as GitHub pre-releases, never in the appcast. CFBundleShortVersionString is the version as is;
@@ -234,14 +235,16 @@ ntdll/$NTDLL_PATCH.patch (a thread's exit no longer closes an unrelated file des
 under msync): LGPL-2.1-or-later, see ntdll/COPYING.LIB and ntdll/LICENSE; build script:
 $REPO_URL/blob/v$APP_VERSION/scripts/build-ntdll.sh.
 The patches are also in $REPO_URL/tree/v$APP_VERSION/patches; the
-sources they apply to: https://github.com/athei/wine/tree/$WINEMAC_COMMIT (CodeWeavers'
-CrossOver sources: https://www.codeweavers.com/crossover/source); build script:
+sources they apply to: https://github.com/athei/wine/tree/$WINEMAC_COMMIT, also as an archive
+in https://github.com/jdrly/wine-engine/releases/tag/$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)
+(CodeWeavers' CrossOver sources: https://www.codeweavers.com/crossover/source); build script:
 $REPO_URL/blob/v$APP_VERSION/scripts/build-winemac.sh.
 
 Not included in this app: the Wine engine (CodeWeavers' CrossOver 26.3 sources with athei's
-patches, Wine 11.0, LGPL-2.1-or-later; built by athei/wine-build, which also bundles the
-components listed in its release) is downloaded at install time from
-https://github.com/athei/wine-build/releases/tag/$(sed -n 's/^ENGINE_NAME=//p' src/som.sh).
+patches, Wine 11.0, LGPL-2.1-or-later; built by athei, who also bundled the components listed in
+its release) is downloaded at install time from
+https://github.com/jdrly/wine-engine/releases/tag/$(sed -n 's/^ENGINE_NAME=//p' src/som.sh),
+with its source.
 EOF
 
 # feed: Sparkle's feed, also read by the Wine wrapper's daily update check (via som.sh)

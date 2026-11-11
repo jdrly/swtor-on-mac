@@ -29,9 +29,12 @@ How SWTOR on Mac updates itself and the installed setup, and how development bui
   proxy, a VPN or a content filter) or a changed file is named as such, with the size that
   arrived, and `install.log` records each try (curl's status, the HTTP code, the size, the
   checksum). If it keeps failing,
-  download [the engine](https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz)
-  in a browser, put the file into `~/Library/Caches/SWTOR on Mac/downloads/` and click Update
-  again: a file there with the right checksum is used as it is.
+  download [the engine](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz)
+  in a browser, put the file into `~/Library/Caches/SWTOR on Mac/downloads/` and try again: a
+  file there with the right checksum (234,978,748 bytes, sha256
+  `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d`) is used as it is. A file
+  under that name that isn't the engine is named in the window and renamed to `<name>.wrong`,
+  and the engine downloads itself; a finished install removes the downloads folder with it.
 
 ## Development builds
 

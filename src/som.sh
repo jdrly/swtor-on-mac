@@ -58,19 +58,20 @@ D9MT_VERSION="$(cat "$RES/d9mt/VERSION" 2>/dev/null || echo unknown)"
 FEED_URL="$(sed -n 's/^feed=//p' "$RES/app.properties" 2>/dev/null || true)"
 FEED_URL="${FEED_URL:-https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml}"
 
-# --- Components: downloaded at install time from their official sources (never bundled).
-# Bump name, URL, size and sha256 together.
-# Wine engine: athei's build of CodeWeavers' CrossOver 26.3 (Wine 11.0, x86_64 WoW64;
-# https://github.com/athei/wine-build), the engine SWGL on Mac uses. Self-contained (its
-# libraries are in lib/external, found via @loader_path) and without a wine-preloader: every
-# Wine process runs from its loader, lib/wine/x86_64-unix/wine.
+# --- Components: downloaded at install time (never bundled). Bump name, URL, size and sha256
+# together.
+# Wine engine: athei's build of CodeWeavers' CrossOver 26.3 (Wine 11.0, x86_64 WoW64), the
+# engine SWGL on Mac uses. athei's release of it is gone; jdrly/wine-engine has the same file,
+# byte for byte, next to the Wine source it was built from (ADR-0006).
+# Self-contained (its libraries are in lib/external, found via @loader_path) and without a
+# wine-preloader: every Wine process runs from its loader, lib/wine/x86_64-unix/wine.
 ENGINE_ID=cx26
 ENGINE_NAME=cx-26.3.0-8
 ENGINE_TITLE="CrossOver 26.3 (Wine 11.0)"
-ENGINE_URL=https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz
+ENGINE_URL=https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz
 # the same file through GitHub's API (the release asset's id): another signed URL on GitHub's
 # asset servers, the download's second way (fetch)
-ENGINE_API_URL=https://api.github.com/repos/athei/wine-build/releases/assets/627976236
+ENGINE_API_URL=https://api.github.com/repos/jdrly/wine-engine/releases/assets/734819803
 ENGINE_SIZE=234978748
 ENGINE_SHA256=1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d
 # two of its files, checked after unpacking (the known-good engine); its ntdll.so is replaced
@@ -595,6 +596,7 @@ FETCH_TRIES=4
 FETCH_SECOND_TRIES=2
 is_xz() { [ "$(head -c 6 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = fd377a585a00 ]; }
 mb() { echo $((($1 + 524288) / 1048576)); }
+thousands() { echo "$1" | sed -e :a -e 's/^\([0-9]\{1,\}\)\([0-9]\{3\}\)/\1,\2/;ta'; }   # 234978748 -> 234,978,748
 
 # fetch_source <url> <tries> [<header>]: attempts at <url> into $f.part (fetch's locals f, sha,
 # size, label, dir); sets OUT: ok ($f.part is the file, verified), empty, page (a web page),
@@ -666,10 +668,11 @@ fetch_source() {
 }
 
 fetch() {
-  local url=$1 sha=$2 size=$3 label=$4 second=${5:-} dir="$CACHE/downloads" f manual
+  local url=$1 sha=$2 size=$3 label=$4 second=${5:-} dir="$CACHE/downloads" f manual have=""
   f="$dir/$(basename "$url")"
   FETCHED=$f
-  if [ -f "$f" ] && [ "$(sha256 "$f")" = "$sha" ]; then
+  [ ! -f "$f" ] || have=$(sha256 "$f")
+  if [ "$have" = "$sha" ]; then
     say "$label: using the verified download in the cache"
     return
   fi
@@ -678,7 +681,14 @@ fetch() {
     return
   fi
   mkdir -p "$dir"
-  if [ -f "$f" ]; then log "$f in the cache is not the expected file (sha256 $(sha256 "$f")); downloading it again"; rm -f "$f"; fi
+  # A file that isn't the one expected, often one the player put here by hand: named in the
+  # window and moved aside as .wrong (replacing an earlier one), not deleted. A finished install
+  # still removes the downloads folder with it (cmd_install)
+  if [ -n "$have" ]; then
+    log "$f in the cache is not the expected file ($(stat -f %z "$f") bytes, sha256 $have); moved to $f.wrong"
+    warn "$(basename "$f") in $dir is not the $label. It has $(thousands "$(stat -f %z "$f")") bytes and a sha256 starting ${have:0:12}, the $label has $(thousands "$size") bytes and a sha256 starting ${sha:0:12}. SWTOR on Mac renamed your file to $(basename "$f").wrong and downloads the $label itself. When the install finishes, it removes the downloads folder, your file included."
+    mv -f "$f" "$f.wrong"
+  fi
   say "Downloading $label from $url"
   fetch_source "$url" "$FETCH_TRIES"
   if [ "$OUT" != ok ] && [ -n "$second" ]; then
@@ -686,7 +696,7 @@ fetch() {
     fetch_source "$second" "$FETCH_SECOND_TRIES" "Accept: application/octet-stream"
   fi
   echo "@progress $label $GOT $size"
-  manual="Or download $url in your browser, put the file into $dir and click Update again."
+  manual="Or download $url in your browser, put the file into $dir and try again. It must be that exact file: $(thousands "$size") bytes, with the sha256 $sha."
   case "$OUT" in
     ok)
       mv -f "$f.part" "$f"

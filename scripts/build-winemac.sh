@@ -40,7 +40,8 @@ PATCHES="winemac-physical-keys winemac-swgl-relative-mouse winemac-swgl-input-th
 W="${WINEMAC_WORK:-/tmp/swtor-on-mac-winemac}"
 case "$W" in *" "*) echo "WINEMAC_WORK must not contain spaces (Wine's makefiles break on them)" >&2; exit 1 ;; esac
 
-# athei/wine@cx-26-patched as named by https://github.com/athei/wine-build/releases/tag/cx-26.3.0-8
+# athei/wine@cx-26-patched as named by athei's release of the engine, cx-26.3.0-8 (gone; the
+# same archive is in https://github.com/jdrly/wine-engine/releases/tag/cx-26.3.0-8)
 WINE_COMMIT=d23b39774528237cafe49f9a073286f854b779c0
 WINE_SRC_URL=https://codeload.github.com/athei/wine/tar.gz/$WINE_COMMIT
 WINE_SRC_SHA256=7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e
