@@ -145,7 +145,7 @@ A change is done only when all of these hold:
   `SWTOR_ON_MAC_DRY_RUN` ([docs/testing.md](docs/testing.md)).
 - Change anything in Broadsword's install beyond what *What it changes* in [docs/how-it-works.md](docs/how-it-works.md) lists (the
   two preloaders and `bin-real/`; Uninstall's copy of the game settings back).
-- Bundle or mirror the Wine engine (ADR-0002).
+- Bundle the Wine engine in the app (ADR-0006).
 - Put a development build into the update feed or a regular release.
 - Commit signing material: the Developer ID, notarization credentials or Sparkle's EdDSA key.
 - Tell players to contact Broadsword or SWTOR customer support about SWTOR on Mac.

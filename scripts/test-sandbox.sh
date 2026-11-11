@@ -208,6 +208,7 @@ SWTOR_ON_MAC_DRY_RUN=1 som install >"$SANDBOX/dry-run.txt" 2>&1 || { cat "$SANDB
 check "dry run: official install unchanged" test "$STOCK" = "$(snap "$BS_WINE")"
 check "dry run: no app files" test ! -e "$SOM"
 check "dry run: lists the wrapper change" grep -q 'write .*bin/wine64-preloader' "$SANDBOX/dry-run.txt"
+check "dry run: the engine from jdrly/wine-engine" grep -qF '[dry-run] download https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz (234978748 bytes' "$SANDBOX/dry-run.txt"
 
 echo "== 2. refuses while the launcher runs"
 # (a stand-in for the launcher, built into the sandbox's official app)
@@ -1549,6 +1550,16 @@ fetch_mode alwaysdrop alwaysdrop fetch-stopped
 check "download: a connection that keeps dropping (both addresses): stopped at 192 of 224 MB, the part kept" eval 'grep -q "^@error The download of Wine engine stopped at 192 of 224 MB" "$SANDBOX/fetch-stopped.txt" && [ "$(stat -f %z "$DLC/$ENGINE_FILE.part")" = 201326592 ]'
 fetch_mode ok ok fetch-resumed
 check "download: the next try continues where it stopped" eval 'grep -q "^@done " "$SANDBOX/fetch-resumed.txt" && grep -q "resuming at 201326592 of" "$SANDBOX/fetch-resumed.log" && [ ! -e "$DLC/$ENGINE_FILE.part" ]'
+# a file under the engine's name that isn't the engine, as a player may put there by hand: named
+# in the window, moved aside as .wrong, and the engine downloaded
+rm -rf "$DLC"; mkdir -p "$DLC"; echo "not the engine" >"$DLC/$ENGINE_FILE"
+# shellcheck disable=SC2034 # (used in check's eval strings)
+WRONG_SHA=$(shasum -a 256 "$DLC/$ENGINE_FILE" | cut -d' ' -f1)
+# shellcheck disable=SC2034 # (used in check's eval strings)
+ESIZE=$(val ENGINE_SIZE "$SOMSH" | sed -e :a -e 's/^\([0-9]\{1,\}\)\([0-9]\{3\}\)/\1,\2/;ta')   # (with thousands commas)
+fetch_mode ok ok fetch-wrongfile
+check "download: a wrong file in the downloads folder is named in the window, with its size and sha256 against the engine's" eval 'grep -qxF "@warn $ENGINE_FILE in $DLC is not the Wine engine. It has 15 bytes and a sha256 starting ${WRONG_SHA:0:12}, the Wine engine has $ESIZE bytes and a sha256 starting ${ESHA:0:12}. SWTOR on Mac renamed your file to $ENGINE_FILE.wrong and downloads the Wine engine itself. When the install finishes, it removes the downloads folder, your file included." "$SANDBOX/fetch-wrongfile.txt"'
+check "  moved aside as .wrong, then the engine downloaded and verified" eval 'grep -qx "not the engine" "$DLC/$ENGINE_FILE.wrong" && grep -q "^@done " "$SANDBOX/fetch-wrongfile.txt" && [ "$(shasum -a 256 "$DLC/$ENGINE_FILE" | cut -d" " -f1)" = "$ESHA" ]'
 # (outside the sandbox: against the real home, as a dry run; what it said is kept in
 # fetch-real.txt with the time, for a look if it fails)
 (unset SWTOR_ON_MAC_ROOT; date '+%F %T'; SWTOR_ON_MAC_DRY_RUN=1 SWTOR_ON_MAC_ENGINE_URL=http://127.0.0.1:1/x/y "$SOMSH" fetch-engine 2>&1 && echo "status 0" || echo "status $?") >"$SANDBOX/fetch-real.txt" 2>&1 || true

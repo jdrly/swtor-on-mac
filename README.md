@@ -52,7 +52,8 @@ the parts underneath it:
 
 - The game runs on CrossOver 26.3 with Wine 11, the engine that
   [SWGL on Mac](https://github.com/jdrly/swgl-on-mac) also uses. SWTOR on Mac downloads it
-  from its publisher at install time and checks it against a pinned sha256.
+  at install time from [jdrly/wine-engine](https://github.com/jdrly/wine-engine), a copy of
+  athei's release, and checks it against a pinned sha256.
 - d9mt translates the game's Direct3D 9 calls to Metal. It compiles shaders for Metal and caches
   them on disk.
 - macOS gives the game Game Mode. Retina Mode, on by default, lets the game render at the
@@ -340,7 +341,7 @@ flowchart LR
 | The installer | `som.sh`, a `/bin/bash` 3.2 script: status, install, uninstall, settings, the hook check | [`src/som.sh`](src/som.sh) |
 | The wrapper | The script in the preloaders' place | [`src/wine-wrapper.sh`](src/wine-wrapper.sh) |
 | Helpers | `hold-launcher` starts the Wine session and runs the game; `setsid-exec` starts a program in a new session | [`src/helpers`](src/helpers) |
-| Wine engine | CrossOver 26.3 with Wine 11, built by [athei/wine-build](https://github.com/athei/wine-build), downloaded at install time | [ADR 0001](docs/adr/0001-one-engine-crossover-26-3.md), [ADR 0002](docs/adr/0002-engine-downloaded-not-redistributed.md) |
+| Wine engine | CrossOver 26.3 with Wine 11, built by athei, downloaded at install time from [jdrly/wine-engine](https://github.com/jdrly/wine-engine) | [ADR 0001](docs/adr/0001-one-engine-crossover-26-3.md), [ADR 0006](docs/adr/0006-engine-downloaded-from-jdrly-wine-engine.md) |
 | Graphics | d9mt's `d3d9.dll` and its `winemetal` bridge, Direct3D 9 to Metal | [`prebuilt/d9mt`](prebuilt/d9mt) |
 | Wine patches | SWTOR on Mac's builds of Wine's Mac driver and `ntdll.so` | [`patches`](patches), [`prebuilt`](prebuilt) |
 | Updates | Sparkle 2.10.0, with an EdDSA-signed feed | [`build.sh`](build.sh) |
@@ -352,8 +353,9 @@ Mac's builds as `.stock` and `.wine` copies.
 ## Patches
 
 SWTOR on Mac builds two Wine components from the engine's own sources, athei/wine at
-[`d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), with
-these patches:
+[`d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0) (also
+as an [archive in jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-d23b39774528237cafe49f9a073286f854b779c0-source.tar.gz)),
+with these patches:
 
 - [`patches/ntdll-msync-alert-fd.patch`](patches/ntdll-msync-alert-fd.patch). CodeWeavers' msync
   port stores a thread's msync alert index in the field where Wine 11 keeps the thread's alert
@@ -425,10 +427,10 @@ that holds its EdDSA key, which never leaves that Mac. [docs/building.md](docs/b
 
 | Component | Source | sha256 |
 |---|---|---|
-| Wine engine `cx-26.3.0-8`, CrossOver 26.3 with Wine 11.0, x86_64 WoW64 | [athei/wine-build cx-26.3.0-8](https://github.com/athei/wine-build/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
+| Wine engine `cx-26.3.0-8`, CrossOver 26.3 with Wine 11.0, x86_64 WoW64 | [jdrly/wine-engine cx-26.3.0-8](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
 | Sparkle 2.10.0, bundled | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
 | d9mt `1d33ea4`, bundled in `prebuilt/d9mt` | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/1d33ea43785a56de329c5ff6583cca65ed3e9cf0) | see `prebuilt/d9mt` |
-| Wine sources for the Mac driver and `ntdll.so`, athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), codeload tar.gz | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
+| Wine sources for the Mac driver and `ntdll.so`, athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), codeload tar.gz; the same archive in [jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-d23b39774528237cafe49f9a073286f854b779c0-source.tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006, only to configure that build | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
 Release 0.1.7 was built from `main` with d9mt `1d33ea4`. Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
@@ -459,9 +461,10 @@ Release 0.1.7 was built from `main` with d9mt `1d33ea4`. Release 0.1.6 was built
   the pinned commit. Its licenses and notices ship in the app under `Resources/Licenses/d9mt`.
 - [Wine](https://www.winehq.org), LGPL-2.1-or-later, comes from CodeWeavers'
   [CrossOver 26.3 sources](https://www.codeweavers.com/crossover/source) with athei's patches in
-  [athei/wine](https://github.com/athei/wine), built and bundled by
-  [athei/wine-build](https://github.com/athei/wine-build). SWTOR on Mac downloads the engine
-  from that release at install time and doesn't redistribute it.
+  [athei/wine](https://github.com/athei/wine), built and bundled by athei. athei's release of
+  the engine is gone, so [jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/tag/cx-26.3.0-8)
+  hosts the same file, byte for byte, next to the Wine source it was built from. SWTOR on Mac
+  downloads the engine from there at install time and doesn't bundle it.
 - Wine's Mac driver and `ntdll.so`, LGPL-2.1-or-later, are built from the engine's sources with
   the [patches](#patches) above. They ship in the app with Wine's license and the patches under
   `Resources/Licenses/winemac` and `Resources/Licenses/ntdll`.

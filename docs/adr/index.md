@@ -32,7 +32,8 @@ This table is the status source of truth. Update both it and the ADR's frontmatt
 | # | Decision | Status |
 |---|---|---|
 | [0001](0001-one-engine-crossover-26-3.md) | The game runs on one Wine engine: CrossOver 26.3 with Wine 11, the engine SWGL on Mac uses | `accepted` |
-| [0002](0002-engine-downloaded-not-redistributed.md) | The engine is downloaded from its official source at install time, never bundled or mirrored (no mirror for licensing reasons) | `accepted` |
+| [0002](0002-engine-downloaded-not-redistributed.md) | The engine is downloaded from its official source at install time, never bundled or mirrored (no mirror for licensing reasons) | `superseded by ADR-0006` |
 | [0003](0003-hook-through-the-preloaders.md) | A wrapper in the preloaders' place; all-or-nothing Install; Uninstall puts Broadsword's folder back | `accepted` |
 | [0004](0004-releases-in-two-halves.md) | Releases built by CI and finished on the maintainer's Mac; development builds are pre-releases only | `accepted` |
 | [0005](0005-no-background-helper.md) | No background helper: nothing of SWTOR on Mac runs while the app is closed; the app checks the launcher hook when it opens | `accepted` |
+| [0006](0006-engine-downloaded-from-jdrly-wine-engine.md) | The engine is downloaded at install time from jdrly/wine-engine, a byte-for-byte copy of athei's gone release with its source, never bundled | `accepted` |
