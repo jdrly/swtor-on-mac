@@ -1,5 +1,5 @@
-# Checks every pull request and every push to main: the scripts and workflows lint clean, and
-# the app builds. No secrets and read-only access; signing and notarizing happen only in
+# Checks every pull request and every push to main: the scripts and workflows lint clean, the
+# d9mt pin is green on d9mt's main, and the app builds. No secrets and read-only access; signing and notarizing happen only in
 # release.yml. (The installer's end-to-end test, scripts/test-sandbox.sh, needs the official
 # SWTOR Mac app installed, so it runs on a developer's Mac, not here; its fixture groups,
 # scripts/test-fixtures.sh, need neither that app nor Wine and run here on the built app.)
@@ -38,6 +38,24 @@ jobs:
           echo "$sha  $RUNNER_TEMP/actionlint.tgz" | sha256sum -c --quiet
           tar -xzf "$RUNNER_TEMP/actionlint.tgz" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color
+
+  # The d9mt pin (scripts/build-d9mt.sh's COMMIT, prebuilt/d9mt/VERSION) is a commit of d9mt's
+  # main that d9mt's own Checks workflow passed: scripts/check-d9mt-pin.sh. It reads the public
+  # jdrly/d9mt through the API with this run's read-only token. A d9mt run that is still going
+  # is waited for. Exit status 2 means GitHub didn't answer or the run didn't finish in time:
+  # that is no verdict on the pin, and the job says so.
+  d9mt-pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The d9mt pin is green on d9mt's main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/check-d9mt-pin.sh --wait 45
 
   build:
     # build.sh needs the macOS 27 SDK. GitHub has no macos-27 label; its macOS 27 image with
