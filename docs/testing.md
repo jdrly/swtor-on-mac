@@ -51,7 +51,8 @@ local feed, as in SWGL on Mac.
 `scripts/test-fixtures.sh [app] [group...]` runs the checks that need neither the official app nor
 Wine, in a folder of their own (`FIXTURE_ROOT`) with an empty home and an empty sandbox: the
 session report on a sample log (the suite's section 6f, which `test-sandbox.sh` runs from the same
-file in `scripts/fixtures/`), the suite's end under a job runner on planted sandboxes, and the
+file in `scripts/fixtures/`), the suite's end under a job runner on planted sandboxes, the d9mt
+pin check (`scripts/check-d9mt-pin.sh` with a stand-in `gh` and planted answers), and the
 suite's `orphan_as`. That helper starts a stand-in with a rewritten argv[0], as Wine 11 shows its
 processes. The argv[0] reaches the rewriting shell in the environment, never on its command line:
 a game path there (section 2c's) makes that shell look like the game to `swtor-running.sh` and

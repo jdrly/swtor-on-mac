@@ -60,6 +60,15 @@ jobs:
             grep -q 'discord.gg/AnV3fZWz2b' "$notes" || { echo "$notes needs the Discord invite in Support"; exit 1; }
           fi
 
+      # A release ships only a d9mt commit of d9mt's main that passed d9mt's own Checks
+      # (scripts/check-d9mt-pin.sh), checked before any secret is read. Exit status 2 means
+      # GitHub didn't answer or d9mt's run is still going after 45 minutes: no verdict on the
+      # pin, so run this job again.
+      - name: Check the d9mt pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/check-d9mt-pin.sh --wait 45
+
       - name: Cache downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

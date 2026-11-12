@@ -70,8 +70,9 @@ Sparkle's EdDSA key never leaves Jan's Mac, so a release comes in two halves:
 
 1. Bump `APP_VERSION` in `build.sh`, add `release-notes/<version>.md`, commit, then tag and
    push: `git tag v<version> && git push origin main v<version>`.
-2. The Release workflow (after approval in the `release` environment) builds, signs and
-   notarizes the app, and creates the draft release `v<version>` with the DMG.
+2. The Release workflow (after approval in the `release` environment) checks the d9mt pin
+   (below), builds, signs and notarizes the app, and creates the draft release `v<version>`
+   with the DMG.
 3. On the Mac: `./build.sh` (it unpacks Sparkle's tools), then
    `scripts/release.sh --feed <version>`. It downloads the notarized DMG from the draft, checks
    it, builds and checks `appcast.xml` (and deltas from the older DMGs in `release/updates/`)
@@ -90,6 +91,14 @@ Without CI, `./build.sh && scripts/release.sh` does everything on the Mac (sign,
 draft).
 
 ## d9mt pin
+
+`scripts/check-d9mt-pin.sh` checks the pin against d9mt's own CI: `prebuilt/d9mt/VERSION` is the
+`COMMIT` of `scripts/build-d9mt.sh`, that commit is on `jdrly/d9mt`'s `main`, and d9mt's `Checks`
+workflow has a green run of exactly that commit (a push, a nightly run or a run by hand; a pull
+request's run tests another tree and doesn't count). The Checks workflow runs it on every pull
+request and the Release workflow before it builds. A pin older than d9mt's CI (before `45fcedb`)
+passes with a note. Exit status 1 means the pin fails; 2 means GitHub didn't answer or d9mt's run
+hasn't finished, which is no verdict: run it again.
 
 `main` pins d9mt `1d33ea4`, d9mt main after jdrly/d9mt#155: the driver of 0.1.7. Since `73511be` (#125, a
 StretchRect sub-rect resolved at its offset) it adds the GPU-fault fixes #133, #135 to #137, #147, #148
