@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # The d9mt pin check (scripts/check-d9mt-pin.sh) on planted trees, with a stand-in gh that
 # answers from planted files: GitHub's JSON goes through the script's own jq filter (jq), an
-# "HTTP <status>" file is that error, and a missing file is no answer at all. Fixture group
+# "HTTP <status>" file is that error, an empty file an empty body (gh fails on it), and a
+# missing file is no answer at all. Fixture group
 # d9mt-pin (scripts/test-fixtures.sh only). Sourced; check and its counters come from lib.sh.
 
 # fx_pin_run <folder> [check-d9mt-pin.sh's arguments]: the check on <folder>/tree with the
@@ -44,6 +45,8 @@ case "$path" in
   *) echo "stand-in gh: unexpected path: $path" >&2; exit 64 ;;
 esac
 [ -f "$FX_PIN/$f" ] || { echo "error connecting to api.github.com" >&2; exit 1; }
+# (an empty body: gh api --jq fails on it, jq alone wouldn't)
+[ -s "$FX_PIN/$f" ] || { echo "unexpected end of JSON input" >&2; exit 1; }
 case "$(head -n 1 "$FX_PIN/$f")" in
   "HTTP "*) echo "gh: planted error ($(head -n 1 "$FX_PIN/$f"))" >&2; exit 1 ;;
 esac
@@ -112,6 +115,10 @@ GH
   rm "$g/main"
   fx_pin_run "$d"
   check "d9mt-pin: no answer at all: asked 3 times, no verdict, exit 2, no FAIL ($FX_RC)" \
+    eval '[ "$FX_RC" = 2 ] && [ "$(fx_pin_asked "$d")" = 3 ] && grep -q "NO VERDICT: GitHub didn.t answer whether the pin is on" "$d/out.txt" && ! grep -q FAIL "$d/out.txt"'
+  : >"$g/main"
+  fx_pin_run "$d"
+  check "d9mt-pin: an empty answer: asked 3 times, no verdict, exit 2, no FAIL ($FX_RC)" \
     eval '[ "$FX_RC" = 2 ] && [ "$(fx_pin_asked "$d")" = 3 ] && grep -q "NO VERDICT: GitHub didn.t answer whether the pin is on" "$d/out.txt" && ! grep -q FAIL "$d/out.txt"'
   echo '{"status":"ahead"}' >"$g/main"
 
