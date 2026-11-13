@@ -52,7 +52,10 @@ local feed, as in SWGL on Mac.
 Wine, in a folder of their own (`FIXTURE_ROOT`) with an empty home and an empty sandbox: the
 session report on a sample log (the suite's section 6f, which `test-sandbox.sh` runs from the same
 file in `scripts/fixtures/`), the suite's end under a job runner on planted sandboxes, the d9mt
-pin check (`scripts/check-d9mt-pin.sh` with a stand-in `gh` and planted answers), development
+pin check (`scripts/check-d9mt-pin.sh` with a stand-in `gh` and planted answers), the AIR
+codegen guard of the d9mt build (group `air-codegen`: `scripts/air-codegen-guard.sh` on planted
+`air-codegen-id.txt` files, and through `scripts/build-d9mt.sh --check-air-codegen` with the id
+that script records, so the group fails while that id is missing or is 0.1.7's), development
 builds' `d9mt-ab.sh air-legacy` on a planted install (group `d9mt-ab`: the game gets
 `D9MT_AIR_LEGACY=1` with a shader cache and pipeline archives of its own, kept from start to
 start), and the
