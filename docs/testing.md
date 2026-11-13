@@ -63,7 +63,12 @@ planted install with the engine's real `dxmt` tree and Mullion's pinned archive,
 once into `.cache/`, the archive served by `scripts/fetch-test-server.py`: Mullion installed, the
 engine's files kept as `.stock` and put back, d9mt's bridge behind the tree's `winemetal.so` link
 untouched, a changed download or another engine's tree refused with nothing changed, and `env`
-without DirectX 12 while Mullion isn't in place), and the
+without DirectX 12 while Mullion isn't in place), development builds' D3DMetal import (group
+`dx12-gptk`: `som.sh dx12-gptk` on made-up Game Porting Toolkit images, real disk images made
+with `hdiutil`, into a planted engine, with a stand-in `codesign`: beta 3's layout imported, the
+`.stock` copies and `lib/external` kept, `env` naming the import; another layout, shim, hash or
+signature refused with nothing changed; an import that fails halfway puts the engine's own files
+and `env` back, and a `gptk_restore` that can't finish keeps the import for the next try), and the
 suite's `orphan_as`. That helper starts a stand-in with a rewritten argv[0], as Wine 11 shows its
 processes. The argv[0] reaches the rewriting shell in the environment, never on its command line:
 a game path there (section 2c's) makes that shell look like the game to `swtor-running.sh` and

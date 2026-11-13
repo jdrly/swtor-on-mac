@@ -50,7 +50,10 @@ on in Settings, the bundled Mac driver replaces the engine's `winemac.so` and it
 `winemac.drv` (the engine's own are kept as `<name>.stock` and come back when both settings are
 off). In a development build with DirectX 12 on a Mullion driver, Mullion's x86_64 files replace
 the engine's in its `lib/wine/dxgi/dxmt` tree (the engine's own are kept as `<name>.stock` and
-come back when the setting is off). It puts d9mt's `d3d9.dll` into its own Wine
+come back when the setting is off). A development build's `som.sh dx12-gptk` copies D3DMetal
+from a Game Porting Toolkit image the user downloaded from Apple into the engine's `gptk` tree
+and `lib/external/gptk-import` (the engine's own come back at the next install). SWTOR on Mac
+never downloads, bundles or distributes those files. It puts d9mt's `d3d9.dll` into its own Wine
 prefix (Wine's own is kept as `d3d9.dll.wine`).
 
 ## Trademarks
