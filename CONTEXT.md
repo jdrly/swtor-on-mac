@@ -130,6 +130,13 @@ The Direct3D 9 to Metal driver the game draws with, Jan Drlý's fork of neo773's
 [jdrly/d9mt](https://github.com/jdrly/d9mt), bundled at a pinned commit (`scripts/build-d9mt.sh`,
 `prebuilt/d9mt`; README, *Credits and licenses*).
 
+**Mullion**
+The Direct3D 12 driver the DirectX 12 client (`swtor_RC2.exe`) runs on by default in development
+builds: [dttdrv/mullion](https://github.com/dttdrv/mullion)'s release archive, pinned by size and
+sha256, installed over the engine's `dxmt` tree only while the setting wants it (`src/som.sh`,
+`MULLION_*` and `install_mullion`; docs/how-it-works.md, *What it changes*).
+_Avoid_: “DXMT” for it (DXMT is what Mullion is built on, and the engine's own tree).
+
 **Pipeline state cache**
 d9mt's record of the pipelines the game used, which it builds again in the background while the
 game loads (`D9MT_STATE_CACHE`, `state/` in d9mt's per-user cache folder). Uninstall leaves d9mt's

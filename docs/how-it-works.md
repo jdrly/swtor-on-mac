@@ -21,7 +21,11 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
     fix, see [Building](building.md); the engine's own kept as `ntdll.so.stock`) (and, while *Game keys by keyboard position* or *Raw mouse-look* is on,
     SWTOR on Mac's build of its Mac driver, `winemac.so` and the PE sides
     `x86_64-windows/winemac.drv`, `i386-windows/winemac.drv`; the engine's own files are kept
-    as `<name>.stock`)
+    as `<name>.stock`) (and, in a development build with DirectX 12 on a Mullion driver,
+    Mullion's files in its `lib/wine/dxgi/dxmt` tree: the engine's own kept as `<name>.stock`,
+    the tree's `winemetal.so` link to the main tree's file, d9mt's bridge, replaced by Mullion's
+    own file, and a `.mullion` mark; all of it goes back when the setting is off or a release
+    build installs)
   - `frameworks/` – only in installs of 0.0.x: the old engine's libraries (removed by the
     Reinstall that upgrades it); `upgrade-backup/` – only while that Reinstall runs
   - `prefix/` – the game's Wine prefix: an APFS clone of Broadsword's, updated for the engine,
@@ -34,7 +38,9 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
   - `install-manifest.json` – what was changed, for Uninstall
   - `last-update-check`, `update-available` – the wrapper's daily update check
   - `backup/` – only if you replaced another Wine wrapper: a copy of it
-- `~/Library/Caches/SWTOR on Mac/downloads` – the engine downloads, only during an install
+- `~/Library/Caches/SWTOR on Mac/downloads` – the engine downloads, only during an install; in
+  a development build also Mullion's archive, kept after a settings change until the next
+  install, so switching back to Mullion needs no new download
 - `winetemp-…/wine` (or `winetemp-…/swtor.exe`) in your per-user temporary folder
   (`$TMPDIR`) – the Game Mode link, made at each game start
 - `d9mt/` in your per-user cache folder (`$(getconf DARWIN_USER_CACHE_DIR)`) – d9mt's own
@@ -113,7 +119,8 @@ Wine, and macOS leaves the game (a foreground app) and the Wine session running.
   `THREADCPU` and `RAWMOUSE` lines, game only);
 - in a development build with *DirectX 12 (experimental)* on, starts the DirectX 12 client,
   `swtor_RC2.exe`, in place of `swtor.exe`, with Wine's builtin `d3d9` and a compatdb rule that
-  gives it D3DMetal ([Settings](settings.md#directx-12-experimental-development-builds)). The
+  gives it its driver: Mullion (by default, in the DXMT tree) or D3DMetal
+  ([Settings](settings.md#directx-12-experimental-development-builds)). The
   game is then `swtor_RC2.exe` for everything above, for Install's and the settings' check that
   the game isn't running, and for the window.
 

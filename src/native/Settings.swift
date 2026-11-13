@@ -98,12 +98,14 @@ final class GameSettings {
 
   // DirectX 12 (experimental, development builds): its driver (som.sh DX12_DRIVERS)
   static let dx12Drivers: [(String, String)] = [
+    ("mullion", "Mullion"),
+    ("mullion-mtl3", "Mullion (Metal 3)"),
     ("gptk", "D3DMetal"),
     ("gptk-mtl3", "D3DMetal (Metal 3)"),
   ]
 
   var dx12Driver: Binding<String> {
-    Binding(get: { self.values["dx12driver"] ?? "gptk" }, set: { self.set("dx12driver", $0) })
+    Binding(get: { self.values["dx12driver"] ?? "mullion" }, set: { self.set("dx12driver", $0) })
   }
 
   // Mouse-Look Speed: a factor on the macOS pointer's speed (som.sh MOUSE_SPEEDS)

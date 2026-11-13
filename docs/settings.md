@@ -102,21 +102,33 @@ neither shows nor applies them: `som.sh set dx12` refuses there, and a `dx12=on`
 | Setting | Default | What it changes |
 |---|---|---|
 | DirectX 12 (experimental) | off | `SWTOR_DX12=1` in `env`: when the launcher starts `…\retailclient\swtor.exe`, the wrapper starts `swtor_RC2.exe` from the same folder with the same arguments. If that file isn't there, it starts `swtor.exe` as always and says so in `wine.log` and `hold.log`. Only while the launcher and the game are closed (it changes the prefix's registry) |
-| DirectX 12 Driver | D3DMetal | `SWTOR_DX12_DRIVER` in `env`: `gptk`, Apple's D3DMetal from the engine (Metal 4 where macOS has it), or `gptk-mtl3`, D3DMetal on Metal 3 (the wrapper sets `D3DM_MTL4=0` for the game) |
+| DirectX 12 Driver | Mullion | `SWTOR_DX12_DRIVER` in `env`: `mullion`, [Mullion](https://github.com/dttdrv/mullion) (Metal 4 where the GPU has it), `mullion-mtl3`, Mullion on Metal 3 (the wrapper sets `MULLION_D3D12_METAL4=0` for the game), `gptk`, Apple's D3DMetal from the engine (Metal 4 where macOS has it), or `gptk-mtl3`, D3DMetal on Metal 3 (`D3DM_MTL4=0`). Only while the launcher and the game are closed (a switch to or from Mullion changes the engine's files) |
 
 With the setting on:
 
-- `env`'s `WINE_COMPATDB` gets a second rule, `name=swtor-dx12;exe=swtor_RC2.exe;dxgi=gptk`: the
-  DirectX 12 client gets D3DMetal's DXGI tree, every other process keeps wined3d. A rule that
-  names an exe applies after the `exe=*` rules, whatever the line order;
+- `env`'s `WINE_COMPATDB` gets a second rule, `name=swtor-dx12;exe=swtor_RC2.exe;dxgi=dxmt` for
+  Mullion, `dxgi=gptk` for D3DMetal: the DirectX 12 client gets that DXGI tree, every other
+  process keeps wined3d. A rule that names an exe applies after the `exe=*` rules, whatever the
+  line order;
+- with a Mullion driver, the setting downloads Mullion's release (`MULLION_*` in `som.sh`:
+  v0.5-alpha.3, 38 MB, checked against its pinned sha256) and installs it over the engine's
+  `dxgi/dxmt` tree, the engine's own files kept as `<name>.stock` (see [What it
+  changes](how-it-works.md#what-it-changes)). A download or tree that isn't the expected one is
+  refused with the reason, and the setting stays as it was. Another driver, the setting off, or a
+  release build's Reinstall puts the engine's own tree back. If Reinstall can't install Mullion,
+  it says so and goes on: `env` then leaves DirectX 12 out, with a line saying why, and the game
+  starts as `swtor.exe`. Mullion's logs (`swtor_RC2_<dll>.log`) and its flight record
+  (`swtor_RC2.exe.flight`, written when the GPU removes the device) go into SWTOR on Mac's log
+  folder (`MULLION_LOG_PATH`, `MULLION_DIAG_PATH`), so Collect Logs has them;
 - the client gets Wine's builtin `d3d9` (`WINEDLLOVERRIDES=d3d9=b` from the wrapper, and
   `DllOverrides` under `AppDefaults\swtor_RC2.exe` in the prefix), so d9mt and its Metal bridge
   stay out of the Direct3D 12 process. `swtor.exe` keeps d9mt;
 - `AppDefaults\swtor_RC2.exe` gets the values `swtor.exe` has (`GrabPointer`, *Game keys by
   keyboard position*, *Raw mouse-look* and its speed, `ThreadCpuStats`), and follows them when
   they change;
-- `wine.log`'s header names it: `SWTOR on Mac DirectX 12: swtor_RC2.exe, driver gptk
-  (dxgi=gptk)`, with `D3DM_MTL4=0` for the Metal 3 driver.
+- `wine.log`'s header names it: `SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion
+  (dxgi=dxmt), Mullion v0.5-alpha.3`, or `driver gptk (dxgi=gptk)`, with `MULLION_D3D12_METAL4=0`
+  or `D3DM_MTL4=0` for a Metal 3 driver.
 
 Off, `env` is the same as without the setting, and the `AppDefaults\swtor_RC2.exe` keys go.
 Reinstall writes or removes them by the setting too, and Uninstall removes the prefix with them.

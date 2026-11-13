@@ -12,7 +12,7 @@
 # engine), and the previous release's Reinstall over this one. A release build then goes on from
 # a development build (section 16, with DEV_APP): its A/B switches and test caches removed, the
 # rest kept, and uninstall to stock. Section 17: DirectX 12 (development builds) on a planted
-# install, and the game found as swtor_RC2.exe.
+# install, and the game found as swtor_RC2.exe; 17b: Mullion over the engine's dxmt tree.
 #
 #   scripts/test-sandbox.sh [path/to/SWTOR on Mac.app]
 #
@@ -1872,7 +1872,7 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   fi
   # (settings.conf: this version writes every setting it knows, so the ones $PREVV does not know,
   # hudpos, fpslimit, fpsbattery and flushcap, come in with their defaults)
-  check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter, fpslimit=off, fpsbattery=off, flushcap=off, dx12=off, dx12driver=gptk), dxvk.conf unchanged" eval 'diff <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" -e "^dx12=" -e "^dx12driver=" "$SANDBOX/prev-settings.conf") <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" -e "^dx12=" -e "^dx12driver=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && grep -qx fpslimit=off "$SOM/settings.conf" && grep -qx fpsbattery=off "$SOM/settings.conf" && grep -qx flushcap=off "$SOM/settings.conf" && grep -qx dx12=off "$SOM/settings.conf" && grep -qx dx12driver=gptk "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
+  check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter, fpslimit=off, fpsbattery=off, flushcap=off, dx12=off, dx12driver=mullion), dxvk.conf unchanged" eval 'diff <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" -e "^dx12=" -e "^dx12driver=" "$SANDBOX/prev-settings.conf") <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" -e "^dx12=" -e "^dx12driver=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && grep -qx fpslimit=off "$SOM/settings.conf" && grep -qx fpsbattery=off "$SOM/settings.conf" && grep -qx flushcap=off "$SOM/settings.conf" && grep -qx dx12=off "$SOM/settings.conf" && grep -qx dx12driver=mullion "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
   check "over $PREVV: env: the state cache line, the Frame Rate Limit lines (off), the Fewer GPU Batches line (off), the btm-check lines$([ "$CHANNEL" = dev ] && echo " and the A/B include") added, the rest as before (versions aside)" eval 'diff <(envnorm "$SANDBOX/prev-env") <(envnorm "$SOM/env") >"$SANDBOX/prev-env.diff" && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && [ "$(envv SWTOR_FPS_LIMIT)/$(envv SWTOR_FPS_LIMIT_BATTERY)/$(envv SWTOR_FLUSH_CAP)" = 0/0/0 ] && [ "$(envv SWTOR_SOM_SH)/$(envv SWTOR_ON_MAC_ROOT)" = "$SOMSH/$SANDBOX" ]'
   check "over $PREVV: no Wine left running" test -z "$(sandbox_wine)"
   [ "$CHANNEL" != dev ] || "$APP/Contents/Resources/d9mt-ab.sh" pfv >/dev/null
@@ -1957,6 +1957,9 @@ fi
 echo "== 17. DirectX 12 (development builds, experimental): settings, env, user.reg and the wrapper's swtor_RC2.exe start on a planted install (scripts/fixtures/dx12.sh), and the game found by that name"
 # shellcheck source=scripts/fixtures/dx12.sh
 . scripts/fixtures/dx12.sh
+# (fx_dx12 ends with Mullion's switches at the game's start, fx_dx12_mullion_start)
+# shellcheck source=scripts/fixtures/dx12-mullion.sh
+. scripts/fixtures/dx12-mullion.sh
 fx_dx12 "$APP" "$SANDBOX/dx12"
 # the game running as swtor_RC2.exe: install, uninstall and the registry settings wait for it,
 # and the window takes it for the game
@@ -1970,6 +1973,9 @@ check "dx12: the window takes a winetemp loader whose argv[0] is swtor_RC2.exe f
 check "dx12: and a swtor_RC2.exe program" test "$(is_game - /Games/SWTOR/retailclient/swtor_RC2.exe 0)" = game
 kill "$g" "$g1" 2>/dev/null || true
 rm -rf "$SANDBOX/usertmp/winetemp-9-8-7-5"
+
+echo "== 17b. DirectX 12 on Mullion: installed over the engine's real dxmt tree and put back, d9mt's bridge untouched, a wrong download or tree refused (scripts/fixtures/dx12-mullion.sh)"
+fx_dx12_mullion "$APP" "$SANDBOX/dx12-mullion"
 
 cleanup_wine
 check "end: no Wine process of the sandbox" test -z "$(sandbox_wine)"

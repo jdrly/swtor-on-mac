@@ -123,6 +123,23 @@ jobs:
           echo "$play"
           grep -q '^unavailable The official SWTOR app was not found' <<<"$play"
 
+      # The pinned downloads the dx12-mullion group tests against (the engine, 235 MB, and
+      # Mullion, 38 MB), in .cache/<sha256>/ where the group keeps them: restored while both pins
+      # stay the same, saved after a run that passed. Only those two folders: the rest of .cache
+      # is build output (compile-check).
+      - name: Pinned downloads for the fixtures
+        id: pins
+        run: |
+          echo "engine=$(sed -n 's/^ENGINE_SHA256=//p' src/som.sh)" >>"$GITHUB_OUTPUT"
+          echo "mullion=$(sed -n 's/^MULLION_SHA256=//p' src/som.sh)" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .cache/${{ steps.pins.outputs.engine }}
+            .cache/${{ steps.pins.outputs.mullion }}
+          key: fixtures-${{ steps.pins.outputs.engine }}-${{ steps.pins.outputs.mullion }}
+
       # The fixture groups (all of them, with their negative controls) on the packaged app, in a
       # new root of their own; the script removes it after a pass and keeps it after a failure.
       - name: fixtures

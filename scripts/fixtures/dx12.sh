@@ -89,7 +89,8 @@ REG
   cat >"$FX_DX12_SOM/engine/bin/wine" <<STUB
 #!/bin/bash
 printf '%s\n' "\$@" >"$FX_DX12_W/args"
-printf 'WINEDLLOVERRIDES=%s\nD3DM_MTL4=%s\n' "\${WINEDLLOVERRIDES-<unset>}" "\${D3DM_MTL4-<unset>}" >"$FX_DX12_W/seen"
+printf 'WINEDLLOVERRIDES=%s\nD3DM_MTL4=%s\nMULLION_D3D12_METAL4=%s\nMULLION_LOG_PATH=%s\nMULLION_DIAG_PATH=%s\n' "\${WINEDLLOVERRIDES-<unset>}" "\${D3DM_MTL4-<unset>}" \
+  "\${MULLION_D3D12_METAL4-<unset>}" "\${MULLION_LOG_PATH-<unset>}" "\${MULLION_DIAG_PATH-<unset>}" >"$FX_DX12_W/seen"
 STUB
   # (hold-launcher's stand-in: no Wine session to start; --run-game <log> <lang> <wine> <args>)
   printf '#!/bin/bash\ncase "$1" in --run-game) shift 3; exec "$@" ;; esac\nexit 0\n' >"$FX_DX12_W/bin-real/hold-launcher"
@@ -100,8 +101,10 @@ STUB
 
   # Off (the default): env and user.reg as without the setting, the game's command unchanged
   fx_dx12_som dev set hud off
-  check "dx12: development build, DirectX 12 off by default, driver gptk ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && grep -qx dx12=off "$FX_DX12_SOM/settings.conf" && grep -qx dx12driver=gptk "$FX_DX12_SOM/settings.conf"'
+  check "dx12: development build, DirectX 12 off by default, driver mullion ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && grep -qx dx12=off "$FX_DX12_SOM/settings.conf" && grep -qx dx12driver=mullion "$FX_DX12_SOM/settings.conf"'
+  # (the checks below are D3DMetal's, from the engine; Mullion's are in dx12-mullion.sh)
+  fx_dx12_som dev set dx12driver gptk
   check "dx12: off: no swtor-dx12 rule, no SWTOR_DX12 lines in env" \
     eval '! grep -q -e swtor-dx12 -e SWTOR_DX12 "$FX_DX12_SOM/env"'
   cp "$FX_DX12_SOM/env" "$d/env.off"; cp "$FX_DX12_SOM/prefix/user.reg" "$d/user.reg.off"
@@ -183,4 +186,6 @@ STUB
     eval '! grep -qi "swtor_RC2" "$FX_DX12_SOM/prefix/user.reg" && fx_dx12_reg "swtor.exe\\\\DllOverrides" "\"d3d9\"=\"native,builtin\""'
   fx_dx12_game "$win"
   check "dx12: release build: swtor.exe's command byte for byte" cmp -s "$FX_DX12_W/args" "$d/args.off"
+  # Mullion's switches at the game's start, on this planted install (dx12-mullion.sh)
+  fx_dx12_mullion_start "$d"
 }
