@@ -20,7 +20,10 @@
 # ones; only here: the real /Library/Logs/DiagnosticReports is never read); d9mt-pin
 # (scripts/check-d9mt-pin.sh on planted trees with a stand-in gh: a pin passes only on d9mt's
 # main with a green Checks run, and no answer from GitHub is "no verdict", never a pass or a
-# fail; only here); self (this
+# fail; only here); d9mt-ab (development builds' scripts/d9mt-ab.sh on a planted install: the
+# air-legacy switch gives the game D9MT_AIR_LEGACY=1 with a shader cache and pipeline archives of
+# its own, kept from start to start; only here, the suite's section 4d checks the other
+# switches); self (this
 # script's own promises, each on a run of its own: a wrong session report fails the checks, a
 # check that starts Wine or the app fails the run, the cleanup removes the root and nothing beside
 # it).
@@ -57,11 +60,13 @@ pass=0 fail=0
 . scripts/fixtures/field-kit.sh
 # shellcheck source=scripts/fixtures/d9mt-pin.sh
 . scripts/fixtures/d9mt-pin.sh
+# shellcheck source=scripts/fixtures/d9mt-ab.sh
+. scripts/fixtures/d9mt-ab.sh
 APP="dist/SWTOR on Mac.app"
 if [ $# -gt 0 ] && [ -d "$1" ]; then APP=$1; shift; fi
 APP="$(cd "$APP" 2>/dev/null && pwd)" || { echo "no app at $APP; run ./build.sh" >&2; exit 1; }
 [ -x "$APP/Contents/Resources/session-report.sh" ] || { echo "no session-report.sh in $APP" >&2; exit 1; }
-FX_ALL="session-report field-kit job-sandbox orphan-as is-launcher eval-exit bridge system-reports d9mt-pin self"
+FX_ALL="session-report field-kit job-sandbox orphan-as is-launcher eval-exit bridge system-reports d9mt-pin d9mt-ab self"
 FX_GROUPS="${*:-$FX_ALL}"
 for g in $FX_GROUPS; do
   case " $FX_ALL " in *" $g "*) ;; *) echo "unknown group $g (groups: $FX_ALL)" >&2; exit 2 ;; esac
@@ -99,6 +104,7 @@ for g in $FX_GROUPS; do
     bridge) fx_bridge "$APP" "$ROOT/bridge" ;;
     system-reports) fx_system_reports "$APP/Contents/Resources/collect-logs.sh" "$ROOT/system-reports" ;;
     d9mt-pin) fx_d9mt_pin "$REPO/scripts/check-d9mt-pin.sh" "$REPO" "$ROOT/d9mt-pin" ;;
+    d9mt-ab) fx_d9mt_ab "$REPO/scripts/d9mt-ab.sh" "$ROOT/d9mt-ab" ;;
     self) fx_self "$REPO/scripts/test-fixtures.sh" "$APP" "$ROOT/self" ;;
   esac
 done

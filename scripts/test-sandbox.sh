@@ -797,6 +797,8 @@ if [ "$CHANNEL" = dev ]; then
   "$AB" flush-cap-off >/dev/null
   check "ab: flush-cap-off: D9MT_FLUSH_CAP=0" eval '[ "$(envv SWTOR_D9MT_AB)/$(envv D9MT_FLUSH_CAP)" = flush-cap-off/0 ]'
   check "ab: flush-cap with flush-cap-off refused, the switches kept" eval '! "$AB" flush-cap flush-cap-off >/dev/null 2>&1 && ! "$AB" flush-cap-off flush-cap >/dev/null 2>&1 && [ "$(envv D9MT_FLUSH_CAP)" = 0 ]'
+  "$AB" air-legacy >/dev/null
+  check "ab: air-legacy: D9MT_AIR_LEGACY=1 with caches of its own" eval '[ "$(envv SWTOR_D9MT_AB)/$(envv D9MT_AIR_LEGACY)" = air-legacy/1 ] && [ "$(envv D9MT_AIR_CACHE)" = "$H/Library/Caches/SWTOR on Mac/d9mt-ab/air-legacy/air-cache.sqlite3" ] && [ "$(envv D9MT_PSO_ARCHIVE_DIR)" = "$H/Library/Caches/SWTOR on Mac/d9mt-ab/air-legacy/pso" ]'
   mkdir -p "$H/Library/Caches/SWTOR on Mac/d9mt-ab/t1"
   check "ab: a cold name used before: warned" eval '"$AB" cold=t1 | grep "used before" >/dev/null'
   "$AB" reset --clean >/dev/null

@@ -43,7 +43,8 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
   setup of your user (SWGL on Mac's too), so Uninstall leaves them; macOS clears that folder
   when it needs the space, and deleting it only costs the stutter of a first start
 - `~/Library/Caches/SWTOR on Mac/d9mt-ab/` – only in development builds, the caches of
-  `d9mt-ab.sh cold=<name>` runs (a release's Reinstall removes them and `d9mt-ab.env`)
+  `d9mt-ab.sh cold=<name>` and `air-legacy` runs (a release's Reinstall removes them and
+  `d9mt-ab.env`)
 - `~/Library/Logs/SWTOR on Mac/` – `install.log`, `rehook.log` (the hook check when the app
   opens), and per game start `wine.log`
   (d9mt warnings; the 4 starts before it as `wine.log.1` to `wine.log.4`), `hold.log`
