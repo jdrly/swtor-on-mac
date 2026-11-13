@@ -36,7 +36,9 @@
   the notice (`shots`), which keys close that alert (`alertkeys`), and what the warp costs (`measure`,
   `sweep`, `findcost`, `idlecheck`, `stillcheck`: CPU, instructions, the GPU time the GPU driver
   counts for the process, frames drawn).
-- `.github/workflows/checks.yml` lints the scripts and builds the app;
+- `.github/workflows/checks.yml` lints the scripts and builds the app; on a pull request into
+  `dx12` it also compiles a development build's window (`SWTOR_ON_MAC_COMPILE_ONLY=1`, which
+  stops after the compile), whose `#if SWTOR_DEV` code the release build leaves out;
   `.github/workflows/release.yml` signs and notarizes on a `v*` tag. Both build on GitHub's
   `xcode-27` image (macOS 27 with Xcode 27, a public preview; there is no `macos-27` label).
 

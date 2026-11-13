@@ -76,6 +76,14 @@ jobs:
       - name: Build
         run: ./build.sh
 
+      # Pull requests into dx12: a development build's window compiles too. The release build
+      # above leaves out its #if SWTOR_DEV code, such as Settings' DirectX 12 section. Only the
+      # compile (unoptimized, with the Sparkle the build above fetched); dist/ stays the release
+      # app. The version only makes it a development build.
+      - name: Development build compiles (dx12)
+        if: github.base_ref == 'dx12'
+        run: SWTOR_ON_MAC_COMPILE_ONLY=1 SWTOR_ON_MAC_VERSION=0.0.1-dev.1 ./build.sh
+
       - name: Check the app
         run: |
           app="dist/SWTOR on Mac.app"
