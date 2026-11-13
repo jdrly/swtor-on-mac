@@ -1974,7 +1974,7 @@ check "dx12: and a swtor_RC2.exe program" test "$(is_game - /Games/SWTOR/retailc
 kill "$g" "$g1" 2>/dev/null || true
 rm -rf "$SANDBOX/usertmp/winetemp-9-8-7-5"
 
-echo "== 17b. DirectX 12 on Mullion: installed over the engine's real dxmt tree and put back, d9mt's bridge untouched, a wrong download or tree refused (scripts/fixtures/dx12-mullion.sh)"
+echo "== 17b. DirectX 12 on Mullion: my fork's build (a stand-in) installed over the engine's real dxmt tree and put back, v0.5-alpha.3's tree switched, d9mt's bridge untouched, a wrong download, VERSION or tree refused (scripts/fixtures/dx12-mullion.sh)"
 fx_dx12_mullion "$APP" "$SANDBOX/dx12-mullion"
 
 echo "== 17c. DirectX 12: D3DMetal from a Game Porting Toolkit image (som.sh dx12-gptk; made-up images, a planted engine, no Wine)"

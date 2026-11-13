@@ -108,6 +108,26 @@ request and the Release workflow before it builds. A pin older than d9mt's CI (b
 passes with a note. Exit status 1 means the pin fails; 2 means GitHub didn't answer or d9mt's run
 hasn't finished, which is no verdict: run it again.
 
+## Mullion pin
+
+Development builds download Mullion, the DirectX 12 driver, from my fork
+[jdrly/mullion](https://github.com/jdrly/mullion): its SWTOR workflow builds every commit pushed
+to the `swtor-on-mac` branch and publishes it to the `swtor-builds` pre-release as
+`mullion-swtor-<commit>.tar.xz`, with a `VERSION` file (the `git describe` line, `commit:`,
+`codegen:`, the toolchain and the run). The pin is the `MULLION_*` block of `src/som.sh`:
+`MULLION_COMMIT`, `MULLION_TITLE`, `MULLION_URL`, `MULLION_API_URL`, `MULLION_SIZE` and
+`MULLION_SHA256` (the workflow's summary prints them), plus `MULLION_FILES` when the archive's
+files change. A new pin is a pull request of its own, with the notices line in
+`THIRD_PARTY_NOTICES.md` and the README's *Pinned components*.
+
+`scripts/check-mullion-pin.sh` checks it: the URL and title name the commit, the commit is on
+the fork's `swtor-on-mac`, the asset at `MULLION_API_URL` has that name, size and sha256, and the
+fork's SWTOR workflow has a green push run of exactly that commit. The Checks workflow runs it on
+every pull request. Its exit statuses are the d9mt pin's. At install, `som.sh` also refuses an
+archive whose `VERSION` names another commit than `MULLION_COMMIT`.
+
+`dx12` pins the fork's `124bfd5`.
+
 `main` pins d9mt `f5439a6`, d9mt main after jdrly/d9mt#190: the driver of 0.1.8, the one
 release that changes the AIR codegen on purpose. Since `1d33ea4` it adds:
 
