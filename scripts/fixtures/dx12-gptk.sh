@@ -71,7 +71,7 @@ fx_gptk_dmg() { # <source folder> <volume name> <image>
 fx_gptk_state() {
   local e="$FX_G_ENG/lib" f
   for f in "$e"/wine/dxgi/gptk/*/* "$e"/external/libd3dshared.dylib "$e"/external/D3DMetal.framework/Versions/A/* \
-           "$e"/external/gptk-import "$e"/external/gptk-import/* "$e"/external/gptk-import/D3DMetal.framework/Versions/A/*; do
+           "$e"/external/gptk-import "$e"/external/gptk-import.new "$e"/external/gptk-import/* "$e"/external/gptk-import/D3DMetal.framework/Versions/A/*; do
     [ -e "$f" ] || [ -L "$f" ] || continue
     if [ -L "$f" ]; then echo "${f#"$e"/} -> $(readlink "$f")"
     elif [ -f "$f" ]; then echo "${f#"$e"/}: $(head -1 "$f")"
@@ -190,6 +190,18 @@ fx_dx12_gptk() {
   fx_gptk dev "$imgs/extra.dmg"
   check "dx12-gptk: a wrong image over an import is refused and leaves the import as it was ($FX_RC)" \
     eval '[ "$FX_RC" != 0 ] && [ "$(fx_gptk_state)" = "$imported" ]'
+
+  # an import that fails halfway, over an import: the engine's own D3DMetal again, and env with it
+  printf '#!/bin/bash\nexit 1\n' >"$d/bin/ditto"
+  chmod 755 "$d/bin/ditto"
+  fx_gptk dev "$good"
+  rm -f "$d/bin/ditto"
+  check "dx12-gptk: a copy that fails over an import: refused, the engine's own D3DMetal again ($FX_RC)" \
+    eval '[ "$FX_RC" != 0 ] && [ "$(fx_gptk_state)" = "$stock" ]'
+  check "dx12-gptk: ...and env names the engine's D3DMetal, no imported libd3dshared" \
+    eval '[ "$(fx_gptk_env SWTOR_DX12_DRIVER_VERSION)/$(fx_gptk_env SWTOR_DX12_LIBD3DSHARED)" = "D3DMetal 4.0b2 (the engine'"'"'s)/<unset>" ]'
+  fx_gptk dev "$good"
+  check "dx12-gptk: imported again after that ($FX_RC)" eval '[ "$FX_RC" = 0 ] && [ "$(fx_gptk_state)" = "$imported" ]'
 
   # gptk_restore (Install calls it), taken from som.sh as the app has it
   # (with som.sh's run and say as plain calls)

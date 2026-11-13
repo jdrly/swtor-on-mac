@@ -1146,8 +1146,12 @@ cmd_dx12_gptk() {
   # the game's files are about to change
   check_not_running
   lock
-  GPTK_TMP=""
-  trap 'gptk_detach; [ -z "$GPTK_TMP" ] || rmdir "$GPTK_TMP" 2>/dev/null || true; rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
+  GPTK_TMP="" GPTK_CHANGING=""
+  # (an import that stops once it has begun to change the engine puts the engine's own D3DMetal
+  # back, and env with it: never half an import, nor env naming files that are gone)
+  trap 'gptk_detach; [ -z "$GPTK_TMP" ] || rmdir "$GPTK_TMP" 2>/dev/null || true
+    [ -z "$GPTK_CHANGING" ] || ( gptk_restore && write_env >/dev/null ) || true
+    rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
   GPTK_TMP=$(mktemp -d "${TMPDIR:-/tmp}/som-gptk.XXXXXX")
 
   gptk_attach "$dmg" "$GPTK_TMP/outer"
@@ -1186,6 +1190,7 @@ cmd_dx12_gptk() {
   if [ -n "$DRY" ]; then echo "[dry-run] D3DMetal $ver from $img into $GPTK_TREE and $GPTK_IMPORT"; return 0; fi
 
   say "Importing D3DMetal $ver from $img"
+  GPTK_CHANGING=1
   gptk_restore
   for n in $GPTK_SHIMS; do
     t=$(gptk_target "$n")
@@ -1208,6 +1213,7 @@ cmd_dx12_gptk() {
   done
   # (with DirectX 12 on: the version for wine.log, the import's libd3dshared for the game)
   write_env >/dev/null
+  GPTK_CHANGING=""
   echo "@done D3DMetal $ver ($img) is in the engine for the DirectX 12 client. Reinstall puts the engine's own back."
 }
 
