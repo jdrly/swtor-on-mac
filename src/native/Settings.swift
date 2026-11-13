@@ -313,7 +313,7 @@ struct SettingsView: View {
       Section {
         Toggle(isOn: settings.toggle("dx12")) {
           Text("DirectX 12 (experimental)")
-          Text(settings.running
+          Text(settings.runing
                ? gameRunningNote
                : "Starts Broadsword's DirectX 12 client (swtor_RC2.exe) instead of the DirectX 9 one.")
         }
