@@ -202,13 +202,12 @@ put() {
     return
   fi
   log "+ write $1"
-  cat >"$1.new.$$"
-  chmod "$2" "$1.new.$$"
-  mv -f "$1.new.$$" "$1"
+  # (chained: where set -e doesn't hold, a failed step still fails it, and nothing is renamed)
+  cat >"$1.new.$$" && chmod "$2" "$1.new.$$" && mv -f "$1.new.$$" "$1"
 }
 
-# copy_atomic <src> <dst> <mode>
-copy_atomic() { run cp "$1" "$2.new.$$"; run chmod "$3" "$2.new.$$"; run mv -f "$2.new.$$" "$2"; }
+# copy_atomic <src> <dst> <mode> (chained as put is)
+copy_atomic() { run cp "$1" "$2.new.$$" && run chmod "$3" "$2.new.$$" && run mv -f "$2.new.$$" "$2"; }
 
 sha256() { shasum -a 256 "$1" | cut -d' ' -f1; }
 is_macho() { [ -f "$1" ] && file -b "$1" 2>/dev/null | grep -q '^Mach-O'; }
@@ -967,7 +966,13 @@ install_mullion() {
   if [ -n "$DRY" ]; then echo "[dry-run] engine's dxmt tree: $([ "$1" = on ] && echo "$MULLION_TITLE" || echo "the engine's own")"; return 0; fi
   [ -d "$t/x86_64-windows" ] || die "The Wine engine has no DXMT tree ($t). Reinstall SWTOR on Mac."
   if [ "$1" != on ]; then
-    if [ -e "$t/.mullion" ]; then run rm -f "$t/.mullion" || die "Could not change $t."; changed=1; fi
+    # the mark first, and an env that no longer starts the game on Mullion, so a restore that
+    # stops halfway never leaves the game on a mixed tree
+    if [ -e "$t/.mullion" ]; then
+      run rm -f "$t/.mullion" || die "Could not change $t."
+      write_env >/dev/null || die "Could not write $SOM/env."
+      changed=1
+    fi
     for e in $ENGINE_DXMT_FILES; do
       f=${e%%:*}
       [ -f "$t/$f.stock" ] && ! cmp -s "$t/$f.stock" "$t/$f" || continue
@@ -1019,7 +1024,7 @@ install_mullion() {
     copy_atomic "$new/$f" "$t/$f" "$mode" || die "Could not install $f into $t."
   done
   run rm -rf "$new"
-  echo "$MULLION_SHA256" | put "$t/.mullion" 644
+  echo "$MULLION_SHA256" | put "$t/.mullion" 644 || die "Could not write $t/.mullion."
 }
 
 # wine <args...> with SWTOR on Mac's engine and prefix (output goes to the log). The engine is

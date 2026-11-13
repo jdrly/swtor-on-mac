@@ -15,10 +15,13 @@ fx_dxm_cached() {
 }
 fx_dxm_val() { sed -n "/^$1=/{s/^$1=//p;q;}" "$2"; }
 # fx_dxm [som.sh's arguments]: the development build's som.sh in the planted sandbox; FX_RC its
-# exit status, $FX_DXM_D/out.txt what it printed
+# exit status, $FX_DXM_D/out.txt what it printed. With FX_DXM_CP_FAIL=<file name>, a cp that
+# copies part of that file and fails, as on a full disk, comes first on the PATH.
 fx_dxm() {
+  local path=$PATH
+  [ -z "${FX_DXM_CP_FAIL:-}" ] || path="$FX_DXM_D/failcp:$PATH"
   FX_RC=0
-  SWTOR_ON_MAC_ROOT="$FX_DXM_D/root" SWTOR_ON_MAC_MULLION_URL="${FX_DXM_URL:-}" \
+  PATH="$path" FX_FAIL="${FX_DXM_CP_FAIL:-}" SWTOR_ON_MAC_ROOT="$FX_DXM_D/root" SWTOR_ON_MAC_MULLION_URL="${FX_DXM_URL:-}" \
     "$FX_DXM_D/dev/Resources/som.sh" "$@" >"$FX_DXM_D/out.txt" 2>&1 || FX_RC=$?
 }
 # fx_dxm_env <variable>: its value in the planted env, or <unset>
@@ -81,6 +84,9 @@ fx_dx12_mullion() {
   echo '{}' >"$FX_DXM_SOM/install-manifest.json"
   printf 'WINE REGISTRY Version 2\n' >"$FX_DXM_SOM/prefix/user.reg"
   tar -xzf "$mullion" -C "$d/rel" --strip-components 1
+  mkdir -p "$d/failcp"
+  printf '#!/bin/bash\ncase "$2" in */"$FX_FAIL".new.*) head -c 1000 "$1" >"$2"; exit 1 ;; esac\nexec %q "$@"\n' "$(command -v cp)" >"$d/failcp/cp"
+  chmod 755 "$d/failcp/cp"
   FX_DXM_REL="$d/rel"
   check "dx12-mullion: the planted tree is the engine's own (its winemetal.so a link to the main tree's)" fx_dxm_stock
 
@@ -114,9 +120,21 @@ fx_dx12_mullion() {
   check "dx12-mullion: back to mullion: the archive kept in the cache is used, not downloaded ($FX_RC)" \
     eval '[ "$FX_RC" = 0 ] && grep -q "using the verified download in the cache" "$d/out.txt" && fx_dxm_mullion'
 
+  # a restore that stops halfway (a copy fails): refused, and env no longer starts the game on
+  # Mullion, whose tree is now mixed
+  FX_DXM_CP_FAIL=d3d11.dll fx_dxm set dx12 off
+  check "dx12-mullion: dx12 off, a copy fails halfway: refused, the mark gone, env starts no DirectX 12 on the mixed tree ($FX_RC)" \
+    eval '[ "$FX_RC" != 0 ] && [ ! -e "$FX_DXM_T/.mullion" ] && [ "$(fx_dxm_env SWTOR_DX12)" = "<unset>" ] && ! grep -q swtor-dx12 "$FX_DXM_SOM/env" && grep -qx dx12=on "$FX_DXM_SOM/settings.conf"'
   fx_dxm set dx12 off
   check "dx12-mullion: dx12 off: the engine's own tree back, no DirectX 12 in env ($FX_RC)" \
     eval '[ "$FX_RC" = 0 ] && fx_dxm_stock && [ "$(fx_dxm_env SWTOR_DX12)" = "<unset>" ] && ! grep -q swtor-dx12 "$FX_DXM_SOM/env"'
+
+  # an install that stops halfway (a copy fails): refused, no mark, no part of a file in place
+  FX_DXM_CP_FAIL=d3d11.dll fx_dxm set dx12 on
+  check "dx12-mullion: dx12 on, a copy fails halfway: refused, no mark, the engine's d3d11.dll, no DirectX 12 in env ($FX_RC)" \
+    eval '[ "$FX_RC" != 0 ] && [ ! -e "$FX_DXM_T/.mullion" ] && cmp -s "$FX_DXM_ORIG/x86_64-windows/d3d11.dll" "$FX_DXM_T/x86_64-windows/d3d11.dll" && [ "$(fx_dxm_env SWTOR_DX12)" = "<unset>" ] && grep -qx dx12=off "$FX_DXM_SOM/settings.conf"'
+  fx_dxm set dx12 off
+  check "dx12-mullion: dx12 off again: the half-installed tree is the engine's own ($FX_RC)" eval '[ "$FX_RC" = 0 ] && fx_dxm_stock'
 
   # a download that isn't the release: refused, nothing changed, and the game starts as before
   rm -rf "$d/root/home/Library/Caches/SWTOR on Mac/downloads"

@@ -41,7 +41,8 @@ sha256 (see `src/som.sh` and the README's *Pinned components*):
 | **Mullion** v0.5-alpha.3 (Direct3D 10, 11 and 12 to Metal, built on [DXMT](https://github.com/3Shain/dxmt); with LLVM). Only development builds download it, when DirectX 12 is on with a Mullion driver | [dttdrv/mullion v0.5-alpha.3](https://github.com/dttdrv/mullion/releases/tag/v0.5-alpha.3), `mullion-v0.5-alpha.3.tar.gz`; source: the tag, commit [`84a3e5e`](https://github.com/dttdrv/mullion/tree/84a3e5e635540d4427634d4adc3cc4a8e6748ba0) | LGPL-2.1-or-later (DXMT's code from its releases up to v0.80 also MIT; LLVM Apache-2.0 WITH LLVM-exception): `LICENSE`, `LICENSE-LLVM.txt` and `licenses/` in the archive |
 | Inside that engine, as athei bundled it: its libraries in `lib/external` (FreeType, GnuTLS, SDL and others), DXMT, mtld3d, x87sidecar and Apple's D3DMetal (Game Porting Toolkit redistributables) | the same release | each component's own license, as published there (`lib/external/D3DMetal-License.rtf`, `x87sidecar-LICENSE`, ...). SWTOR on Mac uses none of the Direct3D backends: the game's Direct3D 9 is d9mt's, and DXGI stays on Wine's wined3d |
 
-The installer changes its copy of the engine in three places (and leaves out its SDK: headers,
+The installer changes its copy of the engine in three places, four in a development build on
+Mullion (and leaves out its SDK: headers,
 Wine's tests, man pages): d9mt's winemetal bridge replaces the engine's `winemetal.so` and its
 placeholder `winemetal.dll`, the bundled `ntdll.so` replaces the engine's (kept as
 `ntdll.so.stock`), and while *Game keys by keyboard position* or *Raw mouse-look* is
