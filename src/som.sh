@@ -966,9 +966,10 @@ install_mullion() {
   if [ -n "$DRY" ]; then echo "[dry-run] engine's dxmt tree: $([ "$1" = on ] && echo "$MULLION_TITLE" || echo "the engine's own")"; return 0; fi
   [ -d "$t/x86_64-windows" ] || die "The Wine engine has no DXMT tree ($t). Reinstall SWTOR on Mac."
   if [ "$1" != on ]; then
-    # the mark first, and an env that no longer starts the game on Mullion, so a restore that
-    # stops halfway never leaves the game on a mixed tree
-    if [ -e "$t/.mullion" ]; then
+    # the mark first, and an env that no longer starts the game on Mullion (also when a try
+    # before stopped after the mark), so a restore that stops halfway never leaves the game on a
+    # mixed tree
+    if [ -e "$t/.mullion" ] || grep -q '^SWTOR_DX12_DRIVER=mullion' "$SOM/env" 2>/dev/null; then
       run rm -f "$t/.mullion" || die "Could not change $t."
       write_env >/dev/null || die "Could not write $SOM/env."
       changed=1
