@@ -3,8 +3,9 @@
 # install: the engine's gptk tree and lib/external as the engine has them (made-up files), and
 # made-up Game Porting Toolkit images in the layout of Apple's 4.0 beta 3 (an outer image with
 # "Evaluation environment for Windows games 4.0 beta 3.dmg" in it, which holds redist/lib). The
-# images are real disk images (hdiutil); codesign is a stand-in that says yes, or no, and notes
-# what it was asked, since the made-up files aren't Apple's. No Wine, no app. Fixture group
+# images are real disk images (hdiutil). The made-up files aren't Apple's: codesign is a
+# stand-in that says yes, or no, and notes what it was asked, and the shims' sha256 list is the
+# made-up ones' (SWTOR_ON_MAC_GPTK_SHIMS), except where a check says otherwise. No Wine, no app. Fixture group
 # dx12-gptk (scripts/test-fixtures.sh), also scripts/test-sandbox.sh's section 17c. Sourced;
 # check and its counters come from lib.sh.
 
@@ -14,12 +15,13 @@ fx_gptk_res() {
   cp "$FX_G_APP/Contents/Resources/som.sh" "$FX_G_D/res-$1/som.sh"
   printf 'version=0.0.0%s\nchannel=%s\n' "$([ "$1" = dev ] && echo -dev.1)" "$1" >"$FX_G_D/res-$1/app.properties"
 }
-# fx_gptk <dev|release> [som.sh's arguments]: som.sh dx12-gptk in the planted sandbox; FX_RC its
-# exit status, $FX_G_D/out.txt what it printed
+# fx_gptk <dev|release> [som.sh's arguments]: som.sh dx12-gptk in the planted sandbox, with the
+# shims' sha256 list in $FX_G_SHIMS; FX_RC its exit status, $FX_G_D/out.txt what it printed
 fx_gptk() {
   local ch=$1; shift
   FX_RC=0
-  PATH="$FX_G_D/bin:$PATH" SWTOR_ON_MAC_ROOT="$FX_G_D/root" "$FX_G_D/res-$ch/som.sh" dx12-gptk "$@" </dev/null >"$FX_G_D/out.txt" 2>&1 || FX_RC=$?
+  PATH="$FX_G_D/bin:$PATH" SWTOR_ON_MAC_ROOT="$FX_G_D/root" SWTOR_ON_MAC_GPTK_SHIMS="$FX_G_SHIMS" \
+    "$FX_G_D/res-$ch/som.sh" dx12-gptk "$@" </dev/null >"$FX_G_D/out.txt" 2>&1 || FX_RC=$?
 }
 # fx_gptk_plist <file> <version>: a framework's Info.plist
 fx_gptk_plist() {
@@ -106,6 +108,8 @@ fx_dx12_gptk() {
     "$imgs/outer/Evaluation environment for Windows games 4.0 beta 3.dmg"
   echo readme >"$imgs/outer/Read Me.pdf"
   fx_gptk_dmg "$imgs/outer" "Game Porting Toolkit 4.0 beta 3" "$imgs/Game_Porting_Toolkit_4.0_beta_3 (1).dmg"
+  FX_G_SHIMS=$(for n in d3d10 d3d11 d3d12 d3d12core dxgi nvapi64 nvngx-on-metalfx; do
+    echo "$n:$(shasum -a 256 "$imgs/eval/redist/lib/wine/x86_64-windows/$n.dll" | cut -d' ' -f1)"; done)
   # a shim beta 3 doesn't have (3.0's atidxx64)
   fx_gptk_eval "$imgs/extra" "atidxx64 d3d10 d3d11 d3d12 d3d12core dxgi nvapi64 nvngx-on-metalfx"
   fx_gptk_dmg "$imgs/extra" "Evaluation environment for Windows games 9.9" \
@@ -125,6 +129,16 @@ fx_dx12_gptk() {
   fx_gptk dev "$imgs/extra.dmg"
   check "dx12-gptk: a shim beta 3 doesn't have is refused and named, nothing changes ($FX_RC)" \
     eval '[ "$FX_RC" != 0 ] && grep -q "x86_64-windows has atidxx64 " "$d/out.txt" && [ "$(fx_gptk_state)" = "$stock" ]'
+  local shims=$FX_G_SHIMS
+  FX_G_SHIMS=$(printf '%s\n' "$shims" | sed 's/^dxgi:.*/dxgi:0000/')
+  fx_gptk dev "$good"
+  check "dx12-gptk: a shim of another build (its sha256) is refused and named, nothing changes ($FX_RC)" \
+    eval '[ "$FX_RC" != 0 ] && grep -q "dxgi.dll is not beta 3'"'"'s build" "$d/out.txt" && [ "$(fx_gptk_state)" = "$stock" ]'
+  FX_G_SHIMS=""
+  fx_gptk dev "$good"
+  check "dx12-gptk: by default the shims must be Apple's beta 3 (the made-up ones are refused), nothing changes ($FX_RC)" \
+    eval '[ "$FX_RC" != 0 ] && grep -q "d3d10.dll is not beta 3'"'"'s build" "$d/out.txt" && [ "$(fx_gptk_state)" = "$stock" ]'
+  FX_G_SHIMS=$shims
   touch "$d/unsigned"
   fx_gptk dev "$good"
   rm -f "$d/unsigned"
@@ -132,10 +146,14 @@ fx_dx12_gptk() {
     eval '[ "$FX_RC" != 0 ] && grep -q "not signed by Apple" "$d/out.txt" && [ "$(fx_gptk_state)" = "$stock" ]'
   # macOS's own codesign: the made-up files aren't Apple's
   FX_RC=0
-  SWTOR_ON_MAC_ROOT="$d/root" "$d/res-dev/som.sh" dx12-gptk "$good" </dev/null >"$d/out.txt" 2>&1 || FX_RC=$?
+  SWTOR_ON_MAC_ROOT="$d/root" SWTOR_ON_MAC_GPTK_SHIMS="$FX_G_SHIMS" "$d/res-dev/som.sh" dx12-gptk "$good" </dev/null >"$d/out.txt" 2>&1 || FX_RC=$?
   check "dx12-gptk: macOS's codesign refuses the made-up files, nothing changes ($FX_RC)" \
     eval '[ "$FX_RC" != 0 ] && grep -q "not signed by Apple" "$d/out.txt" && [ "$(fx_gptk_state)" = "$stock" ]'
-  check "dx12-gptk: the refused images are detached again" eval '! hdiutil info | piped -e "/som-gptk\."'
+  fx_gptk dev "$imgs/plain/Read Me.pdf"
+  check "dx12-gptk: a file that is no disk image is refused, nothing changes ($FX_RC)" \
+    eval '[ "$FX_RC" != 0 ] && grep -q "Could not open Read Me.pdf" "$d/out.txt" && [ "$(fx_gptk_state)" = "$stock" ]'
+  check "dx12-gptk: the refused images are detached again, no mount folder left" \
+    eval '! hdiutil info | piped -e "/som-gptk\." && ! ls -d "${TMPDIR:-/tmp}"/som-gptk.* >/dev/null 2>&1'
 
   rm -f "$d/codesign.txt"
   fx_gptk dev "$good"
@@ -169,7 +187,7 @@ fx_dx12_gptk() {
 
   # gptk_restore (Install calls it), taken from som.sh as the app has it
   # (with som.sh's run and say as plain calls)
-  { printf '%s\n' 'run() { "$@"; }' 'say() { echo "$*"; }'; sed -n '/^gptk_restore() {/,/^}/p' "$d/res-dev/som.sh"; } >"$d/restore.sh"
+  { printf '%s\n' 'run() { "$@"; }' 'say() { echo "$*"; }'; sed -n '/^gptk_link() /p; /^gptk_restore() {/,/^}/p' "$d/res-dev/som.sh"; } >"$d/restore.sh"
   fx_gptk_restore() {
     # shellcheck disable=SC2034 # (gptk_restore reads them)
     ( DRY="" GPTK_TREE="$t" GPTK_IMPORT="$FX_G_ENG/lib/external/gptk-import"
@@ -181,7 +199,8 @@ fx_dx12_gptk() {
   fx_gptk_restore
   check "dx12-gptk: gptk_restore without an import changes nothing and says nothing" \
     eval '[ "$(fx_gptk_state)" = "$stock" ] && [ ! -s "$d/out.txt" ]'
-  # an import that stopped after its record and two shims (one replaced, the added one)
+  # an import that stopped after its record and two shims (one replaced, the added one), with a
+  # backup, a copy and a link it was still writing
   mkdir -p "$FX_G_ENG/lib/external/gptk-import"
   printf 'version=4.0b3\nimage=x\nadded=d3d12core\n' >"$FX_G_ENG/lib/external/gptk-import/IMPORTED"
   cp -p "$t/x86_64-windows/dxgi.dll" "$t/x86_64-windows/dxgi.dll.stock"
@@ -189,6 +208,9 @@ fx_dx12_gptk() {
   echo "MZ gptk d3d12core" >"$t/x86_64-windows/d3d12core.dll"
   ln -sfn ../../../../external/gptk-import/libd3dshared.dylib "$t/x86_64-unix/dxgi.so"
   ln -s ../../../../external/gptk-import/libd3dshared.dylib "$t/x86_64-unix/d3d12core.so"
+  echo "MZ eng" >"$t/x86_64-windows/d3d11.dll.stock.new.123"
+  echo "MZ gp" >"$t/x86_64-windows/d3d11.dll.new.456"
+  ln -s ../../../../external/gptk-import/libd3dshared.dylib "$t/x86_64-unix/d3d11.so.new.789"
   mkdir -p "$FX_G_ENG/lib/external/gptk-import.new"
   fx_gptk_restore
   check "dx12-gptk: gptk_restore after an import that stopped halfway: the engine's own again" \

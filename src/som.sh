@@ -1046,14 +1046,27 @@ install_mullion() {
 # build over a development build) puts the engine's own back; Uninstall removes the engine.
 GPTK_TREE="$ENG/lib/wine/dxgi/gptk"
 GPTK_IMPORT="$ENG/lib/external/gptk-import"
-# The layout gptk_import knows, Game Porting Toolkit 4.0 beta 3's: the downloaded image holds
+# The layout cmd_dx12_gptk knows, Game Porting Toolkit 4.0 beta 3's: the downloaded image holds
 # "Evaluation environment for Windows games <version>.dmg", whose redist/lib has
-# external/libd3dshared.dylib, external/D3DMetal.framework and one shim per name below,
-# wine/x86_64-windows/<name>.dll and wine/x86_64-unix/<name>.so. Beta 3 added d3d12core;
-# nvngx-on-metalfx is the shim this engine (like CrossOver) has as nvngx, the rename Apple's
-# Read Me gives to turn MetalFX on. Any other set of shims is refused.
-GPTK_SHIMS="d3d10 d3d11 d3d12 d3d12core dxgi nvapi64 nvngx-on-metalfx"
+# external/libd3dshared.dylib, external/D3DMetal.framework (both signed by Apple) and one shim
+# per line below, wine/x86_64-windows/<name>.dll and wine/x86_64-unix/<name>.so. Beta 3 added
+# d3d12core; nvngx-on-metalfx is the shim this engine (like CrossOver) has as nvngx, the rename
+# Apple's Read Me gives to turn MetalFX on. The shims are Windows DLLs, which no Apple signature
+# covers, so each must be beta 3's by its sha256 (BCD1210/soju's scripts/get-gptk.sh at bd0d1e3,
+# taken from Apple's image). Any other set of shims, or another build of one, is refused. A test
+# sandbox (SWTOR_ON_MAC_ROOT) may name its own list in SWTOR_ON_MAC_GPTK_SHIMS.
+GPTK_SHIMS_SHA256="d3d10:78c2cd82697dde7081bae72c0ebd82eb41131e7c80b1f99d16ca5f54e5e962e1
+d3d11:39b05a887598697d46225f998354c41582d12b3d35fceb4509df9b2386a10b2e
+d3d12:3174fac027d3ff10971645ac41b665cd53949c87d6d2d7d53b0073bf4bb36981
+d3d12core:8fee579ce538f5a56de72d8ff64dec9d2f018496358069a0216f29a9330ff7fd
+dxgi:d53d9ea91935f0de126ba528264fc4c9b4dfea8bfe43f3f1256bd3e8963d67ee
+nvapi64:de4872e71e6b3f54775b3e564cc487d984c52fec6711bfee250228843ba762d0
+nvngx-on-metalfx:2e522873d2dec412c29f73096f1c1dc6bd8016dc40fd76fbeddd2eb7e226d3cb"
+[ -z "$ROOT" ] || GPTK_SHIMS_SHA256="${SWTOR_ON_MAC_GPTK_SHIMS:-$GPTK_SHIMS_SHA256}"
+GPTK_SHIMS=$(printf '%s\n' "$GPTK_SHIMS_SHA256" | sed 's/:.*//' | tr '\n' ' ')
 gptk_target() { if [ "$1" = nvngx-on-metalfx ]; then echo nvngx; else echo "$1"; fi; }
+# gptk_link <target> <link>: the link replaced in one step (never missing in between)
+gptk_link() { run ln -s "$1" "$2.new.$$"; run mv -f "$2.new.$$" "$2"; }
 # gptk_names <dir> <extension>: what the folder holds, one name a line, sorted, the extension
 # left out (anything else stays as it is, and so doesn't match)
 gptk_names() { ls -A "$1" 2>/dev/null | sed "s/\\.$2\$//" | LC_ALL=C sort; }
@@ -1065,6 +1078,10 @@ gptk_restore() {
   local f n
   [ -d "$GPTK_IMPORT" ] || [ -d "$GPTK_IMPORT.new" ] || return 0
   if [ -n "$DRY" ]; then echo "[dry-run] the engine's own D3DMetal again"; return 0; fi
+  # an interrupted copy, backup or link (<name>.new.<pid>)
+  for f in "$GPTK_TREE"/x86_64-windows/*.new.* "$GPTK_TREE"/x86_64-unix/*.new.*; do
+    if [ -e "$f" ] || [ -L "$f" ]; then run rm -f "$f"; fi
+  done
   for n in $(sed -n 's/^added=//p' "$GPTK_IMPORT/IMPORTED" 2>/dev/null); do
     run rm -f "$GPTK_TREE/x86_64-windows/$n.dll" "$GPTK_TREE/x86_64-unix/$n.so"
   done
@@ -1073,7 +1090,7 @@ gptk_restore() {
   done
   for f in "$GPTK_TREE"/x86_64-unix/*.so; do
     case "$(readlink "$f" 2>/dev/null || true)" in
-      */gptk-import/*) run ln -sfn ../../../../external/libd3dshared.dylib "$f" ;;
+      */gptk-import/*) gptk_link ../../../../external/libd3dshared.dylib "$f" ;;
     esac
   done
   run rm -rf "$GPTK_IMPORT" "$GPTK_IMPORT.new"
@@ -1094,13 +1111,14 @@ gptk_version() {
 # Disk images attached by gptk_import, the last one first, detached when it ends
 GPTK_MOUNTS=""
 gptk_attach() { # <image> <mount point>
+  # (noted first: a failed attach leaves the folder to remove)
+  GPTK_MOUNTS="$2
+$GPTK_MOUNTS"
   mkdir -p "$2"
   # (no -quiet, and the terminal stays its input: an image with Apple's licence agreement shows it
   # and asks there)
   hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$2" "$1" ||
     die "Could not open $(basename "$1") (if it showed Apple's licence agreement, run this again in Terminal and agree). Nothing was changed."
-  GPTK_MOUNTS="$2
-$GPTK_MOUNTS"
 }
 gptk_detach() {
   local m
@@ -1115,7 +1133,7 @@ gptk_detach() {
 # som.sh dx12-gptk <dmg>: D3DMetal from that Game Porting Toolkit image into the engine's gptk
 # tree; an image of another layout is refused before anything changes
 cmd_dx12_gptk() {
-  local dmg="${1:-}" v img lib fw ver id n t f added="" want
+  local dmg="${1:-}" v img lib fw ver id n t f e added="" want
   [ "$CHANNEL" = dev ] || die "Importing D3DMetal is for development builds of SWTOR on Mac only."
   [ -n "$dmg" ] && [ -f "$dmg" ] || die "Usage: som.sh dx12-gptk <the Game Porting Toolkit .dmg from Apple>"
   [ -f "$MANIFEST" ] || die "SWTOR on Mac is not installed."
@@ -1128,8 +1146,9 @@ cmd_dx12_gptk() {
   # the game's files are about to change
   check_not_running
   lock
+  GPTK_TMP=""
+  trap 'gptk_detach; [ -z "$GPTK_TMP" ] || rmdir "$GPTK_TMP" 2>/dev/null || true; rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
   GPTK_TMP=$(mktemp -d "${TMPDIR:-/tmp}/som-gptk.XXXXXX")
-  trap 'gptk_detach; rmdir "$GPTK_TMP" "$SOM/.lock" 2>/dev/null || true' EXIT
 
   gptk_attach "$dmg" "$GPTK_TMP/outer"
   v="$GPTK_TMP/outer"
@@ -1154,8 +1173,9 @@ cmd_dx12_gptk() {
     unknown "redist/lib/wine/x86_64-windows has $(gptk_names "$lib/wine/x86_64-windows" dll | tr '\n' ' ')where it should have $(echo $want)"
   [ "$(gptk_names "$lib/wine/x86_64-unix" so)" = "$want" ] ||
     unknown "redist/lib/wine/x86_64-unix has $(gptk_names "$lib/wine/x86_64-unix" so | tr '\n' ' ')where it should have $(echo $want)"
-  for n in $GPTK_SHIMS; do
-    [ "$(head -c 2 "$lib/wine/x86_64-windows/$n.dll")" = MZ ] || unknown "$n.dll is not a Windows DLL"
+  for e in $GPTK_SHIMS_SHA256; do
+    n=${e%%:*}
+    [ "$(sha256 "$lib/wine/x86_64-windows/$n.dll")" = "${e#*:}" ] || unknown "$n.dll is not beta 3's build"
   done
   id=$(json_get "$fw/Versions/A/Resources/Info.plist" CFBundleIdentifier)
   ver=$(json_get "$fw/Versions/A/Resources/Info.plist" CFBundleShortVersionString)
@@ -1181,9 +1201,10 @@ cmd_dx12_gptk() {
   for n in $GPTK_SHIMS; do
     t=$(gptk_target "$n")
     f="$GPTK_TREE/x86_64-windows/$t.dll"
-    if [ -f "$f" ] && [ ! -f "$f.stock" ]; then run cp -p "$f" "$f.stock"; fi
+    # (the backup complete before it counts: gptk_restore puts every .stock back)
+    if [ -f "$f" ] && [ ! -f "$f.stock" ]; then run cp -p "$f" "$f.stock.new.$$"; run mv -f "$f.stock.new.$$" "$f.stock"; fi
     copy_atomic "$lib/wine/x86_64-windows/$n.dll" "$f" 644
-    run ln -sfn ../../../../external/gptk-import/libd3dshared.dylib "$GPTK_TREE/x86_64-unix/$t.so"
+    gptk_link ../../../../external/gptk-import/libd3dshared.dylib "$GPTK_TREE/x86_64-unix/$t.so"
   done
   echo "@done D3DMetal $ver ($img) is in the engine for the DirectX 12 client. Reinstall puts the engine's own back."
 }
