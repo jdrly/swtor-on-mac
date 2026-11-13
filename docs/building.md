@@ -11,10 +11,16 @@
   the time of `c3f46ce`, which has the same tree: byte for byte the file 0.1.2-dev.2 and dev.3
   were tested with. 0.1.4 pins main `b0d4597` and 0.1.6 main `b532e9c`, each built with its own
   commit time; from `8b22a99` on, `winemetal.so` must come from an LLVM built for macOS 26.0,
-  `otool -l winemetal.so` showing minos 26.0, since d9mt #110's macOS 26 path is in it. From
-  `b532e9c` on, the bridge must also report the AIR cache lineage `AIR_LINEAGE` names
-  (`build/bridge/air-codegen-id.txt`, d9mt ADR-0006), or the script stops: another toolchain
-  that changes the shader compiler's code would make every player recompile their shaders.)
+  `otool -l winemetal.so` showing minos 26.0, since d9mt #110's macOS 26 path is in it. The
+  script sets `MACOSX_DEPLOYMENT_TARGET=26.0` itself and refuses an LLVM built for a newer
+  macOS; d9mt's `scripts/build-llvm-unixside.sh` builds one for 26.0. From `b532e9c` to
+  `1d33ea4` the bridge also had to report the AIR cache lineage 0.1.5.1
+  (`build/bridge/air-codegen-id.txt`, d9mt ADR-0006), or the script stopped: another toolchain
+  that changes the shader compiler's code would make every player recompile their shaders.
+  From `TO-FILL-PIN7` on, the script records the AIR codegen id itself, `AIR_CODEGEN`, and
+  `scripts/air-codegen-guard.sh` stops the build unless that file is one line and the line is,
+  whole, the recorded id's with no lineage, or a later id's with the lineage of `AIR_LINEAGE`'s
+  release. `scripts/build-d9mt.sh --check-air-codegen <file>` runs only that guard.)
 - `build.sh` assembles `dist/SWTOR on Mac.app` with Sparkle (pinned download; ad-hoc signed;
   `--install` copies it to /Applications). Needs Xcode 27 (macOS 27 SDK); the app runs on
   macOS 26 and later.
@@ -100,13 +106,42 @@ request and the Release workflow before it builds. A pin older than d9mt's CI (b
 passes with a note. Exit status 1 means the pin fails; 2 means GitHub didn't answer or d9mt's run
 hasn't finished, which is no verdict: run it again.
 
-`main` pins d9mt `1d33ea4`, d9mt main after jdrly/d9mt#155: the driver of 0.1.7. Since `73511be` (#125, a
-StretchRect sub-rect resolved at its offset) it adds the GPU-fault fixes #133, #135 to #137, #147, #148
+`main` pins d9mt `TO-FILL-PIN7`, d9mt main after jdrly/d9mt#TO-FILL-LASTPR: the driver of 0.1.8, the one
+release that changes the AIR codegen on purpose. Since `1d33ea4` it adds:
+
+- the AIR target per macOS, #167: AIR 2.8 and Metal 4.0 on macOS 26, AIR 2.9 and Metal 4.1 on
+  macOS 27 and later, in the bitcode and in the container. `D9MT_AIR_LEGACY=1` writes 0.1.7's
+  fields, as a support switch;
+- dxbc-spirv at `76236b82` with four d9mt patches, #168;
+- the pixel shader function chosen by each draw's `D3DSHADE_FLAT`, #169;
+- Apple's position-invariance form for SM3 vertex shaders, #172;
+- the fixed-function batch, #173: a flat fragment shader, DXVK's fog, clip plane and
+  DOTPRODUCT3 fixes, the fixed-function vertex shader compiled with `-fpreserve-invariance`, and
+  cube and volume textures in fixed-function stages;
+- Metal's pipeline archives in a folder per AIR identity and AIR target, #174;
+- `D9MT_DEPTH_BIAS_VS=1`, #175, off by default: the constant depth bias applied in the vertex
+  shader on float depth formats;
+- `D3DRS_FILLMODE` sent to Metal, so a wireframe draw is a wireframe, #165;
+- d9mt's own CI and test scripts, #160 and #176 to #190. Of those only #181 touches the build:
+  it lists the codegen's files in byte order, so the AIR codegen id no longer depends on the
+  locale of the shell that starts the build.
+
+#167, #168 and #172 change the AIR codegen, so the bridge reports a new id, `25fc2491…`, with no
+lineage: every player's shaders recompile once after the update to 0.1.8. #175 changes no codegen
+and is off by default. Metal's pipeline archives are rebuilt too, and #174 deletes the folders
+earlier versions left behind on the first start; a folder that a running game still holds stays
+until that game has ended. `scripts/build-d9mt.sh` records the id in `AIR_CODEGEN` and stops a
+build that reports another one (above), because a second new id would make every player
+recompile again. The id doesn't depend on my Mac: GitHub's hosted runner and a rented M1, each
+with Xcode 27.0 and its own LLVM 15.0.7 from d9mt's recipe, build the same one.
+
+`1d33ea4`, d9mt main after jdrly/d9mt#155, was the driver of 0.1.7. Since `73511be` (#125, a
+StretchRect sub-rect resolved at its offset) it added the GPU-fault fixes #133, #135 to #137, #147, #148
 and #151, the DXVK hang fixes #138 and #139, the anti-aliasing compression fix for M1–M4 #140, the
 pipeline descriptor changes #156 and #157, and the diagnostics #134, #141, #154 and #155. The bridge
-changed, but its AIR codegen id is still `38243f7b…` (lineage 0.1.5.1), so players keep 0.1.6's
-shader cache. #156 and #157 change how render pipelines are described to Metal, so Metal's own
-pipeline archive misses once for those pipelines. `b532e9c`, main after jdrly/d9mt#122, keeps
+changed, but its AIR codegen id was still `38243f7b…` (lineage 0.1.5.1), so players kept 0.1.6's
+shader cache. #156 and #157 changed how render pipelines are described to Metal, so Metal's own
+pipeline archive missed once for those pipelines. `b532e9c`, main after jdrly/d9mt#122, keeps
 the shaders players compiled with 0.1.5.1 on macOS 27 (#122: the AIR cache keyed on the shader
 compiler's code, with 0.1.5.1's cache adopted; AIR codegen id `38243f7b…`, lineage 0.1.5.1). It
 brings shaders

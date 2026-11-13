@@ -15,11 +15,18 @@
 # Needs Homebrew bash, mingw-w64, cmake and ninja, and Xcode for the metal compiler.
 # LLVM 15 (x86_64, static) is needed for the bridge; it is not built here:
 #   D9MT_LLVM=<an llvm-x86_64 install prefix built for macOS $MACOS_MIN>
-# (see d9mt's scripts/build-llvm-unixside.sh; SWGL on Mac keeps one in
-# .cache/llvm-macos26/llvm-x86_64).
+# d9mt's scripts/build-llvm-unixside.sh builds one (LLVM 15.0.7, for macOS 26.0 unless
+# MACOSX_DEPLOYMENT_TARGET says otherwise). The deployment target of everything built here is
+# MACOS_MIN below: this script exports it, and refuses an LLVM or a winemetal.so built for a
+# newer macOS. No path on the build machine decides it.
 #
 #   D9MT_SRC=<git url or local clone>  (default: GitHub)
 #   D9MT_WORK=<scratch dir>            (default: /tmp/swtor-on-mac-d9mt)
+#
+#   scripts/build-d9mt.sh --check-air-codegen <air-codegen-id.txt>
+# runs only the AIR codegen guard (scripts/air-codegen-guard.sh) on that file, with the id and
+# the release recorded below, and builds nothing. Fixture group air-codegen tests the guard
+# through it.
 #
 # Every run builds from scratch (d9mt's build does not track header dependencies, jdrly/d9mt#15)
 # after d9mt's scripts/fetch-deps.sh has put its dxbc-spirv checkout at the pin with
@@ -27,17 +34,30 @@
 # reproducible: SOURCE_DATE_EPOCH is the pinned commit's time, and the same D9MT_WORK path gives
 # the same d3d9.dll (its PE image base follows the path: mingw's auto image base).
 set -euo pipefail
+START="$PWD"
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 REPO="${D9MT_SRC:-https://github.com/jdrly/d9mt.git}"
 COMMIT=1d33ea43785a56de329c5ff6583cca65ed3e9cf0
 MACOS_MIN=26.0
-# The AIR cache lineage the bridge must report (d9mt ADR-0006): with it, players keep the shaders
-# compiled by that release. Another Xcode or LLVM that changes the AIR codegen's code gives
-# winemetal.so a new AIR codegen id and every player a full shader recompile, so the build stops.
-AIR_LINEAGE=0.1.5.1
+# The AIR codegen id the bridge must report (d9mt ADR-0006), the identity of the code that
+# compiles the game's shaders. 0.1.8 changes that code on purpose, so this id has no lineage:
+# every player's shaders recompile once after the update. Another Xcode or LLVM that changes the
+# codegen's code would give winemetal.so yet another id and every player one more full recompile,
+# so the build stops unless the bridge reports exactly this id, or a later id that d9mt's lineage
+# table carries back to AIR_LINEAGE's cache.
+AIR_CODEGEN=25fc2491f11d0902328bd623fa12d2d73b7eeebb877e6dfd30d85b78c8e7a6c2
+AIR_LINEAGE=0.1.8
 V="${D9MT_WORK:-/tmp/swtor-on-mac-d9mt}"
 OUT="$ROOT/prebuilt/d9mt"
+case "${1:-}" in
+  "") ;;
+  --check-air-codegen)
+    [ $# = 2 ] || { echo "usage: $0 [--check-air-codegen <air-codegen-id.txt>]" >&2; exit 64; }
+    case $2 in /*) f=$2 ;; *) f=$START/$2 ;; esac   # (the caller's folder, not the repo's)
+    exec "$ROOT/scripts/air-codegen-guard.sh" "$f" "$AIR_CODEGEN" "$AIR_LINEAGE" ;;
+  *) echo "usage: $0 [--check-air-codegen <air-codegen-id.txt>]" >&2; exit 64 ;;
+esac
 export PATH="/opt/homebrew/bin:$PATH"   # the d9mt scripts need bash >= 4.3
 export MACOSX_DEPLOYMENT_TARGET=$MACOS_MIN
 : "${D9MT_LLVM:?set D9MT_LLVM to an llvm-x86_64 install prefix (see the header)}"
@@ -68,11 +88,7 @@ if newer_than_min "$llvm_min"; then
 fi
 echo "[d9mt] bridge"
 SMOKE=0 scripts/build-bridge.sh >build-bridge.log 2>&1 || { tail -20 build-bridge.log; exit 1; }
-if ! grep -q "(lineage $AIR_LINEAGE: " build/bridge/air-codegen-id.txt 2>/dev/null; then
-  echo "winemetal.so's AIR codegen is not lineage $AIR_LINEAGE: $(cat build/bridge/air-codegen-id.txt 2>/dev/null || echo 'no build/bridge/air-codegen-id.txt')" >&2
-  echo "(every player's AIR cache would recompile; build with the toolchain the lineage was proven with)" >&2
-  exit 1
-fi
+"$ROOT/scripts/air-codegen-guard.sh" build/bridge/air-codegen-id.txt "$AIR_CODEGEN" "$AIR_LINEAGE" || exit 1
 echo "[d9mt] driver (x86_64)"
 ARCH=x64 scripts/build-driver.sh >build-driver-x64.log 2>&1 || { tail -20 build-driver-x64.log; exit 1; }
 
