@@ -89,7 +89,7 @@ fx_air_codegen() {
   local cr=$FX_RC
   fx_acg "$d" "AIR codegen $id (no lineage: a\rb)\n"
   local crin=$FX_RC
-  fx_acg "$d" "AIR codegen $id (no lineage:\ta)\n"
+  fx_acg "$d" "AIR codegen $id (no lineage: a\tb)\n"
   check "air-codegen: a carriage return before the line end or inside the text, a tab in the text: refused ($cr, $crin, $FX_RC)" \
     eval '[ "$cr" = 1 ] && [ "$crin" = 1 ] && [ "$FX_RC" = 1 ]'
   fx_acg "$d" "AIR codegen $(printf %s "$id" | tr a-f A-F) ($why)\n"
