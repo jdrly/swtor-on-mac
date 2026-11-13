@@ -11,13 +11,16 @@
 #   AIR codegen <the recorded id> (no lineage: <text>)
 #   AIR codegen <64 hex> (lineage <release>: <text>)
 # The second form is a later toolchain whose id d9mt's lineage table carries back to the
-# release's AIR cache. <text> has no parentheses. Anything else is refused: another id, another
-# release's lineage, the recorded id somewhere inside another line, a second line, no file.
+# release's AIR cache. <text> has no parentheses and no control characters. Anything else is
+# refused: another id, another release's lineage, the recorded id somewhere inside another line,
+# a second line, a NUL byte or another control character anywhere, no file.
 #
 # Exit status: 0 the id is the recorded one; 1 refused, with the built line and the recorded id
 # on stderr; 2 a wrong call. A recorded id that isn't 64 hex digits is a wrong call, so an id
 # nobody filled in passes nothing.
 set -u
+# bytes, not a locale's characters: [0-9a-f] is those sixteen and nothing a collation adds
+export LC_ALL=C
 usage() { echo "usage: $0 <air-codegen-id.txt> <recorded id, 64 hex> <release>" >&2; exit 2; }
 [ $# = 3 ] || usage
 file=$1 id=$2 release=$3
@@ -36,12 +39,16 @@ refuse() {
 }
 
 [ -f "$file" ] || refuse "no $file"
+# A command substitution drops NUL bytes, so a line with one in it would be checked without it:
+# count the bytes with and without them first.
+all=$(wc -c <"$file") && plain=$(tr -d '\000' <"$file" | wc -c) || refuse "$file can't be read"
+[ "$all" -eq "$plain" ] || refuse "$file has NUL bytes"
 # the whole file, less one final newline (the x keeps the others from the command substitution)
 line=$(cat "$file" && echo x) || refuse "$file can't be read"
 line=${line%x}
 line=${line%$'\n'}
 [ -n "$line" ] || refuse "$file is empty"
-case $line in *$'\n'*) refuse "$file has more than one line: $(head -n 1 "$file") […]" ;; esac
-recorded="^AIR codegen $id \\(no lineage: [^()]*\\)\$"
-carried="^AIR codegen [0-9a-f]{64} \\(lineage ${release//./\\.}: [^()]*\\)\$"
+case $line in *$'\n'*) refuse "$file has more than one line, the first: $(head -n 1 "$file")" ;; esac
+recorded="^AIR codegen $id \\(no lineage: [^()[:cntrl:]]*\\)\$"
+carried="^AIR codegen [0-9a-f]{64} \\(lineage ${release//./\\.}: [^()[:cntrl:]]*\\)\$"
 [[ $line =~ $recorded ]] || [[ $line =~ $carried ]] || refuse "$line"

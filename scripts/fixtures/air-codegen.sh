@@ -20,10 +20,17 @@ fx_acg_build() {
   FX_RC=0
   "$FX_ACG_BUILD" --check-air-codegen "$1/id.txt" >"$1/out.txt" 2>&1 || FX_RC=$?
 }
+# fx_acg_args [arguments]: build-d9mt.sh's exit status with them. Without D9MT_LLVM, so that a
+# call the usage check lets through stops before it builds anything
+fx_acg_args() {
+  local rc=0
+  ( unset D9MT_LLVM; "$FX_ACG_BUILD" "$@" >/dev/null 2>&1 ) || rc=$?
+  echo "$rc"
+}
 
 # fx_air_codegen <air-codegen-guard.sh> <build-d9mt.sh> <folder>
 fx_air_codegen() {
-  local d=$3 id other why real lineage changed
+  local d=$3 id other why real lineage changed rcs
   FX_ACG_GUARD=$1 FX_ACG_BUILD=$2
   id=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
   other=fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
@@ -71,6 +78,25 @@ fx_air_codegen() {
     eval '[ "$longer" = 1 ] && [ "$FX_RC" = 1 ]'
   fx_acg "$d" "AIR codegen (lineage 9.9.9: players keep their AIR caches)\n"
   check "air-codegen: a lineage line without an id: refused ($FX_RC)" test "$FX_RC" = 1
+  # bytes a shell drops or a pattern may skip: a NUL (inside the id, the line would read as the
+  # recorded one without it), a carriage return, a tab, capitals
+  fx_acg "$d" "AIR codegen ${id%????}\\000${id#????????????????????????????????????????????????????????????} ($why)\n"
+  local nul=$FX_RC
+  fx_acg "$d" "AIR codegen $id ($why)\n\\000"
+  check "air-codegen: a NUL byte inside the recorded id, or after the line: refused, and the message names it ($nul, $FX_RC)" \
+    eval '[ "$nul" = 1 ] && [ "$FX_RC" = 1 ] && grep -q "has NUL bytes" "$d/out.txt"'
+  fx_acg "$d" "AIR codegen $id ($why)\r\n"
+  local cr=$FX_RC
+  fx_acg "$d" "AIR codegen $id (no lineage: a\rb)\n"
+  local crin=$FX_RC
+  fx_acg "$d" "AIR codegen $id (no lineage:\ta)\n"
+  check "air-codegen: a carriage return before the line end or inside the text, a tab in the text: refused ($cr, $crin, $FX_RC)" \
+    eval '[ "$cr" = 1 ] && [ "$crin" = 1 ] && [ "$FX_RC" = 1 ]'
+  fx_acg "$d" "AIR codegen $(printf %s "$id" | tr a-f A-F) ($why)\n"
+  local caps=$FX_RC
+  fx_acg "$d" "AIR codegen $(printf %s "$other" | tr a-f A-F) (lineage 9.9.9: players keep their AIR caches)\n"
+  check "air-codegen: an id in capitals, with no lineage or with the release's: refused ($caps, $FX_RC)" \
+    eval '[ "$caps" = 1 ] && [ "$FX_RC" = 1 ]'
 
   # a wrong call is neither a pass nor a refusal: an id nobody filled in passes nothing
   printf 'AIR codegen %s (lineage 9.9.9: players keep their AIR caches)\n' "$other" >"$d/id.txt"
@@ -104,4 +130,8 @@ fx_air_codegen() {
   FX_RC=0; "$FX_ACG_BUILD" --check-air-codegen >"$d/out.txt" 2>&1 || FX_RC=$?
   check "air-codegen: build-d9mt.sh reads a relative name in the caller's folder, and without a file it is a wrong call that builds nothing ($rel, $FX_RC)" \
     eval '[ "$rel" = 0 ] && [ "$FX_RC" = 64 ] && grep -q "^usage: " "$d/out.txt"'
+  # (D9MT_LLVM unset: a call that got past the usage check would stop there, with another status)
+  rcs="$(fx_acg_args --bogus) $(fx_acg_args --check-air-codegen "") $(fx_acg_args "" --check-air-codegen) $(fx_acg_args "") $(fx_acg_args "" "") $(fx_acg_args --check-air-codegen "$d/id.txt" more)"
+  check "air-codegen: build-d9mt.sh with an unknown, an empty or a third argument: a wrong call each time ($rcs)" \
+    test "$rcs" = "64 64 64 64 64 64"
 }

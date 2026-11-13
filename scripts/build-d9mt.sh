@@ -50,14 +50,14 @@ AIR_CODEGEN=25fc2491f11d0902328bd623fa12d2d73b7eeebb877e6dfd30d85b78c8e7a6c2
 AIR_LINEAGE=0.1.8
 V="${D9MT_WORK:-/tmp/swtor-on-mac-d9mt}"
 OUT="$ROOT/prebuilt/d9mt"
-case "${1:-}" in
-  "") ;;
-  --check-air-codegen)
-    [ $# = 2 ] || { echo "usage: $0 [--check-air-codegen <air-codegen-id.txt>]" >&2; exit 64; }
-    case $2 in /*) f=$2 ;; *) f=$START/$2 ;; esac   # (the caller's folder, not the repo's)
-    exec "$ROOT/scripts/air-codegen-guard.sh" "$f" "$AIR_CODEGEN" "$AIR_LINEAGE" ;;
-  *) echo "usage: $0 [--check-air-codegen <air-codegen-id.txt>]" >&2; exit 64 ;;
-esac
+if [ $# -gt 0 ]; then
+  if [ $# != 2 ] || [ "$1" != --check-air-codegen ] || [ -z "$2" ]; then
+    echo "usage: $0 [--check-air-codegen <air-codegen-id.txt>]" >&2
+    exit 64
+  fi
+  case $2 in /*) f=$2 ;; *) f=$START/$2 ;; esac   # (the caller's folder, not the repo's)
+  exec "$ROOT/scripts/air-codegen-guard.sh" "$f" "$AIR_CODEGEN" "$AIR_LINEAGE"
+fi
 export PATH="/opt/homebrew/bin:$PATH"   # the d9mt scripts need bash >= 4.3
 export MACOSX_DEPLOYMENT_TARGET=$MACOS_MIN
 : "${D9MT_LLVM:?set D9MT_LLVM to an llvm-x86_64 install prefix (see the header)}"

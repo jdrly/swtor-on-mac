@@ -122,9 +122,9 @@ release that changes the AIR codegen on purpose. Since `1d33ea4` it adds:
 - `D9MT_DEPTH_BIAS_VS=1`, #175, off by default: the constant depth bias applied in the vertex
   shader on float depth formats;
 - `D3DRS_FILLMODE` sent to Metal, so a wireframe draw is a wireframe, #165;
-- d9mt's own CI and test scripts, #160 and #176 to #190. Of those only #181 touches the build:
-  it lists the codegen's files in byte order, so the AIR codegen id no longer depends on the
-  locale of the shell that starts the build.
+- d9mt's own CI and test scripts, #160 and #176 to #190. None of them changes the driver's or
+  the bridge's code. #181 lists the codegen's files in byte order in the bridge's build, so the
+  AIR codegen id no longer depends on the locale of the shell that starts the build.
 
 #167, #168 and #172 change the AIR codegen, so the bridge reports a new id, `25fc2491…`, with no
 lineage: every player's shaders recompile once after the update to 0.1.8. #175 changes no codegen
