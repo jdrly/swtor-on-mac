@@ -187,6 +187,46 @@ session_diag() {
   rm -rf "$d"
 }
 
+# DirectX 12 (Settings, development builds; env has SWTOR_DX12=1): the game's command with
+# Broadsword's DirectX 12 client, swtor_RC2.exe from the same folder, in place of swtor.exe, every
+# other argument as it was. The launcher's path to swtor.exe is a Unix path, or a Windows one
+# (C:\...: found through the prefix's dosdevices). Without swtor_RC2.exe there, swtor.exe as
+# always, and one line in hold.log (only the program's name: the path holds the user's home).
+# Sets game_args (the command to run), game_exe and dx12_note for wine.log.
+dx12_swap() {
+  local a f done=""
+  game_args=() game_exe=swtor.exe dx12_note=""
+  for a in "$@"; do
+    if [ -z "$done" ]; then
+      case "$a" in
+        swtor.exe|*/swtor.exe|*\\swtor.exe)
+          done=1
+          f="${a%swtor.exe}swtor_RC2.exe"
+          case "$f" in
+            [A-Za-z]:*) f="$SWTOR_PREFIX/dosdevices/$(printf '%s' "${f%%:*}" | tr 'A-Z' 'a-z'):${f#?:}" ;;
+          esac
+          if [ -f "${f//\\//}" ]; then
+            a="${a%swtor.exe}swtor_RC2.exe" game_exe=swtor_RC2.exe
+          else
+            dx12_note="swtor_RC2.exe not found next to swtor.exe: starting swtor.exe"
+            printf '%s [wrapper %d] DirectX 12: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" $$ "$dx12_note" >>"$LOG_DIR/hold.log" 2>/dev/null
+          fi ;;
+      esac
+    fi
+    game_args[${#game_args[@]}]=$a
+  done
+  [ "$game_exe" = swtor_RC2.exe ] || return 0
+  # Wine's builtin d3d9 for it, not d9mt: Wine asks WINEDLLOVERRIDES before the registry's
+  # AppDefaults\swtor_RC2.exe, and env gives every process d3d9=n,b
+  export WINEDLLOVERRIDES="d3d9=b"
+  # the driver's switches, for this start only
+  case "$SWTOR_DX12_DRIVER" in
+    gptk-mtl3) export D3DM_MTL4=0 ;;
+  esac
+  # (the DXGI tree as compatdb's swtor-dx12 rule in env names it)
+  dx12_note="swtor_RC2.exe, driver ${SWTOR_DX12_DRIVER:-?} (dxgi=$(printf '%s\n' "$WINE_COMPATDB" | sed -n 's/^name=swtor-dx12;exe=swtor_RC2\.exe;dxgi=//p'))${D3DM_MTL4:+, D3DM_MTL4=$D3DM_MTL4}${SWTOR_DX12_DRIVER_VERSION:+, $SWTOR_DX12_DRIVER_VERSION}"
+}
+
 # wine.log is written anew at every game start: keep the last 4 sessions' as wine.log.1 (the
 # one before) to wine.log.4, so a failed start isn't lost to the next one.
 rotate_wine_log() {
@@ -243,13 +283,16 @@ if [ -n "$SWTOR_ENGINE" ]; then
   esac
   case " $* " in
     *swtor.exe*)
+      # DirectX 12: the command from here on is game_args (swtor_RC2.exe if it is there)
+      game_exe=swtor.exe dx12_note=""
+      if [ "$SWTOR_DX12" = 1 ]; then dx12_swap "$@"; set -- "${game_args[@]}"; fi
       # Debug Logging: Wine debug channels for the game only (RAWMOUSE, THREADCPU lines)
       [ -z "$SWTOR_GAME_WINEDEBUG" ] || export WINEDEBUG="$SWTOR_GAME_WINEDEBUG"
       fps_limit
       flush_cap
       game_lang "$@"
       # (and the locale the game gets: a German one once failed where English worked)
-      { date; env | grep -E '^(WINE|DYLD_|SWTOR_|DXVK_|MTL_|D9MT_|LANG=|LC_)' | sort
+      { date; env | grep -E '^(WINE|DYLD_|SWTOR_|DXVK_|MTL_|D9MT_|D3DM_|MULLION_|LANG=|LC_)' | sort
         echo "game language (from the launcher): $game_lang"; } > "$LOG_DIR/effective-env.txt"
       # Is there a newer SWTOR on Mac? At most once a day, in a detached process (the game
       # does not wait for it; offline it just fails).
@@ -272,6 +315,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
         [ -z "$fps_note" ] || echo "SWTOR on Mac frame rate limit: $fps_note" >&2
         # Fewer GPU Batches, if on (with Debug Logging, d9mt's "flush cap" line follows)
         [ -z "$flush_note" ] || echo "SWTOR on Mac flush cap: $flush_note" >&2
+        # DirectX 12, if on: the client and its driver, or why swtor.exe runs instead
+        [ -z "$dx12_note" ] || echo "SWTOR on Mac DirectX 12: $dx12_note" >&2
         # the game's language and locale (after those: the A/B switches stay the second line)
         echo "SWTOR on Mac game language: $game_lang, LANG=${LANG:-}" >&2
         # the settings, power and thermal state at the start, and the d9mt files' hashes
@@ -291,7 +336,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
       #   lib/wine/x86_64-unix/wine, ntdll uses the links only while WINEDLLPATH is set (to a
       #   harmless value: Wine's own lib/wine), and the first process of a wine command gets
       #   the name "wine": that is the game, unless the command is start.exe /exec <game>,
-      #   whose child gets "swtor.exe". The other name must not point at the bundle.
+      #   whose child gets the game's name (swtor.exe, or swtor_RC2.exe for DirectX 12). The
+      #   other names must not point at the bundle.
       #   CrossOver 24 (0.0.x): the loader is bin/wine-preloader, the game always swtor.exe.
       gm_exe="$SWTOR_GAMEMODE_APP/Contents/MacOS/swtor.exe"
       if [ -f "$SWTOR_ENGINE/bin/wine-preloader" ]; then
@@ -299,15 +345,17 @@ if [ -n "$SWTOR_ENGINE" ]; then
       else
         gm_pre="$SWTOR_ENGINE/lib/wine/x86_64-unix/wine" gm_dllpath="$SWTOR_ENGINE/lib/wine"
         case " $* " in
-          *" start.exe "*|*[/\\]start.exe" "*|*" start "*) gm_name=swtor.exe gm_other=wine ;;
-          *) gm_name=wine gm_other=swtor.exe ;;
+          *" start.exe "*|*[/\\]start.exe" "*|*" start "*) gm_name=$game_exe ;;
+          *) gm_name=wine ;;
         esac
+        gm_other=""
+        for gm_n in wine swtor.exe swtor_RC2.exe; do [ "$gm_n" = "$gm_name" ] || gm_other="$gm_other $gm_n"; done
       fi
       if [ -n "$SWTOR_GAMEMODE_APP" ] && cmp -s "$gm_pre" "$gm_exe" 2>/dev/null; then
         gm_m=$(stat -f '%Fm' "$gm_pre")
         gm_dir="$(getconf DARWIN_USER_TEMP_DIR)winetemp-$(stat -f '%i-%z' "$gm_pre")-${gm_m%.*}-$((10#${gm_m#*.}))"
         if mkdir -p -m 700 "$gm_dir" && ln -sf "$gm_exe" "$gm_dir/$gm_name" 2>>"$LOG_DIR/gamemode.log"; then
-          if [ -n "$gm_other" ] && [ -L "$gm_dir/$gm_other" ]; then rm -f "$gm_dir/$gm_other"; fi
+          for gm_n in $gm_other; do if [ -L "$gm_dir/$gm_n" ]; then rm -f "$gm_dir/$gm_n"; fi; done
           if [ -n "$gm_dllpath" ]; then
             export WINEDLLPATH="$gm_dllpath"
             echo "WINEDLLPATH=$WINEDLLPATH   (Game Mode)" >>"$LOG_DIR/effective-env.txt"

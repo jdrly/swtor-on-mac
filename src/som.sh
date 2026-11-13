@@ -6,9 +6,9 @@
 #   som.sh uninstall   revert everything (the official install goes back to stock)
 #   som.sh settings    KEY=VALUE lines: the settings (Settings window) and whether they can change
 #   som.sh set K V     change one setting (retina, hud, gamemode, vsync, debug, physkeys,
-#                      rawmouse, fpsbattery, flushcap: on/off; memory: auto/low/medium/high/ultra/unlimited;
+#                      rawmouse, fpsbattery, flushcap, dx12: on/off; memory: auto/low/medium/high/ultra/unlimited;
 #                      updates: on/off; mousespeed: one of MOUSE_SPEEDS; hudpos: one of
-#                      HUD_POSITIONS; fpslimit: one of FPS_LIMITS)
+#                      HUD_POSITIONS; fpslimit: one of FPS_LIMITS; dx12driver: one of DX12_DRIVERS)
 #   som.sh rehook      the app's check when it opens (and before Play SWTOR): hook the wrapper
 #                      back in if a launcher update replaced it; nothing runs while the app
 #                      is closed (no launchd job, no login item)
@@ -232,7 +232,7 @@ wrapper_state() {
 #             launcher, waiting for its last Wine calls; Broadsword's, never ended, keeps
 #             nothing from going ahead
 #   launcher  the official launcher (anything else in its app)
-#   game      the game, swtor.exe (any engine)
+#   game      the game, swtor.exe or its DirectX 12 client swtor_RC2.exe (any engine)
 #   wine      a wineserver of Broadsword's Wine: a Wine session of it is running
 #   bswine    any other process of Broadsword's Wine (without its wineserver: a leftover,
 #             e.g. of a game start while the hook was not active)
@@ -258,7 +258,7 @@ proc_list() {
         (t != "" && index(exe, t)) }
     exe == a "Contents/MacOS/mac_wine" { print "helper", pid, prog; next }
     index(prog, a) || index(exe, a) || (ours && prog ~ /\/Star Wars - The Old Republic Launcher$/) { print "launcher", pid, prog; next }
-    ours && (tolower(prog) ~ /[\/\\]swtor\.exe$/ || tolower(exe) ~ /\/swtor\.exe$/) { print "game", pid, prog; next }
+    ours && (tolower(prog) ~ /[\/\\]swtor(_rc2)?\.exe$/ || tolower(exe) ~ /\/swtor(_rc2)?\.exe$/) { print "game", pid, prog; next }
     index(exe, w) && exe ~ /\/wineserver$/ { print "wine", pid, prog; next }
     index(exe, w) { print "bswine", pid, prog; next }
     exe == s { print "session", pid, prog; next }
@@ -393,17 +393,23 @@ status() {
 #               starts (SWTOR_FPS_LIMIT_BATTERY=1; the wrapper asks pmset once)
 #   flushcap    "Fewer GPU Batches" (experimental): the wrapper sets d9mt's D9MT_FLUSH_CAP=1 for
 #               the game from SWTOR_FLUSH_CAP=1 in the env file (d9mt #113)
+#   dx12        "DirectX 12 (experimental)", development builds only (dx12_on): the wrapper starts
+#               Broadsword's DirectX 12 client, swtor_RC2.exe, instead of swtor.exe
+#   dx12driver  its driver, one of DX12_DRIVERS: gptk (Apple's D3DMetal from the engine, Metal 4
+#               where macOS has it) or gptk-mtl3 (D3DMetal on Metal 3, D3DM_MTL4=0)
 # With physkeys or rawmouse on, the engine's Mac driver is the app's patched build
 # (Resources/wine/), else the engine's own (install_winemac).
-SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery flushcap"
+SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery flushcap dx12 dx12driver"
 MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
 HUD_POSITIONS="topleft topcenter topright centerleft centered centerright bottomleft bottomcenter bottomright"
 FPS_LIMITS="off 30 40 45 60"
+DX12_DRIVERS="gptk gptk-mtl3"
 setting_default() {
   case "$1" in
     retina|gamemode|vsync|updates|rawmouse) echo on ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
-    hud|physkeys|fpslimit|fpsbattery|flushcap) echo off ;;
+    hud|physkeys|fpslimit|fpsbattery|flushcap|dx12) echo off ;;
+    dx12driver) echo gptk ;;
     memory) echo auto ;;
     mousespeed) echo 1 ;;
     hudpos) echo topcenter ;;
@@ -416,11 +422,12 @@ setting_valid() { # <key> <value>
   case "$1:$2" in
     retina:on|retina:off|hud:on|hud:off|gamemode:on|gamemode:off|vsync:on|vsync:off) return 0 ;;
     debug:on|debug:off|updates:on|updates:off|physkeys:on|physkeys:off) return 0 ;;
-    rawmouse:on|rawmouse:off|fpsbattery:on|fpsbattery:off|flushcap:on|flushcap:off) return 0 ;;
+    rawmouse:on|rawmouse:off|fpsbattery:on|fpsbattery:off|flushcap:on|flushcap:off|dx12:on|dx12:off) return 0 ;;
     memory:auto|memory:low|memory:medium|memory:high|memory:ultra|memory:unlimited) return 0 ;;
     mousespeed:*) in_list "$2" "$MOUSE_SPEEDS" && return 0 ;;
     hudpos:*) in_list "$2" "$HUD_POSITIONS" && return 0 ;;
     fpslimit:*) in_list "$2" "$FPS_LIMITS" && return 0 ;;
+    dx12driver:*) in_list "$2" "$DX12_DRIVERS" && return 0 ;;
   esac
   return 1
 }
@@ -428,6 +435,15 @@ setting() { # <key>: its value, or the default
   local v
   v=$(sed -n "s/^$1=//p" "$SETTINGS" 2>/dev/null | tail -1)
   if setting_valid "$1" "$v"; then echo "$v"; else setting_default "$1"; fi
+}
+
+# Is DirectX 12 in effect? Only in a development build: a release build never writes or applies
+# anything of it, whatever settings.conf says (a stale dx12=on there does nothing).
+dx12_on() { [ "$CHANNEL" = dev ] && [ "$(setting dx12)" = on ]; }
+# Is the chosen DirectX 12 driver there to run? (D3DMetal comes with the engine)
+dx12_driver_ok() {
+  case "$(setting dx12driver)" in gptk*) return 0 ;; esac
+  return 1
 }
 
 write_settings() { # [<key> <value>]: settings.conf with every key, one of them changed
@@ -491,9 +507,43 @@ set_reg() {
   mv -f "$reg.new.$$" "$reg"
 }
 
+# DirectX 12's per-program Wine settings, straight in the prefix's user.reg (no Wine may run, as
+# for set_reg). With dx12_on, swtor_RC2.exe gets the values swtor.exe has (the mouse-look fix,
+# game keys by position, raw mouse-look and its speed, ThreadCpuStats) and Wine's builtin d3d9,
+# so d9mt and its Metal bridge stay out of the Direct3D 12 process. Otherwise every
+# AppDefaults\swtor_RC2.exe key goes. (The DllOverrides value only counts without a d3d9 entry in
+# WINEDLLOVERRIDES, which Wine asks first: env has d3d9=n,b for every process, so the wrapper
+# also sets WINEDLLOVERRIDES=d3d9=b for swtor_RC2.exe. That one is what keeps d9mt out.)
+dx12_reg() {
+  local reg="$SOM/prefix/user.reg" k='Software\\Wine\\AppDefaults\\swtor_RC2.exe'
+  if [ -n "$DRY" ]; then echo "[dry-run] DirectX 12's Wine settings for swtor_RC2.exe: $(dx12_on && echo written || echo removed) in $reg"; return; fi
+  if dx12_on; then
+    set_reg "$k\\\\X11 Driver" GrabPointer n
+    set_reg "$k\\\\Mac Driver" PhysicalKeyboard "$([ "$(setting physkeys)" = on ] && echo y || echo n)"
+    set_reg "$k\\\\Mac Driver" RawMouseWhenCursorHidden "$([ "$(setting rawmouse)" = on ] && echo y || echo n)"
+    set_reg "$k\\\\Mac Driver" RawMouseGameControllerScale "$(setting mousespeed)"
+    set_reg "$k\\\\Mac Driver" ThreadCpuStats y
+    set_reg "$k\\\\DllOverrides" d3d9 builtin
+  elif [ -f "$reg" ] && grep -qiF "[$k" "$reg"; then
+    log "+ removing $k from $reg"
+    # every section of that key or below it, up to the next section header, with the blank
+    # line before it (blank lines wait for the next line to say whether they stay)
+    K="[$k" awk 'BEGIN { k = tolower(ENVIRON["K"]) }
+      index($0, "[") == 1 { h = tolower($0); c = substr(h, length(k) + 1, 1); drop = substr(h, 1, length(k)) == k && (c == "]" || c == "\\")
+        if (!drop) { printf "%s", blank; print }
+        blank = ""; next }
+      drop { next }
+      $0 == "" { blank = blank "\n"; next }
+      { printf "%s", blank; blank = ""; print }
+      END { printf "%s", blank }' "$reg" >"$reg.new.$$"
+    mv -f "$reg.new.$$" "$reg"
+  fi
+}
+
 cmd_set() {
   local key="${1:-}" value="${2:-}"
   setting_valid "$key" "$value" || { echo "@error Unknown setting: $key=$value"; exit 2; }
+  case "$key" in dx12|dx12driver) [ "$CHANNEL" = dev ] || die "DirectX 12 is in development builds only." ;; esac
   [ -f "$MANIFEST" ] || die "SWTOR on Mac is not installed."
   # an install from 0.0.x runs on its own engine until Reinstall upgrades it: settings written
   # for this version's engine would break it
@@ -501,7 +551,7 @@ cmd_set() {
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
   log "---- set $key=$value"
   case "$key" in
-    retina|physkeys|rawmouse|mousespeed)
+    retina|physkeys|rawmouse|mousespeed|dx12|dx12driver)
       # Wine keeps the registry in its wineserver and writes it back on exit
       end_leftovers
       ! running_now || die "Quit the SWTOR launcher and the game to change $([ "$key" = retina ] && echo "Retina mode" || echo "this setting")." ;;
@@ -519,6 +569,8 @@ cmd_set() {
     mousespeed) set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' RawMouseGameControllerScale "$value" ;;
   esac
   write_settings "$key" "$value"
+  # (swtor_RC2.exe's values follow swtor.exe's, from the settings just written)
+  case "$key" in physkeys|rawmouse|mousespeed|dx12) dx12_reg ;; esac
   write_env >/dev/null
   write_dxvk_conf
   echo "@done $key=$value. It takes effect the next time the game starts."
@@ -724,12 +776,12 @@ winetemp_link() {
 }
 # The Game Mode links of the engine in place (symlinks only: ntdll's own entries are hard
 # links): "wine" (the game as the first process of the wrapper's wine command) or "swtor.exe"
-# (started through start.exe; CrossOver 24 always), see the wrapper
+# (started through start.exe; CrossOver 24 always; swtor_RC2.exe for DirectX 12), see the wrapper
 remove_gamemode_link() {
   local pre n l
   pre=$(engine_loader "$ENG")
   [ -f "$pre" ] || return 0
-  for n in swtor.exe wine; do
+  for n in swtor.exe swtor_RC2.exe wine; do
     l=$(winetemp_link "$pre" "$n")
     if [ -L "$l" ]; then run rm -f "$l"; say "Removed the Game Mode link $l"; fi
   done
@@ -919,6 +971,7 @@ install_prefix() {
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\DllOverrides' /v d3d9 /t REG_SZ /d native,builtin /f ||
     { stop_wine; die "Wine could not write the settings (details in $LOGS/install.log)."; }
   stop_wine
+  dx12_reg
 
   # Game settings (graphics, UI layouts, key bindings) the official setup already has:
   # this engine runs as Wine user "crossover", so a new prefix starts with a clone of them.
@@ -990,7 +1043,7 @@ EOF
 }
 
 write_env() {
-  local gm hud dbg upd fps notify_log="" ab=""
+  local gm hud dbg upd fps notify_log="" ab="" dx12_rule="" dx12_env="" tree
   say "Writing the settings file $SOM/env"
   gm="SWTOR_GAMEMODE_APP=\"$SOM/gamemode/SWTOR.app\""
   [ "$(setting gamemode)" = on ] || gm="#$gm   (Game Mode is off in Settings)"
@@ -1041,6 +1094,25 @@ SWTOR_ON_MAC_ROOT=\"$ROOT\""
 # shows them), until it resets them
 [ ! -f \"$SOM/d9mt-ab.env\" ] || . \"$SOM/d9mt-ab.env\""
   fi
+  # DirectX 12 (development builds, experimental): a compatdb rule that gives swtor_RC2.exe its
+  # driver's DXGI tree (a rule naming an exe applies after the exe=* ones, whatever the line
+  # order), and the wrapper's switch. Off, env is the same as without the setting.
+  if dx12_on && ! dx12_driver_ok; then
+    dx12_env="
+# DirectX 12 is on in Settings, but driver $(setting dx12driver) is not ready: the game starts as swtor.exe"
+  elif dx12_on; then
+    case "$(setting dx12driver)" in
+      gptk*) tree=gptk ;;
+      mullion*) tree=dxmt ;;
+    esac
+    dx12_rule="
+name=swtor-dx12;exe=swtor_RC2.exe;dxgi=$tree"
+    dx12_env="
+# DirectX 12 (experimental, Settings): the wrapper starts swtor_RC2.exe instead of swtor.exe,
+# on this driver (compatdb's swtor-dx12 rule above names its DXGI tree)
+SWTOR_DX12=1
+SWTOR_DX12_DRIVER=$(setting dx12driver)"
+  fi
   put "$SOM/env" 644 <<EOF
 # SWTOR on Mac $VERSION: settings the Wine wrapper in Broadsword's Wine folder reads at every
 # Wine start. Made from settings.conf by the installer and the app's Settings window, which
@@ -1057,7 +1129,7 @@ SWTOR_ENGINE_NAME=$ENGINE_NAME
 SWTOR_PREFIX="$SOM/prefix"
 SWTOR_D9MT=$D9MT_VERSION
 # the engine's compatdb: DXGI on wined3d for every process (no D3DMetal, no DXMT winemetal)
-WINE_COMPATDB='$ENGINE_COMPATDB'
+WINE_COMPATDB='$ENGINE_COMPATDB$dx12_rule'$dx12_env
 # macOS Game Mode: the game runs from a bundle copy of the engine's loader
 $gm
 SWTOR_LOG_DIR="$LOGS"

@@ -110,7 +110,12 @@ Wine, and macOS leaves the game (a foreground app) and the Wine session running.
   backends): DXGI stays on wined3d, so neither Apple's D3DMetal nor the DXMT tree with its own
   winemetal is used next to d9mt's bridge;
 - with Debug Logging on, sets `WINEDEBUG` to `SWTOR_GAME_WINEDEBUG` (the Mac driver's
-  `THREADCPU` and `RAWMOUSE` lines, game only).
+  `THREADCPU` and `RAWMOUSE` lines, game only);
+- in a development build with *DirectX 12 (experimental)* on, starts the DirectX 12 client,
+  `swtor_RC2.exe`, in place of `swtor.exe`, with Wine's builtin `d3d9` and a compatdb rule that
+  gives it D3DMetal ([Settings](settings.md#directx-12-experimental-development-builds)). The
+  game is then `swtor_RC2.exe` for everything above, for Install's and the settings' check that
+  the game isn't running, and for the window.
 
 Leftover Wine processes are processes of SWTOR on Mac's engine (its loader, or CrossOver's
 `winetemp-<inode>-…` hard links of it, found by their real executable: Wine 11 shows

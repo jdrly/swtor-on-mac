@@ -104,7 +104,8 @@ extension Installer {
     return (apps.first { !isGame($0) }, apps.first(where: { isGame($0) }))
   }
 
-  // The game: its Game Mode bundle, or a swtor.exe program. Launch Services knows the game by
+  // The game: its Game Mode bundle, or a swtor.exe program (or swtor_RC2.exe, its DirectX 12
+  // client). Launch Services knows the game by
   // the path CrossOver starts it from, winetemp-<...>/wine: a link to the Game Mode copy of the
   // engine's loader (.../SWTOR.app/Contents/MacOS/swtor.exe), with no bundle id. Wine rewrites
   // the process's argv[0] to the game's path (.../retailclient/swtor.exe), with Game Mode off too.
@@ -121,7 +122,8 @@ extension Installer {
 
   // (a Unix or a Windows path)
   nonisolated static func isSwtorExe(_ path: String) -> Bool {
-    path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last?.lowercased() == "swtor.exe"
+    let name = path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last?.lowercased()
+    return name == "swtor.exe" || name == "swtor_rc2.exe"
   }
 
   // the file a path ends up at, links resolved

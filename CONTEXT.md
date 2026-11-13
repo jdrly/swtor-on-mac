@@ -21,6 +21,13 @@ _Avoid_: “the SWTOR app” when SWTOR on Mac could be meant.
 Broadsword's login and patching window inside the official app. It starts the game and quits
 about 30 seconds later (README, *Known issues*; docs/how-it-works.md).
 
+**DirectX 12 client**
+`swtor_RC2.exe`, Broadsword's DirectX 12 build of the game, which the patcher puts next to
+`swtor.exe` in `retailclient`. Only the Windows launcher can start it; SWTOR on Mac starts it in
+place of `swtor.exe` with the experimental DirectX 12 setting of development builds
+(docs/settings.md).
+_Avoid_: “DX12 exe”, “RC2”.
+
 **Broadsword's Wine folder**
 `~/Library/Application Support/com.broadsword.swtor/Star Wars - The Old
 Republic/swtor-precompiled/Libraries/Wine`: the official app's Wine, which is also its Wine
