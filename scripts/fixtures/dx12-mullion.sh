@@ -107,7 +107,9 @@ fx_dx12_mullion() {
   mkdir -p "$e/lib/wine/x86_64-unix" "$FX_DXM_SOM/prefix"
   fx_dxm_val ENGINE_SHA256 "$r/som.sh" >"$e/.som-source"
   tar -xJf "$engine" -C "$d/orig" --strip-components 5 wine/lib/wine/dxgi/dxmt
-  tar -xJf "$engine" -C "$e/lib/wine" --strip-components 3 wine/lib/wine/dxgi/dxmt
+  # (and its D3DMetal's Info.plist, which env names on a D3DMetal driver)
+  tar -xJf "$engine" -C "$e" --strip-components 1 wine/lib/wine/dxgi/dxmt \
+    wine/lib/external/D3DMetal.framework/Versions/A/Resources/Info.plist
   FX_DXM_ORIG="$d/orig"
   echo "d9mt's bridge (a stand-in)" >"$e/lib/wine/x86_64-unix/winemetal.so"
   cp "$e/lib/wine/x86_64-unix/winemetal.so" "$d/bridge"
@@ -142,8 +144,9 @@ fx_dx12_mullion() {
   fx_dxm set dx12driver gptk
   check "dx12-mullion: gptk: the engine's own tree back ($FX_RC)" eval '[ "$FX_RC" = 0 ] && fx_dxm_stock'
   check "dx12-mullion: gptk: d9mt's bridge still untouched" cmp -s "$d/bridge" "$e/lib/wine/x86_64-unix/winemetal.so"
-  check "dx12-mullion: gptk: rule dxgi=gptk, no Mullion release named" \
-    eval 'fx_dxm_env WINE_COMPATDB | piped -x "name=swtor-dx12;exe=swtor_RC2.exe;dxgi=gptk" && [ "$(fx_dxm_env SWTOR_DX12_DRIVER_VERSION)" = "<unset>" ]'
+  # (the engine's real D3DMetal.framework Info.plist, planted above: 4.0b2)
+  check "dx12-mullion: gptk: rule dxgi=gptk, the engine's D3DMetal named, not Mullion's release" \
+    eval 'fx_dxm_env WINE_COMPATDB | piped -x "name=swtor-dx12;exe=swtor_RC2.exe;dxgi=gptk" && [ "$(fx_dxm_env SWTOR_DX12_DRIVER_VERSION)" = "D3DMetal 4.0b2 (the engine'"'"'s)" ]'
 
   FX_DXM_URL="http://127.0.0.1:$port/html/${mullion##*/}"
   fx_dxm set dx12driver mullion

@@ -228,6 +228,9 @@ dx12_swap() {
       export MULLION_LOG_PATH="$LOG_DIR" MULLION_DIAG_PATH="$LOG_DIR"
       [ "$SWTOR_DX12_DRIVER" != mullion-mtl3 ] || export MULLION_D3D12_METAL4=0 ;;
   esac
+  # D3DMetal imported by som.sh dx12-gptk: ntdll loads the import's libd3dshared, the one the
+  # gptk tree's links name, not lib/external's (which every other process keeps loading)
+  [ -z "${SWTOR_DX12_LIBD3DSHARED:-}" ] || export CX_APPLEGPTK_LIBD3DSHARED_PATH="$SWTOR_DX12_LIBD3DSHARED"
   # (the DXGI tree as compatdb's swtor-dx12 rule in env names it)
   dx12_note="swtor_RC2.exe, driver ${SWTOR_DX12_DRIVER:-?} (dxgi=$(printf '%s\n' "$WINE_COMPATDB" | sed -n 's/^name=swtor-dx12;exe=swtor_RC2\.exe;dxgi=//p'))${D3DM_MTL4:+, D3DM_MTL4=$D3DM_MTL4}${MULLION_D3D12_METAL4:+, MULLION_D3D12_METAL4=$MULLION_D3D12_METAL4}${SWTOR_DX12_DRIVER_VERSION:+, $SWTOR_DX12_DRIVER_VERSION}"
 }

@@ -33,7 +33,9 @@
 # install with the engine's real dxmt tree and Mullion's pinned archive, both downloaded once
 # into .cache: installed, the engine's files kept and put back, d9mt's bridge untouched, a wrong
 # download or another engine's tree refused, env without DirectX 12 while Mullion isn't in
-# place; also the suite's section 17b); self (this
+# place; also the suite's section 17b); dx12-gptk (development builds' som.sh dx12-gptk:
+# D3DMetal from made-up Game Porting Toolkit images into a planted engine, the wrong ones
+# refused, and gptk_restore; also the suite's section 17c); self (this
 # script's own promises, each on a run of its own: a wrong session report fails the checks, a
 # check that starts Wine or the app fails the run, the cleanup removes the root and nothing beside
 # it).
@@ -78,11 +80,13 @@ pass=0 fail=0
 . scripts/fixtures/dx12.sh
 # shellcheck source=scripts/fixtures/dx12-mullion.sh
 . scripts/fixtures/dx12-mullion.sh
+# shellcheck source=scripts/fixtures/dx12-gptk.sh
+. scripts/fixtures/dx12-gptk.sh
 APP="dist/SWTOR on Mac.app"
 if [ $# -gt 0 ] && [ -d "$1" ]; then APP=$1; shift; fi
 APP="$(cd "$APP" 2>/dev/null && pwd)" || { echo "no app at $APP; run ./build.sh" >&2; exit 1; }
 [ -x "$APP/Contents/Resources/session-report.sh" ] || { echo "no session-report.sh in $APP" >&2; exit 1; }
-FX_ALL="session-report field-kit job-sandbox orphan-as is-launcher eval-exit bridge system-reports d9mt-pin air-codegen d9mt-ab dx12 dx12-mullion self"
+FX_ALL="session-report field-kit job-sandbox orphan-as is-launcher eval-exit bridge system-reports d9mt-pin air-codegen d9mt-ab dx12 dx12-mullion dx12-gptk self"
 FX_GROUPS="${*:-$FX_ALL}"
 for g in $FX_GROUPS; do
   case " $FX_ALL " in *" $g "*) ;; *) echo "unknown group $g (groups: $FX_ALL)" >&2; exit 2 ;; esac
@@ -124,6 +128,7 @@ for g in $FX_GROUPS; do
     d9mt-ab) fx_d9mt_ab "$REPO/scripts/d9mt-ab.sh" "$ROOT/d9mt-ab" ;;
     dx12) fx_dx12 "$APP" "$ROOT/dx12" ;;
     dx12-mullion) fx_dx12_mullion "$APP" "$ROOT/dx12-mullion" ;;
+    dx12-gptk) fx_dx12_gptk "$APP" "$ROOT/dx12-gptk" ;;
     self) fx_self "$REPO/scripts/test-fixtures.sh" "$APP" "$ROOT/self" ;;
   esac
 done

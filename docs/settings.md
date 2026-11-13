@@ -127,8 +127,35 @@ With the setting on:
   keyboard position*, *Raw mouse-look* and its speed, `ThreadCpuStats`), and follows them when
   they change;
 - `wine.log`'s header names it: `SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion
-  (dxgi=dxmt), Mullion v0.5-alpha.3`, or `driver gptk (dxgi=gptk)`, with `MULLION_D3D12_METAL4=0`
-  or `D3DM_MTL4=0` for a Metal 3 driver.
+  (dxgi=dxmt), Mullion v0.5-alpha.3`, or `driver gptk (dxgi=gptk), D3DMetal 4.0b2 (the
+  engine's)`, with `MULLION_D3D12_METAL4=0` or `D3DM_MTL4=0` for a Metal 3 driver. The D3DMetal
+  comes from the framework's `Info.plist`, or from the import (see below).
 
 Off, `env` is the same as without the setting, and the `AppDefaults\swtor_RC2.exe` keys go.
 Reinstall writes or removes them by the setting too, and Uninstall removes the prefix with them.
+
+### D3DMetal from a Game Porting Toolkit (DirectX 12, development builds)
+
+The engine carries Apple's D3DMetal from Game Porting Toolkit 4.0 beta 2. A development build
+can use a newer one, 4.0 beta 3, for the DirectX 12 client. You download the toolkit from
+Apple yourself. SWTOR on Mac never downloads, bundles or uploads Apple's files. With the
+launcher and the game closed, run in Terminal:
+
+```sh
+"/Applications/SWTOR on Mac.app/Contents/Resources/som.sh" dx12-gptk ~/Downloads/Game_Porting_Toolkit_4.0_beta_3.dmg
+```
+
+It opens the image read only, and the evaluation environment image inside it. If Apple's licence
+agreement shows up, it asks you in Terminal. Then it checks the layout before it changes
+anything: `redist/lib` with `libd3dshared.dylib` and `D3DMetal.framework`, both signed by Apple,
+and exactly beta 3's shims (`d3d10`, `d3d11`, `d3d12`, `d3d12core`, `dxgi`, `nvapi64`,
+`nvngx-on-metalfx`). Any other image is refused and nothing changes. The shims replace the
+engine's in `lib/wine/dxgi/gptk` (the engine's stay as `.stock`, and `nvngx-on-metalfx` becomes
+`nvngx`). Apple's two libraries go to `lib/external/gptk-import`, and only the DirectX 12
+client loads them. `lib/external`'s own pair stays as it is, because every Wine process, the
+launcher and the DirectX 9 game included, loads that `libd3dshared.dylib`. The version it
+imported goes into `lib/external/gptk-import/IMPORTED`, and `wine.log` names the D3DMetal each
+DirectX 12 start ran.
+
+Reinstall (and *Update to <version>* after an app update) puts the engine's own D3DMetal back,
+so run the command again after either. Uninstall removes the engine with it.

@@ -25,7 +25,11 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
     Mullion's files in its `lib/wine/dxgi/dxmt` tree: the engine's own kept as `<name>.stock`,
     the tree's `winemetal.so` link to the main tree's file, d9mt's bridge, replaced by Mullion's
     own file, and a `.mullion` mark; all of it goes back when the setting is off or a release
-    build installs)
+    build installs) (and, after a development build's `som.sh dx12-gptk`, D3DMetal from the
+    user's own Game Porting Toolkit image: Apple's shims in the `lib/wine/dxgi/gptk` tree, the
+    engine's own kept as `<name>.stock`, Apple's `libd3dshared.dylib` and `D3DMetal.framework`
+    in `lib/external/gptk-import` with its record `IMPORTED`, and the tree's links pointing
+    there; every install puts the engine's own back)
   - `frameworks/` – only in installs of 0.0.x: the old engine's libraries (removed by the
     Reinstall that upgrades it); `upgrade-backup/` – only while that Reinstall runs
   - `prefix/` – the game's Wine prefix: an APFS clone of Broadsword's, updated for the engine,

@@ -20,6 +20,8 @@
 #   som.sh btm-check [window]  the times macOS ended what the launcher left running because it
 #                      is off in Login Items > App Background Activity, in the
 #                      last <window> (24h): exit 0 found, 1 none, 2 the log could not be read
+#   som.sh dx12-gptk <dmg>  development builds: D3DMetal for the DirectX 12 client from a Game
+#                      Porting Toolkit disk image the user downloaded from Apple (gptk_import)
 #
 # Environment:
 #   SWTOR_ON_MAC_ROOT=/abs/dir  sandbox for tests: the official install, the app's own files,
@@ -853,6 +855,7 @@ install_engine() {
   copy_atomic "$RES/d9mt/winemetal.dll" "$w/x86_64-windows/winemetal.dll" 644
   install_ntdll
   install_winemac "$(winemac_wanted)"
+  gptk_restore
 }
 
 # The engine's ntdll.so (the unix side of ntdll, which every Wine process of the engine loads):
@@ -1028,6 +1031,194 @@ install_mullion() {
   echo "$MULLION_SHA256" | put "$t/.mullion" 644 || die "Could not write $t/.mullion."
 }
 
+# --- D3DMetal from a Game Porting Toolkit (development builds, the DirectX 12 client)
+# The engine's D3DMetal is its gptk DXGI tree (lib/wine/dxgi/gptk: Apple's PE shims in
+# x86_64-windows, links to lib/external/libd3dshared.dylib in x86_64-unix) with lib/external's
+# libd3dshared.dylib and D3DMetal.framework; only swtor_RC2.exe gets that tree (write_env's
+# compatdb rule). som.sh dx12-gptk <dmg> puts a D3DMetal from Apple's Game Porting Toolkit there,
+# from the disk image the user downloaded from Apple: the app never downloads, bundles or uploads
+# Apple's files. lib/external's pair stays the engine's, because CrossOver's ntdll loads that
+# libd3dshared.dylib into every Wine process, the launcher and the DirectX 9 game too (its
+# init_non_native_support, CW HACK 22434). The imported pair goes to a folder of its own
+# (GPTK_IMPORT), the tree's links point there, and the wrapper gives the swtor_RC2.exe start
+# CX_APPLEGPTK_LIBD3DSHARED_PATH to it (SWTOR_DX12_LIBD3DSHARED in env), so that process loads one
+# libd3dshared. The tree's own shims stay as <name>.stock. Install (also Reinstall, and a release
+# build over a development build) puts the engine's own back; Uninstall removes the engine.
+GPTK_TREE="$ENG/lib/wine/dxgi/gptk"
+GPTK_IMPORT="$ENG/lib/external/gptk-import"
+# The layout cmd_dx12_gptk knows, Game Porting Toolkit 4.0 beta 3's: the downloaded image holds
+# "Evaluation environment for Windows games <version>.dmg", whose redist/lib has
+# external/libd3dshared.dylib, external/D3DMetal.framework (both signed by Apple) and one shim
+# per line below, wine/x86_64-windows/<name>.dll and wine/x86_64-unix/<name>.so. Beta 3 added
+# d3d12core; nvngx-on-metalfx is the shim this engine (like CrossOver) has as nvngx, the rename
+# Apple's Read Me gives to turn MetalFX on. The shims are Windows DLLs, which no Apple signature
+# covers, so each must be beta 3's by its sha256 (BCD1210/soju's scripts/get-gptk.sh at bd0d1e3,
+# taken from Apple's image). Any other set of shims, or another build of one, is refused. A test
+# sandbox (SWTOR_ON_MAC_ROOT) may name its own list in SWTOR_ON_MAC_GPTK_SHIMS.
+GPTK_SHIMS_SHA256="d3d10:78c2cd82697dde7081bae72c0ebd82eb41131e7c80b1f99d16ca5f54e5e962e1
+d3d11:39b05a887598697d46225f998354c41582d12b3d35fceb4509df9b2386a10b2e
+d3d12:3174fac027d3ff10971645ac41b665cd53949c87d6d2d7d53b0073bf4bb36981
+d3d12core:8fee579ce538f5a56de72d8ff64dec9d2f018496358069a0216f29a9330ff7fd
+dxgi:d53d9ea91935f0de126ba528264fc4c9b4dfea8bfe43f3f1256bd3e8963d67ee
+nvapi64:de4872e71e6b3f54775b3e564cc487d984c52fec6711bfee250228843ba762d0
+nvngx-on-metalfx:2e522873d2dec412c29f73096f1c1dc6bd8016dc40fd76fbeddd2eb7e226d3cb"
+[ -z "$ROOT" ] || GPTK_SHIMS_SHA256="${SWTOR_ON_MAC_GPTK_SHIMS:-$GPTK_SHIMS_SHA256}"
+GPTK_SHIMS=$(printf '%s\n' "$GPTK_SHIMS_SHA256" | sed 's/:.*//' | tr '\n' ' ')
+gptk_target() { if [ "$1" = nvngx-on-metalfx ]; then echo nvngx; else echo "$1"; fi; }
+# gptk_link <target> <link>: the link replaced in one step (never missing in between)
+gptk_link() { run ln -s "$1" "$2.new.$$" && run mv -f "$2.new.$$" "$2"; }
+# gptk_names <dir> <extension>: what the folder holds, one name a line, sorted, the extension
+# left out (anything else stays as it is, and so doesn't match)
+gptk_names() { ls -A "$1" 2>/dev/null | sed "s/\\.$2\$//" | LC_ALL=C sort; }
+gptk_signed() { codesign --verify --strict ${2:+--deep} -R '=anchor apple' "$1" >/dev/null 2>&1; }
+
+# gptk_restore: the engine's own D3DMetal again (nothing to do without an import). The import's
+# record goes in before the tree changes, so this also undoes an import that stopped halfway.
+# Every step returns on failure by itself (an import's EXIT trap calls this where set -e doesn't
+# act), and the import and its record go last, so a failed restore can be run again (Reinstall).
+gptk_restore() {
+  local f n
+  [ -d "$GPTK_IMPORT" ] || [ -d "$GPTK_IMPORT.new" ] || return 0
+  if [ -n "$DRY" ]; then echo "[dry-run] the engine's own D3DMetal again"; return 0; fi
+  # an interrupted copy, backup or link (<name>.new.<pid>)
+  for f in "$GPTK_TREE"/x86_64-windows/*.new.* "$GPTK_TREE"/x86_64-unix/*.new.*; do
+    if [ -e "$f" ] || [ -L "$f" ]; then run rm -f "$f" || return 1; fi
+  done
+  for n in $(sed -n 's/^added=//p' "$GPTK_IMPORT/IMPORTED" 2>/dev/null); do
+    run rm -f "$GPTK_TREE/x86_64-windows/$n.dll" "$GPTK_TREE/x86_64-unix/$n.so" || return 1
+  done
+  for f in "$GPTK_TREE"/x86_64-windows/*.dll.stock; do
+    if [ -f "$f" ]; then run mv -f "$f" "${f%.stock}" || return 1; fi
+  done
+  for f in "$GPTK_TREE"/x86_64-unix/*.so; do
+    case "$(readlink "$f" 2>/dev/null || true)" in
+      */gptk-import/*) gptk_link ../../../../external/libd3dshared.dylib "$f" || return 1 ;;
+    esac
+  done
+  run rm -rf "$GPTK_IMPORT" "$GPTK_IMPORT.new" || return 1
+  say "D3DMetal: the engine's own again"
+}
+
+# gptk_version: the D3DMetal the gptk tree has, for wine.log (SWTOR_DX12_DRIVER_VERSION)
+gptk_version() {
+  local v
+  if [ -f "$GPTK_IMPORT/IMPORTED" ]; then
+    echo "D3DMetal $(sed -n 's/^version=//p' "$GPTK_IMPORT/IMPORTED") (imported: $(sed -n 's/^image=//p' "$GPTK_IMPORT/IMPORTED"))"
+  else
+    v=$(json_get "$ENG/lib/external/D3DMetal.framework/Versions/A/Resources/Info.plist" CFBundleShortVersionString | tr -cd 'A-Za-z0-9._-')
+    echo "D3DMetal ${v:-unknown} (the engine's)"
+  fi
+}
+
+# Disk images attached by gptk_import, the last one first, detached when it ends
+GPTK_MOUNTS=""
+gptk_attach() { # <image> <mount point>
+  # (noted first: a failed attach leaves the folder to remove)
+  GPTK_MOUNTS="$2
+$GPTK_MOUNTS"
+  mkdir -p "$2"
+  # (no -quiet, and the terminal stays its input: an image with Apple's licence agreement shows it
+  # and asks there)
+  hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$2" "$1" ||
+    die "Could not open $(basename "$1") (if it showed Apple's licence agreement, run this again in Terminal and agree). Nothing was changed."
+}
+gptk_detach() {
+  local m
+  printf '%s' "$GPTK_MOUNTS" | while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    hdiutil detach -quiet "$m" 2>/dev/null || hdiutil detach -quiet -force "$m" 2>/dev/null || true
+    rmdir "$m" 2>/dev/null || true
+  done
+  GPTK_MOUNTS=""
+}
+
+# som.sh dx12-gptk <dmg>: D3DMetal from that Game Porting Toolkit image into the engine's gptk
+# tree; an image of another layout is refused before anything changes
+cmd_dx12_gptk() {
+  local dmg="${1:-}" v img lib fw ver id n t f e added="" want
+  [ "$CHANNEL" = dev ] || die "Importing D3DMetal is for development builds of SWTOR on Mac only."
+  [ -n "$dmg" ] && [ -f "$dmg" ] || die "Usage: som.sh dx12-gptk <the Game Porting Toolkit .dmg from Apple>"
+  [ -f "$MANIFEST" ] || die "SWTOR on Mac is not installed."
+  engine_current || die "Click Reinstall to update SWTOR on Mac to $VERSION (with its new Wine engine) first."
+  [ -f "$GPTK_TREE/x86_64-windows/d3d12.dll" ] && [ -d "$GPTK_TREE/x86_64-unix" ] ||
+    die "The Wine engine has no D3DMetal tree ($GPTK_TREE). Uninstall SWTOR on Mac and install it again."
+  if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
+  # (the image's name only: its path names the user's folders)
+  log "---- dx12-gptk ${dmg##*/}"
+  # the game's files are about to change
+  check_not_running
+  lock
+  GPTK_TMP="" GPTK_CHANGING=""
+  # (an import that stops once it has begun to change the engine puts the engine's own D3DMetal
+  # back, and env with it: never half an import, nor env naming files that are gone)
+  trap 'gptk_detach; [ -z "$GPTK_TMP" ] || rmdir "$GPTK_TMP" 2>/dev/null || true
+    [ -z "$GPTK_CHANGING" ] || ( gptk_restore && write_env >/dev/null ) || true
+    rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
+  GPTK_TMP=$(mktemp -d "${TMPDIR:-/tmp}/som-gptk.XXXXXX")
+
+  gptk_attach "$dmg" "$GPTK_TMP/outer"
+  v="$GPTK_TMP/outer"
+  img=${dmg##*/}
+  # the download holds the evaluation environment's image; that image itself is taken too
+  if [ ! -d "$v/redist/lib" ]; then
+    set -- "$v"/Evaluation\ environment\ for\ Windows\ games\ *.dmg
+    [ $# = 1 ] && [ -f "$1" ] ||
+      die "${dmg##*/} is not a Game Porting Toolkit image this version knows: no single \"Evaluation environment for Windows games\" image at its top. Nothing was changed."
+    img=${1##*/}
+    gptk_attach "$1" "$GPTK_TMP/inner"
+    v="$GPTK_TMP/inner"
+  fi
+  img=$(printf '%s' "${img%.dmg}" | tr -cd 'A-Za-z0-9 ._()-')
+  lib="$v/redist/lib"
+  fw="$lib/external/D3DMetal.framework"
+  unknown() { die "$img is not a Game Porting Toolkit layout this version knows ($1). Nothing was changed."; }
+  [ -f "$lib/external/libd3dshared.dylib" ] && [ -f "$fw/Versions/A/D3DMetal" ] && [ -f "$fw/Versions/A/Resources/Info.plist" ] ||
+    unknown "no redist/lib/external with libd3dshared.dylib and D3DMetal.framework"
+  want=$(printf '%s\n' $GPTK_SHIMS | LC_ALL=C sort)
+  [ "$(gptk_names "$lib/wine/x86_64-windows" dll)" = "$want" ] ||
+    unknown "redist/lib/wine/x86_64-windows has $(gptk_names "$lib/wine/x86_64-windows" dll | tr '\n' ' ')where it should have $(echo $want)"
+  [ "$(gptk_names "$lib/wine/x86_64-unix" so)" = "$want" ] ||
+    unknown "redist/lib/wine/x86_64-unix has $(gptk_names "$lib/wine/x86_64-unix" so | tr '\n' ' ')where it should have $(echo $want)"
+  for e in $GPTK_SHIMS_SHA256; do
+    n=${e%%:*}
+    [ "$(sha256 "$lib/wine/x86_64-windows/$n.dll")" = "${e#*:}" ] || unknown "$n.dll is not beta 3's build"
+  done
+  id=$(json_get "$fw/Versions/A/Resources/Info.plist" CFBundleIdentifier)
+  ver=$(json_get "$fw/Versions/A/Resources/Info.plist" CFBundleShortVersionString)
+  [ "$id" = com.apple.D3DMetal ] || unknown "D3DMetal.framework's identifier is \"$id\""
+  case "$ver" in ''|*[!A-Za-z0-9._-]*) unknown "D3DMetal.framework's version is \"$ver\"" ;; esac
+  gptk_signed "$lib/external/libd3dshared.dylib" && gptk_signed "$fw" deep ||
+    die "$img: libd3dshared.dylib or D3DMetal.framework is not signed by Apple. Nothing was changed."
+  if [ -n "$DRY" ]; then echo "[dry-run] D3DMetal $ver from $img into $GPTK_TREE and $GPTK_IMPORT"; return 0; fi
+
+  say "Importing D3DMetal $ver from $img"
+  GPTK_CHANGING=1
+  gptk_restore
+  for n in $GPTK_SHIMS; do
+    t=$(gptk_target "$n")
+    [ -e "$GPTK_TREE/x86_64-windows/$t.dll" ] || added="$added${added:+ }$t"
+  done
+  run mkdir -p "$GPTK_IMPORT.new"
+  run ditto "$lib/external/libd3dshared.dylib" "$GPTK_IMPORT.new/libd3dshared.dylib"
+  run ditto "$fw" "$GPTK_IMPORT.new/D3DMetal.framework"
+  gptk_signed "$GPTK_IMPORT.new/libd3dshared.dylib" && gptk_signed "$GPTK_IMPORT.new/D3DMetal.framework" deep ||
+    die "The copy of D3DMetal in the engine does not verify. Nothing in the engine's D3DMetal tree was changed."
+  printf 'version=%s\nimage=%s\nadded=%s\n' "$ver" "$img" "$added" | put "$GPTK_IMPORT.new/IMPORTED" 644
+  run mv "$GPTK_IMPORT.new" "$GPTK_IMPORT"
+  for n in $GPTK_SHIMS; do
+    t=$(gptk_target "$n")
+    f="$GPTK_TREE/x86_64-windows/$t.dll"
+    # (the backup complete before it counts: gptk_restore puts every .stock back)
+    if [ -f "$f" ] && [ ! -f "$f.stock" ]; then run cp -p "$f" "$f.stock.new.$$"; run mv -f "$f.stock.new.$$" "$f.stock"; fi
+    copy_atomic "$lib/wine/x86_64-windows/$n.dll" "$f" 644
+    gptk_link ../../../../external/gptk-import/libd3dshared.dylib "$GPTK_TREE/x86_64-unix/$t.so"
+  done
+  # (with DirectX 12 on: the version for wine.log, the import's libd3dshared for the game)
+  write_env >/dev/null
+  GPTK_CHANGING=""
+  echo "@done D3DMetal $ver ($img) is in the engine for the DirectX 12 client. Reinstall puts the engine's own back."
+}
+
 # wine <args...> with SWTOR on Mac's engine and prefix (output goes to the log). The engine is
 # self-contained (no library path); its compatdb rule as in the env file.
 wine_do() {
@@ -1159,7 +1350,7 @@ EOF
 }
 
 write_env() {
-  local gm hud dbg upd fps notify_log="" ab="" dx12_rule="" dx12_env="" tree
+  local gm hud dbg upd fps notify_log="" ab="" dx12_rule="" dx12_env="" tree drv=""
   say "Writing the settings file $SOM/env"
   gm="SWTOR_GAMEMODE_APP=\"$SOM/gamemode/SWTOR.app\""
   [ "$(setting gamemode)" = on ] || gm="#$gm   (Game Mode is off in Settings)"
@@ -1218,7 +1409,14 @@ SWTOR_ON_MAC_ROOT=\"$ROOT\""
 # DirectX 12 is on in Settings, but driver $(setting dx12driver) is not ready: the game starts as swtor.exe"
   elif dx12_on; then
     case "$(setting dx12driver)" in
-      gptk*) tree=gptk ;;
+      gptk*) tree=gptk
+        drv="
+# the D3DMetal in its DXGI tree, which wine.log names
+SWTOR_DX12_DRIVER_VERSION=\"$(gptk_version)\""
+        # D3DMetal from som.sh dx12-gptk: the wrapper has the game's ntdll load the import's
+        # libd3dshared (the one the tree's links name), not lib/external's
+        [ ! -f "$GPTK_IMPORT/IMPORTED" ] || drv="$drv
+SWTOR_DX12_LIBD3DSHARED=\"$GPTK_IMPORT/libd3dshared.dylib\"" ;;
       mullion*) tree=dxmt ;;
     esac
     dx12_rule="
@@ -1227,7 +1425,7 @@ name=swtor-dx12;exe=swtor_RC2.exe;dxgi=$tree"
 # DirectX 12 (experimental, Settings): the wrapper starts swtor_RC2.exe instead of swtor.exe,
 # on this driver (compatdb's swtor-dx12 rule above names its DXGI tree)
 SWTOR_DX12=1
-SWTOR_DX12_DRIVER=$(setting dx12driver)"
+SWTOR_DX12_DRIVER=$(setting dx12driver)$drv"
     # (the driver's release, which wine.log names)
     [ "$tree" != dxmt ] || dx12_env="$dx12_env
 SWTOR_DX12_DRIVER_VERSION=\"$MULLION_TITLE\""
@@ -1948,5 +2146,6 @@ case "${1:-}" in
   end-leftovers) cmd_end_leftovers ;;
   fetch-engine) cmd_fetch_engine ;;
   btm-check) cmd_btm_check "${2:-}" ;;
+  dx12-gptk) cmd_dx12_gptk "${2:-}" ;;
   *) sed -n '2,/^# Environment/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac

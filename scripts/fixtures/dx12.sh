@@ -89,8 +89,8 @@ REG
   cat >"$FX_DX12_SOM/engine/bin/wine" <<STUB
 #!/bin/bash
 printf '%s\n' "\$@" >"$FX_DX12_W/args"
-printf 'WINEDLLOVERRIDES=%s\nD3DM_MTL4=%s\nMULLION_D3D12_METAL4=%s\nMULLION_LOG_PATH=%s\nMULLION_DIAG_PATH=%s\n' "\${WINEDLLOVERRIDES-<unset>}" "\${D3DM_MTL4-<unset>}" \
-  "\${MULLION_D3D12_METAL4-<unset>}" "\${MULLION_LOG_PATH-<unset>}" "\${MULLION_DIAG_PATH-<unset>}" >"$FX_DX12_W/seen"
+printf 'WINEDLLOVERRIDES=%s\nD3DM_MTL4=%s\nMULLION_D3D12_METAL4=%s\nMULLION_LOG_PATH=%s\nMULLION_DIAG_PATH=%s\nCX_APPLEGPTK_LIBD3DSHARED_PATH=%s\n' "\${WINEDLLOVERRIDES-<unset>}" "\${D3DM_MTL4-<unset>}" \
+  "\${MULLION_D3D12_METAL4-<unset>}" "\${MULLION_LOG_PATH-<unset>}" "\${MULLION_DIAG_PATH-<unset>}" "\${CX_APPLEGPTK_LIBD3DSHARED_PATH-<unset>}" >"$FX_DX12_W/seen"
 STUB
   # (hold-launcher's stand-in: no Wine session to start; --run-game <log> <lang> <wine> <args>)
   printf '#!/bin/bash\ncase "$1" in --run-game) shift 3; exec "$@" ;; esac\nexit 0\n' >"$FX_DX12_W/bin-real/hold-launcher"
@@ -131,8 +131,8 @@ STUB
     eval '[ "$(sed -n 1p "$FX_DX12_W/args")" = "C:\\swtor\\retailclient\\swtor_RC2.exe" ] && [ "$(sed 1d "$FX_DX12_W/args")" = "$(sed 1d "$d/args.off")" ]'
   check "dx12: on: Wine's builtin d3d9 for it (d3d9=b), no Metal 3 switch ($(fx_dx12_seen WINEDLLOVERRIDES), $(fx_dx12_seen D3DM_MTL4))" \
     eval '[ "$(fx_dx12_seen WINEDLLOVERRIDES)/$(fx_dx12_seen D3DM_MTL4)" = "d3d9=b/<unset>" ]'
-  check "dx12: on: wine.log names the client, the driver and its tree" \
-    grep -qx "SWTOR on Mac DirectX 12: swtor_RC2.exe, driver gptk (dxgi=gptk)" "$logs/wine.log"
+  check "dx12: on: wine.log names the client, the driver, its tree and the engine's D3DMetal (no Info.plist planted: unknown)" \
+    grep -qx "SWTOR on Mac DirectX 12: swtor_RC2.exe, driver gptk (dxgi=gptk), D3DMetal unknown (the engine's)" "$logs/wine.log"
   check "dx12: on: effective-env.txt has the game's d3d9=b" grep -qx WINEDLLOVERRIDES=d3d9=b "$logs/effective-env.txt"
   fx_dx12_game "$unix"
   check "dx12: on: a Unix path to swtor.exe works the same" \
@@ -146,10 +146,31 @@ STUB
   fx_dx12_som dev set dx12driver gptk-mtl3
   fx_dx12_game "$win"
   check "dx12: driver gptk-mtl3: D3DM_MTL4=0 for the game, the same tree, named in wine.log ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_seen D3DM_MTL4)" = 0 ] && grep -qx "SWTOR on Mac DirectX 12: swtor_RC2.exe, driver gptk-mtl3 (dxgi=gptk), D3DM_MTL4=0" "$logs/wine.log"'
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_seen D3DM_MTL4)" = 0 ] && grep -qx "SWTOR on Mac DirectX 12: swtor_RC2.exe, driver gptk-mtl3 (dxgi=gptk), D3DM_MTL4=0, D3DMetal unknown (the engine'"'"'s)" "$logs/wine.log"'
   fx_dx12_som dev set dx12driver vulkan
   check "dx12: an unknown driver is refused, the setting kept ($FX_RC)" eval '[ "$FX_RC" = 2 ] && grep -qx dx12driver=gptk-mtl3 "$FX_DX12_SOM/settings.conf"'
   fx_dx12_som dev set dx12driver gptk
+
+  # D3DMetal imported by som.sh dx12-gptk (its record planted; the import itself is fixture group
+  # dx12-gptk's): the game's ntdll gets the import's libd3dshared, nothing else does
+  mkdir -p "$FX_DX12_SOM/engine/lib/external/gptk-import"
+  printf 'version=4.0b3\nimage=Evaluation environment for Windows games 4.0 beta 3\nadded=d3d12core\n' >"$FX_DX12_SOM/engine/lib/external/gptk-import/IMPORTED"
+  fx_dx12_som dev set dx12driver gptk
+  fx_dx12_game "$win"
+  check "dx12: imported D3DMetal: the game gets CX_APPLEGPTK_LIBD3DSHARED_PATH to the import's libd3dshared, wine.log names its version ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_seen CX_APPLEGPTK_LIBD3DSHARED_PATH)" = "$FX_DX12_SOM/engine/lib/external/gptk-import/libd3dshared.dylib" ] && grep -qx "SWTOR on Mac DirectX 12: swtor_RC2.exe, driver gptk (dxgi=gptk), D3DMetal 4.0b3 (imported: Evaluation environment for Windows games 4.0 beta 3)" "$logs/wine.log"'
+  "$FX_DX12_W/bin/wine64-preloader" "$FX_DX12_W/bin/wine64" 'C:\windows\system32\reg.exe' query 'HKCU\Software' >/dev/null 2>&1
+  check "dx12: imported D3DMetal: another Wine start keeps lib/external's libd3dshared (no CX_APPLEGPTK_LIBD3DSHARED_PATH)" \
+    test "$(fx_dx12_seen CX_APPLEGPTK_LIBD3DSHARED_PATH)" = "<unset>"
+  mv "$FX_DX12_SOM/prefix/drive_c/swtor/retailclient/swtor_RC2.exe" "$d/swtor_RC2.exe"
+  fx_dx12_game "$win"
+  check "dx12: imported D3DMetal, no swtor_RC2.exe: swtor.exe keeps lib/external's libd3dshared too" \
+    eval 'cmp -s "$FX_DX12_W/args" "$d/args.off" && [ "$(fx_dx12_seen CX_APPLEGPTK_LIBD3DSHARED_PATH)" = "<unset>" ]'
+  mv "$d/swtor_RC2.exe" "$FX_DX12_SOM/prefix/drive_c/swtor/retailclient/swtor_RC2.exe"
+  rm -rf "$FX_DX12_SOM/engine/lib/external/gptk-import"
+  fx_dx12_som dev set dx12driver gptk
+  check "dx12: without an import: no SWTOR_DX12_LIBD3DSHARED in env ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_env SWTOR_DX12_LIBD3DSHARED)" = "<unset>" ]'
 
   # No swtor_RC2.exe next to swtor.exe: swtor.exe as always, and said so
   rm "$FX_DX12_SOM/prefix/drive_c/swtor/retailclient/swtor_RC2.exe"
