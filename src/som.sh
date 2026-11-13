@@ -96,19 +96,26 @@ name=swtor-on-mac;exe=*;dxgi=wined3d'
 # template libraries in $SOM/frameworks): an install over it upgrades the prefix and removes
 # both once it has gone through (upgrade_from_old_engine).
 OLD_ENGINE_SHA256=203f9e9fd6c2cc77e6525d798a434ced326145db34a356355e05659d3445fd1c
-# Mullion, the DirectX 12 driver of development builds (install_mullion): a release archive
-# pinned by size and sha256, downloaded only when DirectX 12 is on with a Mullion driver. Its
-# source is this block: name, URL, size, sha256 and the files taken from it change together.
-MULLION_TITLE="Mullion v0.5-alpha.3"
-MULLION_URL=https://github.com/dttdrv/mullion/releases/download/v0.5-alpha.3/mullion-v0.5-alpha.3.tar.gz
-MULLION_API_URL=https://api.github.com/repos/dttdrv/mullion/releases/assets/735821532
-MULLION_SIZE=38655870
-MULLION_SHA256=b743f2ffcd88392e91f1b52e007137ce897c0ffc4e3376d17218da075b5c646c
-# what of it goes into the engine's dxmt tree (lib/wine/dxgi/dxmt), as the archive's top folder
-# has them (x86_64 only: the engine is x86_64, and Mullion has no 32-bit build)
+# Mullion, the DirectX 12 driver of development builds (install_mullion): a build of my fork,
+# jdrly/mullion, that its SWTOR workflow published to the swtor-builds pre-release, pinned by
+# commit, size and sha256 (the Mullion pin; scripts/check-mullion-pin.sh checks it against the
+# fork's CI), downloaded only when DirectX 12 is on with a Mullion driver. Its source is this
+# block: commit, name, URL, size, sha256 and the files taken from it change together.
+MULLION_COMMIT=124bfd5f3f166b77926abf553649b4a1ccb8b8bf
+MULLION_TITLE="Mullion (jdrly/mullion 124bfd5)"
+MULLION_URL=https://github.com/jdrly/mullion/releases/download/swtor-builds/mullion-swtor-124bfd5f3f166b77926abf553649b4a1ccb8b8bf.tar.xz
+MULLION_API_URL=https://api.github.com/repos/jdrly/mullion/releases/assets/745350848
+MULLION_SIZE=9026716
+MULLION_SHA256=944d5367f0550f4c451eb864da9b63c159f94cbd52b695d2241ac9d4309f7edf
+# what of it goes into the engine's dxmt tree (lib/wine/dxgi/dxmt), as the archive has them
+# (x86_64 only: the engine is x86_64, and Mullion has no 32-bit build)
 MULLION_FILES="x86_64-windows/d3d10core.dll x86_64-windows/d3d11.dll x86_64-windows/d3d12.dll
-x86_64-windows/d3d12core.dll x86_64-windows/dxgi.dll x86_64-windows/nvapi64.dll
-x86_64-windows/nvngx.dll x86_64-windows/winemetal.dll x86_64-unix/winemetal.so"
+x86_64-windows/d3d12core.dll x86_64-windows/dxgi.dll x86_64-windows/winemetal.dll
+x86_64-unix/winemetal.so"
+# Files an earlier Mullion pin put into that tree that this one doesn't have (Mullion
+# v0.5-alpha.3's NVIDIA shims; the engine has none there either): removed when Mullion is
+# installed or taken out
+MULLION_OLD_FILES="x86_64-windows/nvapi64.dll x86_64-windows/nvngx.dll"
 # The engine's own files of that tree which Mullion replaces (<path>:<sha256>), and its
 # x86_64-unix/winemetal.so, a link to the main tree's file, which is d9mt's bridge after install:
 # it is replaced, never written through
@@ -672,11 +679,8 @@ backup_foreign() {
 # for the next try.
 FETCH_TRIES=4
 FETCH_SECOND_TRIES=2
-# is_archive <file>: it starts as an xz archive (the engine) or a gzip one (Mullion) does
-is_archive() {
-  case "$(head -c 6 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" in fd377a585a00|1f8b08*) return 0 ;; esac
-  return 1
-}
+# is_archive <file>: it starts as an xz archive (the engine and Mullion) does
+is_archive() { [ "$(head -c 6 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = fd377a585a00 ]; }
 mb() { echo $((($1 + 524288) / 1048576)); }
 thousands() { echo "$1" | sed -e :a -e 's/^\([0-9]\{1,\}\)\([0-9]\{3\}\)/\1,\2/;ta'; }   # 234978748 -> 234,978,748
 
@@ -952,20 +956,28 @@ mullion_wanted() {
   case "$CHANNEL:$x:$d" in dev:on:mullion*) echo on ;; *) echo off ;; esac
 }
 # mullion_ready: the dxmt tree has this app's Mullion, every file of it in place (its mark,
-# written last)
-mullion_ready() { [ "$(cat "$ENG/lib/wine/dxgi/dxmt/.mullion" 2>/dev/null)" = "$MULLION_SHA256" ]; }
+# written last: the archive's sha256, then the build as its VERSION names it)
+mullion_ready() { [ "$(sed -n 1p "$ENG/lib/wine/dxgi/dxmt/.mullion" 2>/dev/null)" = "$MULLION_SHA256" ]; }
+# mullion_version: the installed build, for wine.log (SWTOR_DX12_DRIVER_VERSION)
+mullion_version() {
+  local v
+  v=$(sed -n 2p "$ENG/lib/wine/dxgi/dxmt/.mullion" 2>/dev/null)
+  echo "$MULLION_TITLE${v:+, $v}"
+}
 
 # install_mullion <on|off>: the engine's dxmt tree, which only the DirectX 12 rule for
 # swtor_RC2.exe gives a process (write_env; the rule for every other process says wined3d). On:
-# Mullion's files from its release archive (downloaded into the cache and verified, MULLION_*),
-# the engine's own kept next to them as <name>.stock, checked by sha256, and the tree's
-# winemetal.so link replaced by Mullion's file, so d9mt's bridge in the main tree stays as it is.
+# Mullion's files from its archive (downloaded into the cache and verified, MULLION_*; its
+# VERSION must name MULLION_COMMIT), the files of an earlier pin it doesn't have gone
+# (MULLION_OLD_FILES), the engine's own kept next to them as <name>.stock, checked by sha256,
+# and the tree's winemetal.so link replaced by Mullion's file, so d9mt's bridge in the main tree
+# stays as it is.
 # Off: the engine's own files back, Mullion's extra ones gone and the link back; nothing to do
 # when the tree never had Mullion. The mark (.mullion) goes first and comes last, so a tree that
 # is half done is never taken for Mullion's (mullion_ready). Fails with die, also where set -e
 # doesn't hold: Install runs it in a subshell and goes on without Mullion (cmd_install).
 install_mullion() {
-  local t="$ENG/lib/wine/dxgi/dxmt" new="$ENG/.mullion.new" e f sha mode changed=""
+  local t="$ENG/lib/wine/dxgi/dxmt" new="$ENG/.mullion.new" e f sha mode v changed=""
   if [ -n "$DRY" ]; then echo "[dry-run] engine's dxmt tree: $([ "$1" = on ] && echo "$MULLION_TITLE" || echo "the engine's own")"; return 0; fi
   if [ "$1" != on ]; then
     # the mark first, and an env that no longer starts the game on Mullion (also when a try
@@ -982,8 +994,9 @@ install_mullion() {
       copy_atomic "$t/$f.stock" "$t/$f" 644 || die "Could not put the engine's $f back in $t."
       changed=1
     done
-    # (Mullion's own files: not the engine's, and not the link, put back below)
-    for f in $MULLION_FILES; do
+    # (Mullion's own files, this pin's and an earlier one's: not the engine's, and not the
+    # link, put back below)
+    for f in $MULLION_FILES $MULLION_OLD_FILES; do
       # shellcheck disable=SC2086 # (the list's lines as words)
       case " $(printf '%s ' $ENGINE_DXMT_FILES)x86_64-unix/winemetal.so: " in *" $f:"*) continue ;; esac
       if [ -e "$t/$f" ]; then run rm -f "$t/$f" || die "Could not remove $t/$f."; changed=1; fi
@@ -1016,19 +1029,30 @@ install_mullion() {
     fetch "$MULLION_URL" "$MULLION_SHA256" "$MULLION_SIZE" "$MULLION_TITLE" "$MULLION_API_URL"
   fi
   say "Installing $MULLION_TITLE (DirectX 12) into the engine's DXMT tree"
-  { run rm -rf "$new" && run mkdir -p "$new" && run tar -xzf "$FETCHED" -C "$new" --strip-components 1; } ||
+  { run rm -rf "$new" && run mkdir -p "$new" && run tar -xJf "$FETCHED" -C "$new"; } ||
     die "Could not unpack $MULLION_TITLE ($FETCHED)."
   for f in $MULLION_FILES; do
     [ -f "$new/$f" ] || die "$MULLION_TITLE's archive has no $f; nothing was changed in the engine."
   done
+  # the fork's build of the pinned commit, as its VERSION says (commit: <40 hex>)
+  v=$(sed -n 's/^commit: //p' "$new/VERSION" 2>/dev/null)
+  [ "$v" = "$MULLION_COMMIT" ] ||
+    die "$MULLION_TITLE's archive is a build of another commit (${v:-its VERSION names none}); nothing was changed in the engine."
+  # (and the build wine.log names: VERSION's git describe line and AIR codegen, in characters
+  # env can hold between quotes)
+  v="$(sed -n 1p "$new/VERSION"), codegen $(sed -n 's/^codegen: //p' "$new/VERSION")"
+  v=$(printf '%s' "$v" | LC_ALL=C tr -cd 'A-Za-z0-9 ,._+-')
   run rm -f "$t/.mullion" || die "Could not change $t."
   for f in $MULLION_FILES; do
     case "$f" in *.so) mode=755 ;; *) mode=644 ;; esac
     # (a new name, then a rename: the link is replaced, d9mt's bridge behind it is not touched)
     copy_atomic "$new/$f" "$t/$f" "$mode" || die "Could not install $f into $t."
   done
+  for f in $MULLION_OLD_FILES; do
+    [ ! -e "$t/$f" ] || run rm -f "$t/$f" || die "Could not remove $t/$f."
+  done
   run rm -rf "$new"
-  echo "$MULLION_SHA256" | put "$t/.mullion" 644 || die "Could not write $t/.mullion."
+  printf '%s\n%s\n' "$MULLION_SHA256" "$v" | put "$t/.mullion" 644 || die "Could not write $t/.mullion."
 }
 
 # --- D3DMetal from a Game Porting Toolkit (development builds, the DirectX 12 client)
@@ -1426,9 +1450,9 @@ name=swtor-dx12;exe=swtor_RC2.exe;dxgi=$tree"
 # on this driver (compatdb's swtor-dx12 rule above names its DXGI tree)
 SWTOR_DX12=1
 SWTOR_DX12_DRIVER=$(setting dx12driver)$drv"
-    # (the driver's release, which wine.log names)
+    # (the driver's build, which wine.log names)
     [ "$tree" != dxmt ] || dx12_env="$dx12_env
-SWTOR_DX12_DRIVER_VERSION=\"$MULLION_TITLE\""
+SWTOR_DX12_DRIVER_VERSION=\"$(mullion_version)\""
   fi
   put "$SOM/env" 644 <<EOF
 # SWTOR on Mac $VERSION: settings the Wine wrapper in Broadsword's Wine folder reads at every

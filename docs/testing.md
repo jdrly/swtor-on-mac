@@ -59,11 +59,16 @@ that script records, so the group fails while that id is missing or is 0.1.7's),
 builds' `d9mt-ab.sh air-legacy` on a planted install (group `d9mt-ab`: the game gets
 `D9MT_AIR_LEGACY=1` with a shader cache and pipeline archives of its own, kept from start to
 start), development builds' Mullion for DirectX 12 (group `dx12-mullion`: `som.sh set` on a
-planted install with the engine's real `dxmt` tree and Mullion's pinned archive, both downloaded
-once into `.cache/`, the archive served by `scripts/fetch-test-server.py`: Mullion installed, the
-engine's files kept as `.stock` and put back, d9mt's bridge behind the tree's `winemetal.so` link
-untouched, a changed download or another engine's tree refused with nothing changed, and `env`
-without DirectX 12 while Mullion isn't in place), development builds' D3DMetal import (group
+planted install with the engine's real `dxmt` tree, downloaded once into `.cache/`, and
+stand-in archives in the layout of my fork's builds, pinned in the test's `som.sh` and served by
+`scripts/fetch-test-server.py`: Mullion installed, `env` naming the build from its `VERSION`, the
+engine's files kept as `.stock` and put back byte for byte, d9mt's bridge behind the tree's
+`winemetal.so` link untouched, a tree left by Mullion v0.5-alpha.3 switched to the fork's build
+or put back with its NVIDIA shims gone, a changed download, an archive whose `VERSION` names
+another commit or another engine's tree refused with nothing changed, and `env` without
+DirectX 12 while Mullion isn't in place), the Mullion pin check (group `mullion-pin`:
+`scripts/check-mullion-pin.sh` with a stand-in `gh` and planted answers, a commit without a green
+push run failing), development builds' D3DMetal import (group
 `dx12-gptk`: `som.sh dx12-gptk` on made-up Game Porting Toolkit images, real disk images made
 with `hdiutil`, into a planted engine, with a stand-in `codesign`: beta 3's layout imported, the
 `.stock` copies and `lib/external` kept, `env` naming the import; another layout, shim, hash or

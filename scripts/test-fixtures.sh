@@ -20,7 +20,9 @@
 # ones; only here: the real /Library/Logs/DiagnosticReports is never read); d9mt-pin
 # (scripts/check-d9mt-pin.sh on planted trees with a stand-in gh: a pin passes only on d9mt's
 # main with a green Checks run, and no answer from GitHub is "no verdict", never a pass or a
-# fail; only here); air-codegen (scripts/air-codegen-guard.sh on planted air-codegen-id.txt
+# fail; only here); mullion-pin (scripts/check-mullion-pin.sh the same way: the Mullion pin
+# passes only on the fork's swtor-on-mac with its pinned asset and a green push run of its SWTOR
+# workflow; only here); air-codegen (scripts/air-codegen-guard.sh on planted air-codegen-id.txt
 # files, and through scripts/build-d9mt.sh --check-air-codegen with the id that script records:
 # the d9mt build passes only on the recorded AIR codegen id or a lineage of this release; only
 # here); d9mt-ab (development builds' scripts/d9mt-ab.sh on a planted install: the
@@ -30,11 +32,12 @@
 # user.reg as a development and as a release build, and the wrapper's swtor_RC2.exe start on a
 # planted install with a stand-in engine; also the suite's section 17); dx12-mullion
 # (development builds' Mullion for DirectX 12, som.sh set on a planted
-# install with the engine's real dxmt tree and Mullion's pinned archive, both downloaded once
-# into .cache: installed, the engine's files kept and put back, d9mt's bridge untouched, a wrong
-# download or another engine's tree refused, env without DirectX 12 while Mullion isn't in
-# place; also the suite's section 17b); dx12-gptk (development builds' som.sh dx12-gptk:
-# D3DMetal from made-up Game Porting Toolkit images into a planted engine, the wrong ones
+# install with the engine's real dxmt tree, downloaded once into .cache, and stand-ins of my
+# fork's archives: installed, named in env from its VERSION, the engine's files kept and put
+# back, d9mt's bridge untouched, v0.5-alpha.3's tree switched to the fork's build, a wrong
+# download, a VERSION of another commit or another engine's tree refused, env without
+# DirectX 12 while Mullion isn't in place; also the suite's section 17b); dx12-gptk
+# (development builds' som.sh dx12-gptk: D3DMetal from made-up Game Porting Toolkit images into a planted engine, the wrong ones
 # refused, and gptk_restore; also the suite's section 17c); self (this
 # script's own promises, each on a run of its own: a wrong session report fails the checks, a
 # check that starts Wine or the app fails the run, the cleanup removes the root and nothing beside
@@ -72,6 +75,8 @@ pass=0 fail=0
 . scripts/fixtures/field-kit.sh
 # shellcheck source=scripts/fixtures/d9mt-pin.sh
 . scripts/fixtures/d9mt-pin.sh
+# shellcheck source=scripts/fixtures/mullion-pin.sh
+. scripts/fixtures/mullion-pin.sh
 # shellcheck source=scripts/fixtures/air-codegen.sh
 . scripts/fixtures/air-codegen.sh
 # shellcheck source=scripts/fixtures/d9mt-ab.sh
@@ -86,7 +91,7 @@ APP="dist/SWTOR on Mac.app"
 if [ $# -gt 0 ] && [ -d "$1" ]; then APP=$1; shift; fi
 APP="$(cd "$APP" 2>/dev/null && pwd)" || { echo "no app at $APP; run ./build.sh" >&2; exit 1; }
 [ -x "$APP/Contents/Resources/session-report.sh" ] || { echo "no session-report.sh in $APP" >&2; exit 1; }
-FX_ALL="session-report field-kit job-sandbox orphan-as is-launcher eval-exit bridge system-reports d9mt-pin air-codegen d9mt-ab dx12 dx12-mullion dx12-gptk self"
+FX_ALL="session-report field-kit job-sandbox orphan-as is-launcher eval-exit bridge system-reports d9mt-pin mullion-pin air-codegen d9mt-ab dx12 dx12-mullion dx12-gptk self"
 FX_GROUPS="${*:-$FX_ALL}"
 for g in $FX_GROUPS; do
   case " $FX_ALL " in *" $g "*) ;; *) echo "unknown group $g (groups: $FX_ALL)" >&2; exit 2 ;; esac
@@ -124,6 +129,7 @@ for g in $FX_GROUPS; do
     bridge) fx_bridge "$APP" "$ROOT/bridge" ;;
     system-reports) fx_system_reports "$APP/Contents/Resources/collect-logs.sh" "$ROOT/system-reports" ;;
     d9mt-pin) fx_d9mt_pin "$REPO/scripts/check-d9mt-pin.sh" "$REPO" "$ROOT/d9mt-pin" ;;
+    mullion-pin) fx_mullion_pin "$REPO/scripts/check-mullion-pin.sh" "$REPO" "$ROOT/mullion-pin" ;;
     air-codegen) fx_air_codegen "$REPO/scripts/air-codegen-guard.sh" "$REPO/scripts/build-d9mt.sh" "$ROOT/air-codegen" ;;
     d9mt-ab) fx_d9mt_ab "$REPO/scripts/d9mt-ab.sh" "$ROOT/d9mt-ab" ;;
     dx12) fx_dx12 "$APP" "$ROOT/dx12" ;;

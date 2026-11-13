@@ -1,7 +1,8 @@
 # Checks every pull request and every push to main: the scripts and workflows lint clean, the
-# d9mt pin is green on d9mt's main, and the app builds. No secrets and read-only access; signing and notarizing happen only in
-# release.yml. (The installer's end-to-end test, scripts/test-sandbox.sh, needs the official
-# SWTOR Mac app installed, so it runs on a developer's Mac, not here; its fixture groups,
+# d9mt pin is green on d9mt's main, the Mullion pin on my fork's swtor-on-mac, and the app
+# builds. No secrets and read-only access; signing and notarizing happen only in release.yml.
+# (The installer's end-to-end test, scripts/test-sandbox.sh, needs the official SWTOR Mac app
+# installed, so it runs on a developer's Mac, not here; its fixture groups,
 # scripts/test-fixtures.sh, need neither that app nor Wine and run here on the built app.)
 name: Checks
 
@@ -56,6 +57,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: scripts/check-d9mt-pin.sh --wait 45
+
+  # The Mullion pin (MULLION_* in src/som.sh) is a commit of my fork's swtor-on-mac branch, its
+  # asset is the one pinned, and the fork's SWTOR workflow has a green push run of that commit:
+  # scripts/check-mullion-pin.sh, the same way as the d9mt pin, with the same exit statuses.
+  mullion-pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The Mullion pin is green on the fork's swtor-on-mac
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/check-mullion-pin.sh --wait 45
 
   build:
     # build.sh needs the macOS 27 SDK. GitHub has no macos-27 label; its macOS 27 image with
@@ -123,22 +140,18 @@ jobs:
           echo "$play"
           grep -q '^unavailable The official SWTOR app was not found' <<<"$play"
 
-      # The pinned downloads the dx12-mullion group tests against (the engine, 235 MB, and
-      # Mullion, 38 MB), in .cache/<sha256>/ where the group keeps them: restored while both pins
-      # stay the same, saved after a run that passed. Only those two folders: the rest of .cache
-      # is build output (compile-check).
+      # The pinned download the dx12-mullion group tests against (the engine, 235 MB; Mullion's
+      # archives there are stand-ins it makes), in .cache/<sha256>/ where the group keeps it:
+      # restored while the pin stays the same, saved after a run that passed. Only that folder:
+      # the rest of .cache is build output (compile-check).
       - name: Pinned downloads for the fixtures
         id: pins
-        run: |
-          echo "engine=$(sed -n 's/^ENGINE_SHA256=//p' src/som.sh)" >>"$GITHUB_OUTPUT"
-          echo "mullion=$(sed -n 's/^MULLION_SHA256=//p' src/som.sh)" >>"$GITHUB_OUTPUT"
+        run: echo "engine=$(sed -n 's/^ENGINE_SHA256=//p' src/som.sh)" >>"$GITHUB_OUTPUT"
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
-            .cache/${{ steps.pins.outputs.engine }}
-            .cache/${{ steps.pins.outputs.mullion }}
-          key: fixtures-${{ steps.pins.outputs.engine }}-${{ steps.pins.outputs.mullion }}
+          path: .cache/${{ steps.pins.outputs.engine }}
+          key: fixtures-${{ steps.pins.outputs.engine }}
 
       # The fixture groups (all of them, with their negative controls) on the packaged app, in a
       # new root of their own; the script removes it after a pass and keeps it after a failure.
