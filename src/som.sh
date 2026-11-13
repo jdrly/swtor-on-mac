@@ -1066,7 +1066,7 @@ nvngx-on-metalfx:2e522873d2dec412c29f73096f1c1dc6bd8016dc40fd76fbeddd2eb7e226d3c
 GPTK_SHIMS=$(printf '%s\n' "$GPTK_SHIMS_SHA256" | sed 's/:.*//' | tr '\n' ' ')
 gptk_target() { if [ "$1" = nvngx-on-metalfx ]; then echo nvngx; else echo "$1"; fi; }
 # gptk_link <target> <link>: the link replaced in one step (never missing in between)
-gptk_link() { run ln -s "$1" "$2.new.$$"; run mv -f "$2.new.$$" "$2"; }
+gptk_link() { run ln -s "$1" "$2.new.$$" && run mv -f "$2.new.$$" "$2"; }
 # gptk_names <dir> <extension>: what the folder holds, one name a line, sorted, the extension
 # left out (anything else stays as it is, and so doesn't match)
 gptk_names() { ls -A "$1" 2>/dev/null | sed "s/\\.$2\$//" | LC_ALL=C sort; }
@@ -1074,26 +1074,28 @@ gptk_signed() { codesign --verify --strict ${2:+--deep} -R '=anchor apple' "$1" 
 
 # gptk_restore: the engine's own D3DMetal again (nothing to do without an import). The import's
 # record goes in before the tree changes, so this also undoes an import that stopped halfway.
+# Every step returns on failure by itself (an import's EXIT trap calls this where set -e doesn't
+# act), and the import and its record go last, so a failed restore can be run again (Reinstall).
 gptk_restore() {
   local f n
   [ -d "$GPTK_IMPORT" ] || [ -d "$GPTK_IMPORT.new" ] || return 0
   if [ -n "$DRY" ]; then echo "[dry-run] the engine's own D3DMetal again"; return 0; fi
   # an interrupted copy, backup or link (<name>.new.<pid>)
   for f in "$GPTK_TREE"/x86_64-windows/*.new.* "$GPTK_TREE"/x86_64-unix/*.new.*; do
-    if [ -e "$f" ] || [ -L "$f" ]; then run rm -f "$f"; fi
+    if [ -e "$f" ] || [ -L "$f" ]; then run rm -f "$f" || return 1; fi
   done
   for n in $(sed -n 's/^added=//p' "$GPTK_IMPORT/IMPORTED" 2>/dev/null); do
-    run rm -f "$GPTK_TREE/x86_64-windows/$n.dll" "$GPTK_TREE/x86_64-unix/$n.so"
+    run rm -f "$GPTK_TREE/x86_64-windows/$n.dll" "$GPTK_TREE/x86_64-unix/$n.so" || return 1
   done
   for f in "$GPTK_TREE"/x86_64-windows/*.dll.stock; do
-    if [ -f "$f" ]; then run mv -f "$f" "${f%.stock}"; fi
+    if [ -f "$f" ]; then run mv -f "$f" "${f%.stock}" || return 1; fi
   done
   for f in "$GPTK_TREE"/x86_64-unix/*.so; do
     case "$(readlink "$f" 2>/dev/null || true)" in
-      */gptk-import/*) gptk_link ../../../../external/libd3dshared.dylib "$f" ;;
+      */gptk-import/*) gptk_link ../../../../external/libd3dshared.dylib "$f" || return 1 ;;
     esac
   done
-  run rm -rf "$GPTK_IMPORT" "$GPTK_IMPORT.new"
+  run rm -rf "$GPTK_IMPORT" "$GPTK_IMPORT.new" || return 1
   say "D3DMetal: the engine's own again"
 }
 

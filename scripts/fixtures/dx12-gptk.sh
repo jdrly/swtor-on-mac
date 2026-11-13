@@ -206,11 +206,21 @@ fx_dx12_gptk() {
   # gptk_restore (Install calls it), taken from som.sh as the app has it
   # (with som.sh's run and say as plain calls)
   { printf '%s\n' 'run() { "$@"; }' 'say() { echo "$*"; }'; sed -n '/^gptk_link() /p; /^gptk_restore() {/,/^}/p' "$d/res-dev/som.sh"; } >"$d/restore.sh"
+  # fx_gptk_restore: FX_RC its exit status
   fx_gptk_restore() {
+    FX_RC=0
     # shellcheck disable=SC2034 # (gptk_restore reads them)
     ( DRY="" GPTK_TREE="$t" GPTK_IMPORT="$FX_G_ENG/lib/external/gptk-import"
-      . "$d/restore.sh"; gptk_restore ) >"$d/out.txt" 2>&1
+      . "$d/restore.sh"; gptk_restore ) >"$d/out.txt" 2>&1 || FX_RC=$?
   }
+  # a restore that can't make a link (a full disk): it says so, and keeps the import and its
+  # record, so no link points at a removed file and it can run again
+  mkdir -p "$d/no-ln"
+  printf '#!/bin/bash\nexit 1\n' >"$d/no-ln/ln"
+  chmod 755 "$d/no-ln/ln"
+  PATH="$d/no-ln:$PATH" fx_gptk_restore
+  check "dx12-gptk: gptk_restore that can't make a link: fails, keeps the import and its record, no link dangles ($FX_RC)" \
+    eval '[ "$FX_RC" != 0 ] && [ -f "$FX_G_ENG/lib/external/gptk-import/IMPORTED" ] && [ -z "$(find "$t/x86_64-unix" -type l ! -exec test -e {} \; -print)" ]'
   fx_gptk_restore
   check "dx12-gptk: gptk_restore: the engine's own D3DMetal again, file for file" \
     eval '[ "$(fx_gptk_state)" = "$stock" ] && grep -qx "D3DMetal: the engine'"'"'s own again" "$d/out.txt"'
