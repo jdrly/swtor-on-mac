@@ -119,7 +119,8 @@ Wine, and macOS leaves the game (a foreground app) and the Wine session running.
   `THREADCPU` and `RAWMOUSE` lines, game only);
 - in a development build with *DirectX 12 (experimental)* on, starts the DirectX 12 client,
   `swtor_RC2.exe`, in place of `swtor.exe`, with Wine's builtin `d3d9` and a compatdb rule that
-  gives it D3DMetal ([Settings](settings.md#directx-12-experimental-development-builds)). The
+  gives it its driver: Mullion (by default, in the DXMT tree) or D3DMetal
+  ([Settings](settings.md#directx-12-experimental-development-builds)). The
   game is then `swtor_RC2.exe` for everything above, for Install's and the settings' check that
   the game isn't running, and for the window.
 
