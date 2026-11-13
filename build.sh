@@ -29,6 +29,11 @@
 #   ./build.sh                 build into dist/, ad-hoc signed
 #   ./build.sh --install       also copy the app to /Applications
 #
+# SWTOR_ON_MAC_COMPILE_ONLY=1 compiles the window (src/native) for the channel of
+# SWTOR_ON_MAC_VERSION into .cache/compile-check and stops, without optimizing and with dist/ left
+# as it is. Checks uses it to compile a development build's #if SWTOR_DEV code next to the
+# release build.
+#
 # Signing for distribution (Developer ID, hardened runtime, notarization) is
 # scripts/release.sh, which re-signs a copy of dist/ inside out.
 set -euo pipefail
@@ -124,6 +129,18 @@ if [ ! -d "$SPARKLE/Sparkle.framework" ]; then
   rm -rf "$SPARKLE" && mv "$SPARKLE.part" "$SPARKLE"
 fi
 
+# The window's compiler flags. Development builds compile their dev-only UI (badge, About line,
+# Settings texts and settings) in with SWTOR_DEV; a release binary has none of it.
+dev_flags=(); [ "$CHANNEL" = release ] || dev_flags=(-D SWTOR_DEV)
+swift_flags=(-parse-as-library ${dev_flags[@]+"${dev_flags[@]}"} -target "arm64-apple-macos$MACOS_MIN" -F "$SPARKLE" -framework Sparkle
+  -Xlinker -rpath -Xlinker @executable_path/../Frameworks)
+if [ -n "${SWTOR_ON_MAC_COMPILE_ONLY:-}" ]; then
+  rm -rf "$CACHE/compile-check" && mkdir -p "$CACHE/compile-check"
+  swiftc "${swift_flags[@]}" -o "$CACHE/compile-check/SWTORonMac" src/native/*.swift
+  echo "The window compiles ($CHANNEL channel, $APP_VERSION)"
+  exit 0
+fi
+
 echo "Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -138,12 +155,7 @@ printf 'APPL????' >"$APP/Contents/PkgInfo"
 
 NB="$CACHE/native-build"
 rm -rf "$NB" && mkdir -p "$NB"
-# Development builds compile their dev-only UI (badge, About line, Settings texts) in with
-# SWTOR_DEV; a release binary has none of it.
-dev_flags=(); [ "$CHANNEL" = release ] || dev_flags=(-D SWTOR_DEV)
-swiftc -parse-as-library -O ${dev_flags[@]+"${dev_flags[@]}"} -target "arm64-apple-macos$MACOS_MIN" -F "$SPARKLE" -framework Sparkle \
-  -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
-  -o "$APP/Contents/MacOS/SWTORonMac" src/native/*.swift
+swiftc -O "${swift_flags[@]}" -o "$APP/Contents/MacOS/SWTORonMac" src/native/*.swift
 # Sparkle without its XPC services (they are only for sandboxed apps); its license ships with it.
 mkdir -p "$APP/Contents/Frameworks"
 ditto "$SPARKLE/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
