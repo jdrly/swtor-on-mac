@@ -17,7 +17,7 @@
   `1d33ea4` the bridge also had to report the AIR cache lineage 0.1.5.1
   (`build/bridge/air-codegen-id.txt`, d9mt ADR-0006), or the script stopped: another toolchain
   that changes the shader compiler's code would make every player recompile their shaders.
-  From `TO-FILL-PIN7` on, the script records the AIR codegen id itself, `AIR_CODEGEN`, and
+  From `f5439a6` on, the script records the AIR codegen id itself, `AIR_CODEGEN`, and
   `scripts/air-codegen-guard.sh` stops the build unless that file is one line and the line is,
   whole, the recorded id's with no lineage, or a later id's with the lineage of `AIR_LINEAGE`'s
   release. `scripts/build-d9mt.sh --check-air-codegen <file>` runs only that guard.)
@@ -106,7 +106,7 @@ request and the Release workflow before it builds. A pin older than d9mt's CI (b
 passes with a note. Exit status 1 means the pin fails; 2 means GitHub didn't answer or d9mt's run
 hasn't finished, which is no verdict: run it again.
 
-`main` pins d9mt `TO-FILL-PIN7`, d9mt main after jdrly/d9mt#TO-FILL-LASTPR: the driver of 0.1.8, the one
+`main` pins d9mt `f5439a6`, d9mt main after jdrly/d9mt#190: the driver of 0.1.8, the one
 release that changes the AIR codegen on purpose. Since `1d33ea4` it adds:
 
 - the AIR target per macOS, #167: AIR 2.8 and Metal 4.0 on macOS 26, AIR 2.9 and Metal 4.1 on

@@ -441,11 +441,11 @@ that holds its EdDSA key, which never leaves that Mac. [docs/building.md](docs/b
 |---|---|---|
 | Wine engine `cx-26.3.0-8`, CrossOver 26.3 with Wine 11.0, x86_64 WoW64 | [jdrly/wine-engine cx-26.3.0-8](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
 | Sparkle 2.10.0, bundled | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
-| d9mt `TO-FILL-PIN7`, bundled in `prebuilt/d9mt` | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/TO-FILL-PIN40) | see `prebuilt/d9mt` |
+| d9mt `f5439a6`, bundled in `prebuilt/d9mt` | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/f5439a625c3c30697d53ac658f86801ca6083e7f) | see `prebuilt/d9mt` |
 | Wine sources for the Mac driver and `ntdll.so`, athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), codeload tar.gz; the same archive in [jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-d23b39774528237cafe49f9a073286f854b779c0-source.tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006, only to configure that build | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
-`main` pins d9mt `TO-FILL-PIN7` for 0.1.8. Release 0.1.7.1 was built from `main` with d9mt `1d33ea4`, as was release 0.1.7. Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
+`main` pins d9mt `f5439a6` for 0.1.8. Release 0.1.7.1 was built from `main` with d9mt `1d33ea4`, as was release 0.1.7. Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
 `release/0.1.5` branch with the d9mt build it shipped.
 
 ## Documentation
