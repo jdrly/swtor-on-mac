@@ -63,10 +63,16 @@ they differ from releases in four ways:
   (`D9MT_UNWRITTEN_NULL=0`: d9mt #105 off), the switches that are off by default for an A/B:
   `pso-async` (`D9MT_PSO_ASYNC_FLUSH=1`, d9mt #114), `flush-cap` and `flush-cap-off`
   (`D9MT_FLUSH_CAP=1` or `0`, #113; they win over Settings' Fewer GPU Batches) and
-  `compile-maxconc` (`D9MT_COMPILE_MAXCONC=1`, #117), and `cold=<name>` (an empty shader cache and pipeline
+  `compile-maxconc` (`D9MT_COMPILE_MAXCONC=1`, #117), `cold=<name>` (an empty shader cache and pipeline
   archives of their own in `~/Library/Caches/SWTOR on Mac/d9mt-ab/<name>`, d9mt's own caches
-  untouched). Each call sets exactly the switches it names; `d9mt-ab.sh` alone shows them,
-  `reset` clears them (`--clean` also deletes the cold caches). They are kept in
+  untouched), and `air-legacy` (`D9MT_AIR_LEGACY=1`, d9mt #167: the game's shaders in the AIR
+  format d9mt wrote before 0.1.8, for a Mac where the format of its macOS fails. It gets a
+  shader cache and pipeline archives of its own in `d9mt-ab/air-legacy`, or `cold=<name>`'s,
+  and keeps them from start to start: a cache file holds one format's shaders and drops the
+  other's, so d9mt's own cache would lose the compiled shaders when the switch goes on and
+  again when it goes off. A d9mt before #167 doesn't read the variable). Each call sets exactly
+  the switches it names; `d9mt-ab.sh` alone shows them,
+  `reset` clears them (`--clean` also deletes the test caches). They are kept in
   `d9mt-ab.env` next to `env`, which only a development build's `env` reads, so Settings keep
   them; `wine.log` names them in its second line and the session report shows them. A
-  release's Reinstall over a development build removes `d9mt-ab.env` and the cold caches.
+  release's Reinstall over a development build removes `d9mt-ab.env` and the test caches.

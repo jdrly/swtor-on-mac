@@ -9,7 +9,7 @@
 #
 #   d9mt-ab.sh                    what the next game start gets
 #   d9mt-ab.sh <switch>...        set exactly these switches
-#   d9mt-ab.sh reset [--clean]    no switches (--clean: also delete the cold caches below)
+#   d9mt-ab.sh reset [--clean]    no switches (--clean: also delete the test caches below)
 #
 # Switches:
 #   state-off     D9MT_STATE_CACHE=0: no pipeline state cache (no prewarm, nothing recorded)
@@ -43,6 +43,14 @@
 #                 d9mt's shader compiler. d9mt's own caches are not touched, and the state
 #                 cache stays the normal one (add state-off for a run without it). A name
 #                 that was used before is warm: take a new one for every cold run.
+#   air-legacy    D9MT_AIR_LEGACY=1: d9mt writes the game's shaders in the AIR format it used
+#                 before 0.1.8, for a Mac where the format of its macOS fails (d9mt #167). The
+#                 run gets a shader cache and pipeline archives of its own, in
+#                 ~/Library/Caches/SWTOR on Mac/d9mt-ab/air-legacy, or cold=<name>'s when that
+#                 is given too. They are kept from start to start. On d9mt's own cache the
+#                 switch would cost the compiled shaders twice, going on and going off: a
+#                 cache file keeps one format's shaders and drops the other's. A d9mt before
+#                 #167 (the pin of 0.1.7 and older) doesn't read the variable.
 #
 # SWTOR_ON_MAC_ROOT=/abs/dir: a sandbox (as for som.sh).
 set -euo pipefail
@@ -69,7 +77,7 @@ status() {
     echo "do): click Reinstall (or Update to ...) in a development build of the app first."
   fi
   if [ -d "$COLD" ] && [ -n "$(ls -A "$COLD" 2>/dev/null)" ]; then
-    echo "Cold caches: $(ls "$COLD" | tr '\n' ' ')($(du -sh "$COLD" 2>/dev/null | cut -f1); reset --clean deletes them)"
+    echo "Test caches: $(ls "$COLD" | tr '\n' ' ')($(du -sh "$COLD" 2>/dev/null | cut -f1); reset --clean deletes them)"
   fi
 }
 
@@ -77,14 +85,14 @@ case "${1:-}" in
   "") status; exit 0 ;;
   -h|--help) usage ;;
   reset)
-    case "${2:-}" in "") ;; --clean) rm -rf "$COLD"; echo "Deleted the cold caches ($COLD)" ;; *) usage ;; esac
+    case "${2:-}" in "") ;; --clean) rm -rf "$COLD"; echo "Deleted the test caches ($COLD)" ;; *) usage ;; esac
     rm -f "$FILE"
     status
     exit 0 ;;
 esac
 
 [ -d "$SOM" ] || { echo "SWTOR on Mac is not installed ($SOM)" >&2; exit 1; }
-names="" vars="" config="" cold=""
+names="" vars="" config="" cold="" legacy=""
 add() { case " $names " in *" $1 "*) ;; *) names="${names:+$names }$1" ;; esac; }
 var() { case "$vars" in *"$1"*) ;; *) vars="$vars$1
 " ;; esac; }
@@ -118,14 +126,20 @@ for a in "$@"; do
     cold=*)
       n=${a#cold=}
       case "$n" in ''|*[!A-Za-z0-9._-]*|.*) echo "cold=<name>: letters, digits, . _ - only" >&2; exit 2 ;; esac
+      [ "$n" != air-legacy ] || { echo "cold=air-legacy: that folder is the air-legacy switch's own, take another name" >&2; exit 2; }
       [ -z "$cold" ] || [ "$cold" = "$n" ] || { echo "Only one cold=<name> at a time" >&2; exit 2; }
       cold=$n; add "$a" ;;
+    air-legacy) add "$a"; var 'D9MT_AIR_LEGACY=1'; legacy=1 ;;
     *) echo "Unknown switch: $a" >&2; usage ;;
   esac
 done
 if [ -n "$cold" ] && [ -e "$COLD/$cold" ]; then
   echo "Note: $COLD/$cold was used before, so it is not cold any more (take a new name, or reset --clean)."
 fi
+# The run's own shader cache and pipeline archives: cold=<name>'s, else air-legacy's (kept from
+# start to start, so no note for a folder that is there)
+own=$cold
+[ -n "$own" ] || [ -z "$legacy" ] || own=air-legacy
 
 tmp="$FILE.new.$$"
 {
@@ -134,9 +148,9 @@ tmp="$FILE.new.$$"
   echo "SWTOR_D9MT_AB=\"$names\""
   printf '%s' "$vars"
   [ -z "$config" ] || echo "DXVK_CONFIG=\"$config\""
-  if [ -n "$cold" ]; then
-    echo "D9MT_AIR_CACHE=\"$COLD/$cold/air-cache.sqlite3\""
-    echo "D9MT_PSO_ARCHIVE_DIR=\"$COLD/$cold/pso\""
+  if [ -n "$own" ]; then
+    echo "D9MT_AIR_CACHE=\"$COLD/$own/air-cache.sqlite3\""
+    echo "D9MT_PSO_ARCHIVE_DIR=\"$COLD/$own/pso\""
   fi
 } >"$tmp"
 mv -f "$tmp" "$FILE"
