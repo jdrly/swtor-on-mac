@@ -96,6 +96,16 @@ final class GameSettings {
     Binding(get: { self.values["fpslimit"] ?? "off" }, set: { self.set("fpslimit", $0) })
   }
 
+  // DirectX 12 (experimental, development builds): its driver (som.sh DX12_DRIVERS)
+  static let dx12Drivers: [(String, String)] = [
+    ("gptk", "D3DMetal"),
+    ("gptk-mtl3", "D3DMetal (Metal 3)"),
+  ]
+
+  var dx12Driver: Binding<String> {
+    Binding(get: { self.values["dx12driver"] ?? "gptk" }, set: { self.set("dx12driver", $0) })
+  }
+
   // Mouse-Look Speed: a factor on the macOS pointer's speed (som.sh MOUSE_SPEEDS)
   static let mouseSpeeds = ["0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.5", "3"]
 
@@ -298,6 +308,24 @@ struct SettingsView: View {
                + "game stutters more.")
         }
       }
+      #if SWTOR_DEV
+      // development builds only: Broadsword's DirectX 12 client instead of swtor.exe (som.sh dx12)
+      Section {
+        Toggle(isOn: settings.toggle("dx12")) {
+          Text("DirectX 12 (experimental)")
+          Text(settings.running
+               ? gameRunningNote
+               : "Starts Broadsword's DirectX 12 client (swtor_RC2.exe) instead of the DirectX 9 one.")
+        }
+        Picker(selection: settings.dx12Driver) {
+          ForEach(GameSettings.dx12Drivers, id: \.0) { value, title in Text(title).tag(value) }
+        } label: {
+          Text("DirectX 12 Driver")
+        }
+        .disabled(settings.values["dx12"] != "on")
+      }
+      .disabled(settings.running)
+      #endif
 
     case .game:
       Section {

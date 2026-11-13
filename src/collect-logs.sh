@@ -289,7 +289,7 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
     return 0
   fi
   "$UNIFIED_LOG" show --last "${GPU_HOURS}h" --style compact --predicate 'process != "log" AND (eventMessage CONTAINS "IOGPUMetalError"
-    OR ((process BEGINSWITH "wine" OR process == "swtor.exe") AND (messageType == error OR messageType == fault)
+    OR ((process BEGINSWITH "wine" OR process == "swtor.exe" OR process == "swtor_RC2.exe") AND (messageType == error OR messageType == fault)
       AND (sender CONTAINS[c] "metal" OR sender CONTAINS[c] "IOGPU" OR sender CONTAINS[c] "AGX"))
     OR (process == "kernel" AND sender BEGINSWITH "AGX"))' </dev/null >"$work/gpu-log" 2>/dev/null &
   pid=$!
@@ -312,7 +312,7 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
   LC_ALL=C awk -v lines="$GPU_LINES" -v mlines="$METAL_LINES" -v st="$st" -v timedout="$timedout" \
       -v summary="$work/gpu-summary" -v mdbfull="$work/gpu-mdbfull" '
     !/^[0-9][0-9][0-9][0-9]-/ { next }
-    { name = $4; sub(/\[.*/, "", name); ours = name ~ /^wine/ || name == "swtor.exe" }
+    { name = $4; sub(/\[.*/, "", name); ours = name ~ /^wine/ || name == "swtor.exe" || name == "swtor_RC2.exe" }
     name == "kernel" {
       sender = $5; if (sender !~ /^\([A-Za-z0-9_.-]+\)$/) sender = "(AGX)"
       body = $0; for (i = 1; i <= 5; i++) sub(/^[^ ]+ +/, "", body); body = tolower(body)
@@ -364,6 +364,7 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
 #   panic-full-*.panic                    the panic string's head, WindowServer's, loginwindow's
 #                                         and the game's uptime and thread names
 #   swtor.exe_*.diag, wine*_*.diag        the event, limit and duration lines
+# (swtor.exe's: also swtor_RC2.exe's, the DirectX 12 client's)
 # No other names: every line of an extract (but the GPU event's) must have one of the forms in
 # sys_forms, Apple's lines in these reports with their numbers in number places; any other line is
 # replaced by a note. A form's identity places (a process, a service, a kext, a thread's or queue's
@@ -379,7 +380,7 @@ SYS_FILE_MAX=20000000
 SYS_THREADS=200
 # The processes whose names are kept: macOS's display server, login and kernel, the game, Wine's
 # and the app's (exact names, as macOS writes them)
-SYS_IDS="WindowServer loginwindow kernel_task swtor.exe wine wine64 wine-preloader wine64-preloader wineserver winedevice.exe SWTORonMac"
+SYS_IDS="WindowServer loginwindow kernel_task swtor.exe swtor_RC2.exe wine wine64 wine-preloader wine64-preloader wineserver winedevice.exe SWTORonMac"
 # The thread and queue names that are kept (exact): WindowServer's and loginwindow's (Apple's),
 # the game's, Wine's and d9mt's, as in real reports; com.apple.coreanimation's display, frame-info
 # and cursor threads per display are matched in sys_resolve
@@ -647,9 +648,9 @@ system_reports() {  # → $work/sys/<name in the zip>, $work/sys-index, $work/sy
     echo "not read (no access to $SYS_DIAG)" >"$work/sys-summary"; return 0
   fi
   # (newest first; equal times by name, in C order, in every locale)
-  find "$SYS_DIAG" -maxdepth 1 -type f \( -name 'gpuEvent-swtor.exe-*' -o -name 'gpuEvent-wine*' -o -name 'WindowServer*.ips' \
+  find "$SYS_DIAG" -maxdepth 1 -type f \( -name 'gpuEvent-swtor.exe-*' -o -name 'gpuEvent-swtor_RC2.exe-*' -o -name 'gpuEvent-wine*' -o -name 'WindowServer*.ips' \
     -o -name '*.userspace_watchdog_timeout.spin' -o -name 'panic-full-*.panic' \
-    -o \( \( -name 'swtor.exe_*' -o -name 'wine*_*' \) -name '*.diag' \) \) -mmin "-$mins" \
+    -o \( \( -name 'swtor.exe_*' -o -name 'swtor_RC2.exe_*' -o -name 'wine*_*' \) -name '*.diag' \) \) -mmin "-$mins" \
     -exec stat -f '%m %z %N' {} + 2>/dev/null | LC_ALL=C sort -k1,1rn -k3 >"$w/list"
   while read -r _ s f; do
     base=${f##*/}

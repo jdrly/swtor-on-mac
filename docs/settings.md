@@ -91,3 +91,32 @@ messages. With the setting on:
   acceleration settings untouched (SWTOR does not apply them itself);
 - the pointer is hidden as before, with a blank cursor image, never by turning the cursor off
   (that would drop the game out of Direct presentation, the Metal HUD's *Direct*).
+
+## DirectX 12 (experimental, development builds)
+
+Development builds have two more settings at the end of the Graphics pane, to try Broadsword's
+DirectX 12 client (`swtor_RC2.exe`, which the patcher puts next to `swtor.exe`). A release build
+neither shows nor applies them: `som.sh set dx12` refuses there, and a `dx12=on` left in
+`settings.conf` by a development build does nothing.
+
+| Setting | Default | What it changes |
+|---|---|---|
+| DirectX 12 (experimental) | off | `SWTOR_DX12=1` in `env`: when the launcher starts `…\retailclient\swtor.exe`, the wrapper starts `swtor_RC2.exe` from the same folder with the same arguments. If that file isn't there, it starts `swtor.exe` as always and says so in `wine.log` and `hold.log`. Only while the launcher and the game are closed (it changes the prefix's registry) |
+| DirectX 12 Driver | D3DMetal | `SWTOR_DX12_DRIVER` in `env`: `gptk`, Apple's D3DMetal from the engine (Metal 4 where macOS has it), or `gptk-mtl3`, D3DMetal on Metal 3 (the wrapper sets `D3DM_MTL4=0` for the game) |
+
+With the setting on:
+
+- `env`'s `WINE_COMPATDB` gets a second rule, `name=swtor-dx12;exe=swtor_RC2.exe;dxgi=gptk`: the
+  DirectX 12 client gets D3DMetal's DXGI tree, every other process keeps wined3d. A rule that
+  names an exe applies after the `exe=*` rules, whatever the line order;
+- the client gets Wine's builtin `d3d9` (`WINEDLLOVERRIDES=d3d9=b` from the wrapper, and
+  `DllOverrides` under `AppDefaults\swtor_RC2.exe` in the prefix), so d9mt and its Metal bridge
+  stay out of the Direct3D 12 process. `swtor.exe` keeps d9mt;
+- `AppDefaults\swtor_RC2.exe` gets the values `swtor.exe` has (`GrabPointer`, *Game keys by
+  keyboard position*, *Raw mouse-look* and its speed, `ThreadCpuStats`), and follows them when
+  they change;
+- `wine.log`'s header names it: `SWTOR on Mac DirectX 12: swtor_RC2.exe, driver gptk
+  (dxgi=gptk)`, with `D3DM_MTL4=0` for the Metal 3 driver.
+
+Off, `env` is the same as without the setting, and the `AppDefaults\swtor_RC2.exe` keys go.
+Reinstall writes or removes them by the setting too, and Uninstall removes the prefix with them.
