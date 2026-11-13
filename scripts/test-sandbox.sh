@@ -1977,6 +1977,11 @@ rm -rf "$SANDBOX/usertmp/winetemp-9-8-7-5"
 echo "== 17b. DirectX 12 on Mullion: installed over the engine's real dxmt tree and put back, d9mt's bridge untouched, a wrong download or tree refused (scripts/fixtures/dx12-mullion.sh)"
 fx_dx12_mullion "$APP" "$SANDBOX/dx12-mullion"
 
+echo "== 17c. DirectX 12: D3DMetal from a Game Porting Toolkit image (som.sh dx12-gptk; made-up images, a planted engine, no Wine)"
+# shellcheck source=scripts/fixtures/dx12-gptk.sh
+. scripts/fixtures/dx12-gptk.sh
+fx_dx12_gptk "$APP" "$SANDBOX/dx12-gptk"
+
 cleanup_wine
 check "end: no Wine process of the sandbox" test -z "$(sandbox_wine)"
 echo "== $pass passed, $fail failed"
