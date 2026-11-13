@@ -52,6 +52,36 @@ fx_dxm_kept() {
   done
 }
 
+# fx_dx12_mullion_start <folder>: Mullion's switches at the game's start, through the wrapper on
+# the planted install of scripts/fixtures/dx12.sh's fx_dx12 (its helpers and stand-in engine;
+# called at its end). Its engine has no dxmt tree: the mark stands for an installed Mullion.
+fx_dx12_mullion_start() {
+  local d=$1 t logs win='C:\swtor\retailclient\swtor.exe'
+  t="$FX_DX12_SOM/engine/lib/wine/dxgi/dxmt"
+  # shellcheck disable=SC2034 # (used in check's eval strings)
+  logs="$d/root/home/Library/Logs/SWTOR on Mac"
+  # (the driver first, with DirectX 12 off: Mullion not wanted yet, so its mark stays)
+  fx_dx12_som dev set dx12 off
+  fx_dx12_som dev set dx12driver mullion
+  mkdir -p "$t/x86_64-windows" "$t/x86_64-unix"
+  sed -n 's/^MULLION_SHA256=//p' "$d/dev/som.sh" >"$t/.mullion"
+  fx_dx12_som dev set dx12 on
+  fx_dx12_game "$win"
+  check "dx12 mullion: the game as swtor_RC2.exe, Mullion's logs and flight record into the log folder, Metal 4 left to Mullion ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && [ "$(sed -n 1p "$FX_DX12_W/args")" = "C:\\swtor\\retailclient\\swtor_RC2.exe" ] && [ "$(fx_dx12_seen MULLION_LOG_PATH)/$(fx_dx12_seen MULLION_DIAG_PATH)/$(fx_dx12_seen MULLION_D3D12_METAL4)" = "$logs/$logs/<unset>" ]'
+  check "dx12 mullion: wine.log names the driver, its tree and the release" \
+    eval 'grep -qx "SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion (dxgi=dxmt), $(sed -n "s/^MULLION_TITLE=//p" "$d/dev/som.sh" | tr -d \")" "$logs/wine.log"'
+  fx_dx12_som dev set dx12driver mullion-mtl3
+  fx_dx12_game "$win"
+  check "dx12 mullion-mtl3: MULLION_D3D12_METAL4=0 for the game, named in wine.log, no D3DMetal switch ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_seen MULLION_D3D12_METAL4)/$(fx_dx12_seen D3DM_MTL4)" = "0/<unset>" ] && grep -q "^SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion-mtl3 (dxgi=dxmt), MULLION_D3D12_METAL4=0, Mullion " "$logs/wine.log"'
+  fx_dx12_som dev set dx12driver gptk
+  fx_dx12_game "$win"
+  check "dx12 mullion: back on D3DMetal: no Mullion switch, the mark gone ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_seen MULLION_LOG_PATH)/$(fx_dx12_seen MULLION_D3D12_METAL4)" = "<unset>/<unset>" ] && [ ! -e "$t/.mullion" ]'
+  fx_dx12_som dev set dx12 off
+}
+
 # fx_dx12_mullion <app> <folder>
 fx_dx12_mullion() {
   local app=$1 d=$2 r engine mullion port server e f

@@ -222,9 +222,14 @@ dx12_swap() {
   # the driver's switches, for this start only
   case "$SWTOR_DX12_DRIVER" in
     gptk-mtl3) export D3DM_MTL4=0 ;;
+    mullion*)
+      # Mullion's logs (swtor_RC2_<dll>.log) and its flight record (swtor_RC2.exe.flight, when
+      # the GPU removes the device) in the log folder, which Collect Logs bundles
+      export MULLION_LOG_PATH="$LOG_DIR" MULLION_DIAG_PATH="$LOG_DIR"
+      [ "$SWTOR_DX12_DRIVER" != mullion-mtl3 ] || export MULLION_D3D12_METAL4=0 ;;
   esac
   # (the DXGI tree as compatdb's swtor-dx12 rule in env names it)
-  dx12_note="swtor_RC2.exe, driver ${SWTOR_DX12_DRIVER:-?} (dxgi=$(printf '%s\n' "$WINE_COMPATDB" | sed -n 's/^name=swtor-dx12;exe=swtor_RC2\.exe;dxgi=//p'))${D3DM_MTL4:+, D3DM_MTL4=$D3DM_MTL4}${SWTOR_DX12_DRIVER_VERSION:+, $SWTOR_DX12_DRIVER_VERSION}"
+  dx12_note="swtor_RC2.exe, driver ${SWTOR_DX12_DRIVER:-?} (dxgi=$(printf '%s\n' "$WINE_COMPATDB" | sed -n 's/^name=swtor-dx12;exe=swtor_RC2\.exe;dxgi=//p'))${D3DM_MTL4:+, D3DM_MTL4=$D3DM_MTL4}${MULLION_D3D12_METAL4:+, MULLION_D3D12_METAL4=$MULLION_D3D12_METAL4}${SWTOR_DX12_DRIVER_VERSION:+, $SWTOR_DX12_DRIVER_VERSION}"
 }
 
 # wine.log is written anew at every game start: keep the last 4 sessions' as wine.log.1 (the

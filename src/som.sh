@@ -964,7 +964,6 @@ mullion_ready() { [ "$(cat "$ENG/lib/wine/dxgi/dxmt/.mullion" 2>/dev/null)" = "$
 install_mullion() {
   local t="$ENG/lib/wine/dxgi/dxmt" new="$ENG/.mullion.new" e f sha mode changed=""
   if [ -n "$DRY" ]; then echo "[dry-run] engine's dxmt tree: $([ "$1" = on ] && echo "$MULLION_TITLE" || echo "the engine's own")"; return 0; fi
-  [ -d "$t/x86_64-windows" ] || die "The Wine engine has no DXMT tree ($t). Reinstall SWTOR on Mac."
   if [ "$1" != on ]; then
     # the mark first, and an env that no longer starts the game on Mullion (also when a try
     # before stopped after the mark), so a restore that stops halfway never leaves the game on a
@@ -987,7 +986,7 @@ install_mullion() {
       if [ -e "$t/$f" ]; then run rm -f "$t/$f" || die "Could not remove $t/$f."; changed=1; fi
     done
     f="$t/x86_64-unix/winemetal.so"
-    if [ "$(readlink "$f" 2>/dev/null)" != "$ENGINE_DXMT_LINK" ]; then
+    if [ -d "${f%/*}" ] && [ "$(readlink "$f" 2>/dev/null)" != "$ENGINE_DXMT_LINK" ]; then
       { run ln -s "$ENGINE_DXMT_LINK" "$f.new.$$" && run mv -f "$f.new.$$" "$f"; } || die "Could not put the link $f back."
       changed=1
     fi
@@ -995,6 +994,7 @@ install_mullion() {
     return 0
   fi
   if mullion_ready; then say "The engine has $MULLION_TITLE (DirectX 12)"; return 0; fi
+  [ -d "$t/x86_64-windows" ] || die "The Wine engine has no DXMT tree ($t). Reinstall SWTOR on Mac."
   # the engine's own files, kept once (a .stock is never made from another file than the engine's)
   for e in $ENGINE_DXMT_FILES; do
     f=${e%%:*} sha=${e#*:}
