@@ -23,6 +23,8 @@ fx_gptk() {
   PATH="$FX_G_D/bin:$PATH" SWTOR_ON_MAC_ROOT="$FX_G_D/root" SWTOR_ON_MAC_GPTK_SHIMS="$FX_G_SHIMS" \
     "$FX_G_D/res-$ch/som.sh" dx12-gptk "$@" </dev/null >"$FX_G_D/out.txt" 2>&1 || FX_RC=$?
 }
+# fx_gptk_env <variable>: its value as the wrapper gets it from the planted env, or <unset>
+fx_gptk_env() { ( set -a; . "$FX_G_D/root/home/Library/Application Support/SWTOR on Mac/env"; set +a; eval "printf '%s' \"\${$1-<unset>}\"" ); }
 # fx_gptk_plist <file> <version>: a framework's Info.plist
 fx_gptk_plist() {
   mkdir -p "$(dirname "$1")"
@@ -156,6 +158,8 @@ fx_dx12_gptk() {
     eval '! hdiutil info | piped -e "/som-gptk\." && ! ls -d "${TMPDIR:-/tmp}"/som-gptk.* >/dev/null 2>&1'
 
   rm -f "$d/codesign.txt"
+  # (DirectX 12 on, D3DMetal its driver: the import rewrites env for the wrapper)
+  printf 'dx12=on\ndx12driver=gptk\n' >"$som/settings.conf"
   fx_gptk dev "$good"
   check "dx12-gptk: beta 3's image, by a path with spaces and parentheses: imported, version and image named ($FX_RC)" \
     eval '[ "$FX_RC" = 0 ] && grep -qx "@done D3DMetal 4.0b3 (Evaluation environment for Windows games 4.0 beta 3) is in the engine for the DirectX 12 client. Reinstall puts the engine'"'"'s own back." "$d/out.txt"'
@@ -169,6 +173,8 @@ fx_dx12_gptk() {
     eval '[ "$(head -1 "$FX_G_ENG/lib/external/libd3dshared.dylib")/$(head -1 "$FX_G_ENG/lib/external/D3DMetal.framework/Versions/A/D3DMetal")" = "engine libd3dshared/engine D3DMetal" ]'
   check "dx12-gptk: the imported pair in gptk-import, the framework's links kept, and the record" \
     eval '[ "$(head -1 "$FX_G_ENG/lib/external/gptk-import/D3DMetal.framework/D3DMetal")" = "gptk D3DMetal" ] && [ -L "$FX_G_ENG/lib/external/gptk-import/D3DMetal.framework/Versions/Current" ] && [ "$(cat "$FX_G_ENG/lib/external/gptk-import/IMPORTED")" = "$(printf "version=4.0b3\nimage=Evaluation environment for Windows games 4.0 beta 3\nadded=d3d12core")" ]'
+  check "dx12-gptk: env names the imported D3DMetal for wine.log, and its libd3dshared for the game's ntdll" \
+    eval '[ "$(fx_gptk_env SWTOR_DX12_DRIVER_VERSION)" = "D3DMetal 4.0b3 (imported: Evaluation environment for Windows games 4.0 beta 3)" ] && [ "$(fx_gptk_env SWTOR_DX12_LIBD3DSHARED)" = "$FX_G_ENG/lib/external/gptk-import/libd3dshared.dylib" ]'
   check "dx12-gptk: codesign asked for Apple's anchor, the framework deep" \
     eval 'piped -x -e "--verify --strict -R =anchor apple .*/redist/lib/external/libd3dshared.dylib" "$d/codesign.txt" && piped -x -e "--verify --strict --deep -R =anchor apple .*/redist/lib/external/D3DMetal.framework" "$d/codesign.txt" && piped -x -e "--verify --strict --deep -R =anchor apple .*/gptk-import.new/D3DMetal.framework" "$d/codesign.txt"'
   check "dx12-gptk: both images detached, the mount folder gone" \

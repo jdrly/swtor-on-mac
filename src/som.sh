@@ -1206,6 +1206,8 @@ cmd_dx12_gptk() {
     copy_atomic "$lib/wine/x86_64-windows/$n.dll" "$f" 644
     gptk_link ../../../../external/gptk-import/libd3dshared.dylib "$GPTK_TREE/x86_64-unix/$t.so"
   done
+  # (with DirectX 12 on: the version for wine.log, the import's libd3dshared for the game)
+  write_env >/dev/null
   echo "@done D3DMetal $ver ($img) is in the engine for the DirectX 12 client. Reinstall puts the engine's own back."
 }
 
@@ -1340,7 +1342,7 @@ EOF
 }
 
 write_env() {
-  local gm hud dbg upd fps notify_log="" ab="" dx12_rule="" dx12_env="" tree
+  local gm hud dbg upd fps notify_log="" ab="" dx12_rule="" dx12_env="" tree drv=""
   say "Writing the settings file $SOM/env"
   gm="SWTOR_GAMEMODE_APP=\"$SOM/gamemode/SWTOR.app\""
   [ "$(setting gamemode)" = on ] || gm="#$gm   (Game Mode is off in Settings)"
@@ -1399,7 +1401,14 @@ SWTOR_ON_MAC_ROOT=\"$ROOT\""
 # DirectX 12 is on in Settings, but driver $(setting dx12driver) is not ready: the game starts as swtor.exe"
   elif dx12_on; then
     case "$(setting dx12driver)" in
-      gptk*) tree=gptk ;;
+      gptk*) tree=gptk
+        drv="
+# the D3DMetal in its DXGI tree, which wine.log names
+SWTOR_DX12_DRIVER_VERSION=\"$(gptk_version)\""
+        # D3DMetal from som.sh dx12-gptk: the wrapper has the game's ntdll load the import's
+        # libd3dshared (the one the tree's links name), not lib/external's
+        [ ! -f "$GPTK_IMPORT/IMPORTED" ] || drv="$drv
+SWTOR_DX12_LIBD3DSHARED=\"$GPTK_IMPORT/libd3dshared.dylib\"" ;;
       mullion*) tree=dxmt ;;
     esac
     dx12_rule="
@@ -1408,7 +1417,7 @@ name=swtor-dx12;exe=swtor_RC2.exe;dxgi=$tree"
 # DirectX 12 (experimental, Settings): the wrapper starts swtor_RC2.exe instead of swtor.exe,
 # on this driver (compatdb's swtor-dx12 rule above names its DXGI tree)
 SWTOR_DX12=1
-SWTOR_DX12_DRIVER=$(setting dx12driver)"
+SWTOR_DX12_DRIVER=$(setting dx12driver)$drv"
     # (the driver's release, which wine.log names)
     [ "$tree" != dxmt ] || dx12_env="$dx12_env
 SWTOR_DX12_DRIVER_VERSION=\"$MULLION_TITLE\""

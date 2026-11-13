@@ -127,8 +127,9 @@ With the setting on:
   keyboard position*, *Raw mouse-look* and its speed, `ThreadCpuStats`), and follows them when
   they change;
 - `wine.log`'s header names it: `SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion
-  (dxgi=dxmt), Mullion v0.5-alpha.3`, or `driver gptk (dxgi=gptk)`, with `MULLION_D3D12_METAL4=0`
-  or `D3DM_MTL4=0` for a Metal 3 driver.
+  (dxgi=dxmt), Mullion v0.5-alpha.3`, or `driver gptk (dxgi=gptk), D3DMetal 4.0b2 (the
+  engine's)`, with `MULLION_D3D12_METAL4=0` or `D3DM_MTL4=0` for a Metal 3 driver. The D3DMetal
+  comes from the framework's `Info.plist`, or from the import (see below).
 
 Off, `env` is the same as without the setting, and the `AppDefaults\swtor_RC2.exe` keys go.
 Reinstall writes or removes them by the setting too, and Uninstall removes the prefix with them.
