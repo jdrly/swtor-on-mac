@@ -58,7 +58,12 @@ codegen guard of the d9mt build (group `air-codegen`: `scripts/air-codegen-guard
 that script records, so the group fails while that id is missing or is 0.1.7's), development
 builds' `d9mt-ab.sh air-legacy` on a planted install (group `d9mt-ab`: the game gets
 `D9MT_AIR_LEGACY=1` with a shader cache and pipeline archives of its own, kept from start to
-start), and the
+start), development builds' Mullion for DirectX 12 (group `dx12-mullion`: `som.sh set` on a
+planted install with the engine's real `dxmt` tree and Mullion's pinned archive, both downloaded
+once into `.cache/`, the archive served by `scripts/fetch-test-server.py`: Mullion installed, the
+engine's files kept as `.stock` and put back, d9mt's bridge behind the tree's `winemetal.so` link
+untouched, a changed download or another engine's tree refused with nothing changed, and `env`
+without DirectX 12 while Mullion isn't in place), and the
 suite's `orphan_as`. That helper starts a stand-in with a rewritten argv[0], as Wine 11 shows its
 processes. The argv[0] reaches the rewriting shell in the environment, never on its command line:
 a game path there (section 2c's) makes that shell look like the game to `swtor-running.sh` and

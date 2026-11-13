@@ -201,8 +201,13 @@ Heaviest stack for the target process:
 EOF
 
   echo "  (run 1: planted reports)"
+  # Mullion's logs and flight record, which the wrapper has it write into the log folder (DirectX 12)
+  echo "info:  Mullion d3d12 (a fixture line)" >"$logs/swtor_RC2_d3d12.log"
+  echo "flight (a fixture line)" >"$logs/swtor_RC2.exe.flight"
   sr_zip planted
   check "system reports: the zip is written" eval '[ -s "$SR/planted/zip" ] && [ -f "$(cat "$SR/planted/zip")" ] && [ -n "$SR_OUT" ]'
+  check "Collect Logs: Mullion's log and flight record from the log folder are in the zip" \
+    eval 'sr_has logs/swtor_RC2_d3d12.log "Mullion d3d12 (a fixture line)" && sr_has logs/swtor_RC2.exe.flight "flight (a fixture line)"'
   local d="system-reports"
   check "system reports: the extracts, the Mac's name gone from the names" eval '[ "$(LC_ALL=C ls "$SR_OUT/$d" | tr "\n" " ")" = "WindowServer-2026-10-31-195329.ips.txt WindowServer-2026-10-31-234600.ips.txt WindowServer_2026-10-31-195334.userspace_watchdog_timeout.spin.txt gpuEvent-swtor.exe-2026-10-31-195244.ips panic-full-2026-11-01-000358.0002.panic.txt swtor.exe_2026-10-31-213115.diag.txt " ]'
   check "system reports: the GPU event whole" eval 'sr_has "$d/gpuEvent-swtor.exe-2026-10-31-195244.ips" "\"restart_reason_desc\":\"BIF0 page fault\"" && sr_has "$d/gpuEvent-swtor.exe-2026-10-31-195244.ips" "\"is_read\":true"'

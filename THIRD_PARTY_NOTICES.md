@@ -38,6 +38,7 @@ sha256 (see `src/som.sh` and the README's *Pinned components*):
 | Component | Source | License |
 |---|---|---|
 | **Wine engine** `cx-26.3.0-8`: Wine 11.0 from CodeWeavers' CrossOver 26.3 sources with athei's patches ([athei/wine](https://github.com/athei/wine), commit `d23b397`), built and bundled by athei, the engine SWGL on Mac uses. athei's release of it is gone, so jdrly/wine-engine hosts the same file, byte for byte (ADR-0006) | [jdrly/wine-engine cx-26.3.0-8](https://github.com/jdrly/wine-engine/releases/tag/cx-26.3.0-8), with its source, [`wine-d23b397…-source.tar.gz`](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-d23b39774528237cafe49f9a073286f854b779c0-source.tar.gz) (athei/wine [`d23b397`](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0)) | LGPL-2.1-or-later ([Wine](https://www.winehq.org); CrossOver sources: <https://www.codeweavers.com/crossover/source>) |
+| **Mullion** v0.5-alpha.3 (Direct3D 10, 11 and 12 to Metal, built on [DXMT](https://github.com/3Shain/dxmt); with LLVM). Only development builds download it, when DirectX 12 is on with a Mullion driver | [dttdrv/mullion v0.5-alpha.3](https://github.com/dttdrv/mullion/releases/tag/v0.5-alpha.3), `mullion-v0.5-alpha.3.tar.gz`; source: the tag, commit [`84a3e5e`](https://github.com/dttdrv/mullion/tree/84a3e5e635540d4427634d4adc3cc4a8e6748ba0) | LGPL-2.1-or-later (DXMT's code from its releases up to v0.80 also MIT; LLVM Apache-2.0 WITH LLVM-exception): `LICENSE`, `LICENSE-LLVM.txt` and `licenses/` in the archive |
 | Inside that engine, as athei bundled it: its libraries in `lib/external` (FreeType, GnuTLS, SDL and others), DXMT, mtld3d, x87sidecar and Apple's D3DMetal (Game Porting Toolkit redistributables) | the same release | each component's own license, as published there (`lib/external/D3DMetal-License.rtf`, `x87sidecar-LICENSE`, ...). SWTOR on Mac uses none of the Direct3D backends: the game's Direct3D 9 is d9mt's, and DXGI stays on Wine's wined3d |
 
 The installer changes its copy of the engine in three places (and leaves out its SDK: headers,
@@ -46,7 +47,9 @@ placeholder `winemetal.dll`, the bundled `ntdll.so` replaces the engine's (kept 
 `ntdll.so.stock`), and while *Game keys by keyboard position* or *Raw mouse-look* is
 on in Settings, the bundled Mac driver replaces the engine's `winemac.so` and its two
 `winemac.drv` (the engine's own are kept as `<name>.stock` and come back when both settings are
-off). It puts d9mt's `d3d9.dll` into its own Wine
+off). In a development build with DirectX 12 on a Mullion driver, Mullion's x86_64 files replace
+the engine's in its `lib/wine/dxgi/dxmt` tree (the engine's own are kept as `<name>.stock` and
+come back when the setting is off). It puts d9mt's `d3d9.dll` into its own Wine
 prefix (Wine's own is kept as `d3d9.dll.wine`).
 
 ## Trademarks

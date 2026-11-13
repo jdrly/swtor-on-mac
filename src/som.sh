@@ -94,6 +94,27 @@ name=swtor-on-mac;exe=*;dxgi=wined3d'
 # template libraries in $SOM/frameworks): an install over it upgrades the prefix and removes
 # both once it has gone through (upgrade_from_old_engine).
 OLD_ENGINE_SHA256=203f9e9fd6c2cc77e6525d798a434ced326145db34a356355e05659d3445fd1c
+# Mullion, the DirectX 12 driver of development builds (install_mullion): a release archive
+# pinned by size and sha256, downloaded only when DirectX 12 is on with a Mullion driver. Its
+# source is this block: name, URL, size, sha256 and the files taken from it change together.
+MULLION_TITLE="Mullion v0.5-alpha.3"
+MULLION_URL=https://github.com/dttdrv/mullion/releases/download/v0.5-alpha.3/mullion-v0.5-alpha.3.tar.gz
+MULLION_API_URL=https://api.github.com/repos/dttdrv/mullion/releases/assets/735821532
+MULLION_SIZE=38655870
+MULLION_SHA256=b743f2ffcd88392e91f1b52e007137ce897c0ffc4e3376d17218da075b5c646c
+# what of it goes into the engine's dxmt tree (lib/wine/dxgi/dxmt), as the archive's top folder
+# has them (x86_64 only: the engine is x86_64, and Mullion has no 32-bit build)
+MULLION_FILES="x86_64-windows/d3d10core.dll x86_64-windows/d3d11.dll x86_64-windows/d3d12.dll
+x86_64-windows/d3d12core.dll x86_64-windows/dxgi.dll x86_64-windows/nvapi64.dll
+x86_64-windows/nvngx.dll x86_64-windows/winemetal.dll x86_64-unix/winemetal.so"
+# The engine's own files of that tree which Mullion replaces (<path>:<sha256>), and its
+# x86_64-unix/winemetal.so, a link to the main tree's file, which is d9mt's bridge after install:
+# it is replaced, never written through
+ENGINE_DXMT_FILES="x86_64-windows/d3d10core.dll:833d26971abc8661efc8b5cc18548c70ce8e482e4ea4b1d3f69a367612264d26
+x86_64-windows/d3d11.dll:7ca382af0eb32d8a432f6efb14d594fefb45673663be1f7e6682254bff885c47
+x86_64-windows/dxgi.dll:fc58aae0aba511a1ec4d2417e5bba6adb888bb14315d0f59cccdfd27f670d544
+x86_64-windows/winemetal.dll:514245d533c750599614311a792c45ed600aef52948571d98c0fc70fd3df16e0"
+ENGINE_DXMT_LINK=../../../x86_64-unix/winemetal.so
 
 # --- Paths
 ROOT="${SWTOR_ON_MAC_ROOT:-}"
@@ -403,13 +424,13 @@ SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse m
 MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
 HUD_POSITIONS="topleft topcenter topright centerleft centered centerright bottomleft bottomcenter bottomright"
 FPS_LIMITS="off 30 40 45 60"
-DX12_DRIVERS="gptk gptk-mtl3"
+DX12_DRIVERS="mullion mullion-mtl3 gptk gptk-mtl3"
 setting_default() {
   case "$1" in
     retina|gamemode|vsync|updates|rawmouse) echo on ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     hud|physkeys|fpslimit|fpsbattery|flushcap|dx12) echo off ;;
-    dx12driver) echo gptk ;;
+    dx12driver) echo mullion ;;
     memory) echo auto ;;
     mousespeed) echo 1 ;;
     hudpos) echo topcenter ;;
@@ -442,8 +463,11 @@ setting() { # <key>: its value, or the default
 dx12_on() { [ "$CHANNEL" = dev ] && [ "$(setting dx12)" = on ]; }
 # Is the chosen DirectX 12 driver there to run? (D3DMetal comes with the engine)
 dx12_driver_ok() {
-  case "$(setting dx12driver)" in gptk*) return 0 ;; esac
-  return 1
+  case "$(setting dx12driver)" in
+    gptk*) return 0 ;;
+    mullion*) mullion_ready ;;
+    *) return 1 ;;
+  esac
 }
 
 write_settings() { # [<key> <value>]: settings.conf with every key, one of them changed
@@ -567,6 +591,7 @@ cmd_set() {
       install_winemac "$(winemac_wanted rawmouse "$value")"
       set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' RawMouseWhenCursorHidden "$([ "$value" = on ] && echo y || echo n)" ;;
     mousespeed) set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' RawMouseGameControllerScale "$value" ;;
+    dx12|dx12driver) install_mullion "$(mullion_wanted "$key" "$value")" ;;
   esac
   write_settings "$key" "$value"
   # (swtor_RC2.exe's values follow swtor.exe's, from the settings just written)
@@ -637,7 +662,7 @@ backup_foreign() {
 # (the engine through GitHub's API, Accept: application/octet-stream: the same file at another
 # signed address, which gets around a damaged copy on the way). An attempt that stops early (a
 # dropped connection, a stall: under 10 KB/s for a minute) is resumed where it stopped; one
-# that brought something else than the file (more than its size, or not an xz archive: a
+# that brought something else than the file (more than its size, or not an archive: a
 # captive portal's or a proxy's page) starts over. Each attempt is logged (curl's status, the
 # HTTP code, the size; the first bytes if they are not an archive; the checksum), and the
 # message says what went wrong, with what arrived, and what to do. (curl alone reports success
@@ -646,7 +671,11 @@ backup_foreign() {
 # for the next try.
 FETCH_TRIES=4
 FETCH_SECOND_TRIES=2
-is_xz() { [ "$(head -c 6 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = fd377a585a00 ]; }
+# is_archive <file>: it starts as an xz archive (the engine) or a gzip one (Mullion) does
+is_archive() {
+  case "$(head -c 6 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" in fd377a585a00|1f8b08*) return 0 ;; esac
+  return 1
+}
 mb() { echo $((($1 + 524288) / 1048576)); }
 thousands() { echo "$1" | sed -e :a -e 's/^\([0-9]\{1,\}\)\([0-9]\{3\}\)/\1,\2/;ta'; }   # 234978748 -> 234,978,748
 
@@ -662,7 +691,7 @@ fetch_source() {
     # a partial download is resumed only if it is the start of the archive
     if [ -f "$f.part" ]; then
       GOT=$(stat -f %z "$f.part")
-      if [ "$GOT" -gt "$size" ] || ! is_xz "$f.part"; then
+      if [ "$GOT" -gt "$size" ] || ! is_archive "$f.part"; then
         log "attempt $try: the partial download ($GOT bytes) is not the start of the file; starting over"
         rm -f "$f.part"
       elif [ "$GOT" -eq "$size" ]; then
@@ -694,14 +723,14 @@ fetch_source() {
       # server said the file isn't there (HTTP 4xx)
       case "$http" in 4??) break ;; esac
     else
-      [ "$GOT" -lt "$size" ] && is_xz "$f.part" || break   # complete, or not the file: judged below
+      [ "$GOT" -lt "$size" ] && is_archive "$f.part" || break   # complete, or not the file: judged below
     fi
     [ "$try" -eq "$tries" ] || sleep 2
   done
   rm -f "$info"
   if [ ! -s "$f.part" ]; then
     rm -f "$f.part"; OUT=empty
-  elif ! is_xz "$f.part"; then
+  elif ! is_archive "$f.part"; then
     START=$(head -c 200 "$f.part" | LC_ALL=C tr -c '[:print:]' ' ' | tr -s ' ')
     log "not the file: $GOT bytes starting with: $START"
     rm -f "$f.part"
@@ -912,6 +941,87 @@ install_winemac() {
   fi
 }
 
+# mullion_wanted [<key> <value>]: on if the engine's dxmt tree should be Mullion's (a
+# development build, DirectX 12 on, a Mullion driver; <key> about to be set to <value>), else off
+mullion_wanted() {
+  local x d
+  x=$(setting dx12) d=$(setting dx12driver)
+  case "${1:-}" in dx12) x=$2 ;; dx12driver) d=$2 ;; esac
+  case "$CHANNEL:$x:$d" in dev:on:mullion*) echo on ;; *) echo off ;; esac
+}
+# mullion_ready: the dxmt tree has this app's Mullion, every file of it in place (its mark,
+# written last)
+mullion_ready() { [ "$(cat "$ENG/lib/wine/dxgi/dxmt/.mullion" 2>/dev/null)" = "$MULLION_SHA256" ]; }
+
+# install_mullion <on|off>: the engine's dxmt tree, which only the DirectX 12 rule for
+# swtor_RC2.exe gives a process (write_env; the rule for every other process says wined3d). On:
+# Mullion's files from its release archive (downloaded into the cache and verified, MULLION_*),
+# the engine's own kept next to them as <name>.stock, checked by sha256, and the tree's
+# winemetal.so link replaced by Mullion's file, so d9mt's bridge in the main tree stays as it is.
+# Off: the engine's own files back, Mullion's extra ones gone and the link back; nothing to do
+# when the tree never had Mullion. The mark (.mullion) goes first and comes last, so a tree that
+# is half done is never taken for Mullion's (mullion_ready). Fails with die, also where set -e
+# doesn't hold: Install runs it in a subshell and goes on without Mullion (cmd_install).
+install_mullion() {
+  local t="$ENG/lib/wine/dxgi/dxmt" new="$ENG/.mullion.new" e f sha mode changed=""
+  if [ -n "$DRY" ]; then echo "[dry-run] engine's dxmt tree: $([ "$1" = on ] && echo "$MULLION_TITLE" || echo "the engine's own")"; return 0; fi
+  [ -d "$t/x86_64-windows" ] || die "The Wine engine has no DXMT tree ($t). Reinstall SWTOR on Mac."
+  if [ "$1" != on ]; then
+    if [ -e "$t/.mullion" ]; then run rm -f "$t/.mullion" || die "Could not change $t."; changed=1; fi
+    for e in $ENGINE_DXMT_FILES; do
+      f=${e%%:*}
+      [ -f "$t/$f.stock" ] && ! cmp -s "$t/$f.stock" "$t/$f" || continue
+      copy_atomic "$t/$f.stock" "$t/$f" 644 || die "Could not put the engine's $f back in $t."
+      changed=1
+    done
+    # (Mullion's own files: not the engine's, and not the link, put back below)
+    for f in $MULLION_FILES; do
+      # shellcheck disable=SC2086 # (the list's lines as words)
+      case " $(printf '%s ' $ENGINE_DXMT_FILES)x86_64-unix/winemetal.so: " in *" $f:"*) continue ;; esac
+      if [ -e "$t/$f" ]; then run rm -f "$t/$f" || die "Could not remove $t/$f."; changed=1; fi
+    done
+    f="$t/x86_64-unix/winemetal.so"
+    if [ "$(readlink "$f" 2>/dev/null)" != "$ENGINE_DXMT_LINK" ]; then
+      { run ln -s "$ENGINE_DXMT_LINK" "$f.new.$$" && run mv -f "$f.new.$$" "$f"; } || die "Could not put the link $f back."
+      changed=1
+    fi
+    [ -z "$changed" ] || say "The engine's DXMT tree is the engine's own again (no Mullion)"
+    return 0
+  fi
+  if mullion_ready; then say "The engine has $MULLION_TITLE (DirectX 12)"; return 0; fi
+  # the engine's own files, kept once (a .stock is never made from another file than the engine's)
+  for e in $ENGINE_DXMT_FILES; do
+    f=${e%%:*} sha=${e#*:}
+    if [ ! -f "$t/$f.stock" ]; then
+      [ "$(sha256 "$t/$f")" = "$sha" ] ||
+        die "The Wine engine's DXMT tree ($f) is not the expected build, so $MULLION_TITLE is not installed. Reinstall SWTOR on Mac."
+      run cp -p "$t/$f" "$t/$f.stock" || die "Could not keep a copy of $t/$f."
+    fi
+    [ "$(sha256 "$t/$f.stock")" = "$sha" ] ||
+      die "The Wine engine's copy of its $f ($f.stock) is damaged, so $MULLION_TITLE is not installed. Uninstall SWTOR on Mac and install it again."
+  done
+  # (in a sandbox, SWTOR_ON_MAC_MULLION_URL may name a test's server for the same file)
+  if [ -n "$ROOT" ] && [ -n "${SWTOR_ON_MAC_MULLION_URL:-}" ]; then
+    fetch "$SWTOR_ON_MAC_MULLION_URL" "$MULLION_SHA256" "$MULLION_SIZE" "$MULLION_TITLE"
+  else
+    fetch "$MULLION_URL" "$MULLION_SHA256" "$MULLION_SIZE" "$MULLION_TITLE" "$MULLION_API_URL"
+  fi
+  say "Installing $MULLION_TITLE (DirectX 12) into the engine's DXMT tree"
+  { run rm -rf "$new" && run mkdir -p "$new" && run tar -xzf "$FETCHED" -C "$new" --strip-components 1; } ||
+    die "Could not unpack $MULLION_TITLE ($FETCHED)."
+  for f in $MULLION_FILES; do
+    [ -f "$new/$f" ] || die "$MULLION_TITLE's archive has no $f; nothing was changed in the engine."
+  done
+  run rm -f "$t/.mullion" || die "Could not change $t."
+  for f in $MULLION_FILES; do
+    case "$f" in *.so) mode=755 ;; *) mode=644 ;; esac
+    # (a new name, then a rename: the link is replaced, d9mt's bridge behind it is not touched)
+    copy_atomic "$new/$f" "$t/$f" "$mode" || die "Could not install $f into $t."
+  done
+  run rm -rf "$new"
+  echo "$MULLION_SHA256" | put "$t/.mullion" 644
+}
+
 # wine <args...> with SWTOR on Mac's engine and prefix (output goes to the log). The engine is
 # self-contained (no library path); its compatdb rule as in the env file.
 wine_do() {
@@ -1112,6 +1222,9 @@ name=swtor-dx12;exe=swtor_RC2.exe;dxgi=$tree"
 # on this driver (compatdb's swtor-dx12 rule above names its DXGI tree)
 SWTOR_DX12=1
 SWTOR_DX12_DRIVER=$(setting dx12driver)"
+    # (the driver's release, which wine.log names)
+    [ "$tree" != dxmt ] || dx12_env="$dx12_env
+SWTOR_DX12_DRIVER_VERSION=\"$MULLION_TITLE\""
   fi
   put "$SOM/env" 644 <<EOF
 # SWTOR on Mac $VERSION: settings the Wine wrapper in Broadsword's Wine folder reads at every
@@ -1694,7 +1807,7 @@ cmd_install() {
   step "Checking your Mac"
   preflight
   check_wrapper install
-  local avail
+  local avail w
   avail=$(df -k "$H" | awk 'NR == 2 { print $4 }')
   [ "${avail:-0}" -gt 2000000 ] || die "Not enough free disk space (SWTOR on Mac needs about 2 GB)."
   lock
@@ -1706,6 +1819,12 @@ cmd_install() {
   step "Wine engine"
   begin_upgrade
   install_engine
+  # DirectX 12's Mullion (development builds). Without it in place the game starts as swtor.exe
+  # (write_env), so a failed download or check is a warning, not a failed install.
+  w=$(mullion_wanted)
+  if ! ( install_mullion "$w" ) | awk '{ sub(/^@error /, "@warn "); print; fflush() }'; then
+    [ "$w" != on ] || warn "$MULLION_TITLE is not installed, so DirectX 12 starts the game as swtor.exe (DirectX 9). Reinstall to try again."
+  fi
   phase 2
   step "Wine prefix and d9mt"
   install_prefix
