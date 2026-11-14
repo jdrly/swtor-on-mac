@@ -45,10 +45,11 @@
   (athei/wine at the commit athei/wine-build's release names, pinned sha256; configured like
   athei's build; the engine download pinned in `src/som.sh` for linking) with
   `patches/winemac-physical-keys.patch`, SWGL on Mac's `winemac-swgl-relative-mouse.patch` and
-  `winemac-swgl-input-thread.patch` (unchanged copies) and `winemac-swtor-mouse.patch`, in that
-  order, into `prebuilt/winemac`, together with an unpatched build: `scripts/winemac-compare.py`
-  checks that one against the engine's own `winemac.so` and that the patches change only the
-  keyboard and mouse functions and the options; the PE sides are checked by their imports and
+  `winemac-swgl-input-thread.patch` (unchanged copies), `winemac-swtor-mouse.patch` and
+  `winemac-native-fullscreen.patch`, in that order, into `prebuilt/winemac`, together with an
+  unpatched build: `scripts/winemac-compare.py` checks that one against the engine's own
+  `winemac.so` and that the patches change only the keyboard and mouse functions, the native
+  fullscreen functions (named one by one) and the options; the PE sides are checked by their imports and
   sections. It also refuses if a patch hides the cursor by turning it off (`[NSCursor hide]`),
   which would cost Direct presentation (Xcode, Rosetta, Homebrew bison; llvm-mingw pinned as in
   athei's build). The build is reproducible (the PE sides without their debug info).

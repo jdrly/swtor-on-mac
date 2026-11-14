@@ -378,9 +378,12 @@ with these patches:
 - [`patches/winemac-swtor-mouse.patch`](patches/winemac-swtor-mouse.patch), SWTOR's changes to
   those two. It matches the camera speed to the pointer speed set in System Settings and turns
   off the parts SWG needs and SWTOR doesn't.
+- [`patches/winemac-native-fullscreen.patch`](patches/winemac-native-fullscreen.patch), *Native
+  fullscreen (own Space)*: the game's borderless fullscreen window goes into a fullscreen Space of
+  its own and out again, without the size-move messages and waits of a stock transition.
 
-SWTOR on Mac installs the patched Mac driver only while *Game keys by keyboard position* or *Raw
-mouse-look* is on. The build scripts, [`scripts/build-ntdll.sh`](scripts/build-ntdll.sh) and
+SWTOR on Mac installs the patched Mac driver only while *Game keys by keyboard position*, *Raw
+mouse-look* or *Native fullscreen (own Space)* is on. The build scripts, [`scripts/build-ntdll.sh`](scripts/build-ntdll.sh) and
 [`scripts/build-winemac.sh`](scripts/build-winemac.sh), also build an unpatched copy. They check
 that it matches the engine's own file and that the patches change only the functions they target. Upstream Wine has no fix for the `SetCursorPos` mouse-look problem yet, so the mouse
 patches stay.

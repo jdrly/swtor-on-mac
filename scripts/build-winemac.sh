@@ -12,13 +12,15 @@
 #   winemac-swtor-mouse.patch         SWTOR on Mac's changes to them (see its header): options
 #                                     off unless set, speed matched to the macOS pointer, the
 #                                     RAWMOUSE and THREADCPU debug lines
+#   winemac-native-fullscreen.patch   the NativeFullscreen option (off by default): the game's
+#                                     fullscreen window in a Space of its own, the NATIVEFS lines
 #   winemac.so                     the unix side (x86_64)
 #   x86_64-windows/winemac.drv     the PE sides (the input thread is started from dllmain.c);
 #   i386-windows/winemac.drv       they go with this winemac.so only
 #   COPYING.LIB, LICENSE           Wine's license texts (LGPL-2.1-or-later), from the same sources
 #   VERSION                        what it was built from
-# The installer puts the three into its engine copy while "Game keys by keyboard position" or
-# "Raw mouse-look" is on. It also builds the unpatched driver, to check the toolchain against
+# The installer puts the three into its engine copy while "Game keys by keyboard position",
+# "Raw mouse-look" or "Native fullscreen (own Space)" is on. It also builds the unpatched driver, to check the toolchain against
 # the engine's own files and what the patches change (scripts/winemac-compare.py).
 #
 # Configured like athei's build-wine.sh (x86_64 host, i386+x86_64 PE, macOS 26.0 minimum).
@@ -36,7 +38,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 OUT="$ROOT/prebuilt/winemac"
-PATCHES="winemac-physical-keys winemac-swgl-relative-mouse winemac-swgl-input-thread winemac-swtor-mouse"
+PATCHES="winemac-physical-keys winemac-swgl-relative-mouse winemac-swgl-input-thread winemac-swtor-mouse winemac-native-fullscreen"
 W="${WINEMAC_WORK:-/tmp/swtor-on-mac-winemac}"
 case "$W" in *" "*) echo "WINEMAC_WORK must not contain spaces (Wine's makefiles break on them)" >&2; exit 1 ;; esac
 
