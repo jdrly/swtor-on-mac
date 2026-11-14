@@ -84,3 +84,19 @@ keeps a reproducer set in `repro/`: the run's inputs (`inputs.txt`: the apps' ve
 CDHashes, the official app's version, the scripts' commit, macOS), SWTOR on Mac's files with the
 prefix's registry, and its logs. If that copy fails (a full disk), `home/` itself is kept, moved
 to `repro/home`.
+
+`scripts/nfprobe.sh` runs the AppKit probe for native fullscreen (`scripts/nfprobe.m`, #96): a
+native program, no Wine, no game files and no network, that asks whether macOS takes a borderless
+window that covers the screen into a fullscreen Space. It builds the probe with `clang` and runs
+each mode with a time limit: a titled, resizable window as the control, then the borderless window
+with `FullScreenPrimary` (A), the same made titled and resizable only while in the Space (B, as
+SDL2 does), and A and B again with the presentation options `FullScreen|HideDock|HideMenuBar`. Each
+run enters the Space, hands activation to a helper app and gets it back, leaves the Space and exits
+by itself, and prints the notifications with their times, the window's frame and style before, in
+and after, the screen's frame and safe area, the first `nextDrawable` after the return, and a
+verdict line: `entered`, `refused`, `failed` or `no verdict`. If the control can't enter and leave,
+the session can't judge (a hosted runner, an SSH session): the script prints `no verdict` and
+exits 1. `--control-without-toggle` is its failing control, and `--display` adds a run on a second
+display that reports what happens to the window when that display goes away. Run it in a logged-in
+GUI session that nobody is using: each run takes the screen for a few seconds. The probe isn't part
+of the app.
