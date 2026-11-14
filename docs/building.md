@@ -118,12 +118,13 @@ finished.
    A file added, removed or changed anywhere else stops the release. The first comparison shows
    that the build being published is the one I played; the second, that nothing changed since
    the last release that the commits don't explain.
-6. **Publish**, after `scripts/release-receipt.sh verify release/<version> --commit <squash commit>`
-   passes and the squash commit is on `origin/main`. Verify reads only: the files against the
-   receipt's hashes, the DMG's name, the channel and the feed's versions against the receipt, an
-   app built from a clean tree, and at the commit to be tagged the same source tree (a squash
-   merge's equal tree passes), build.sh's `APP_VERSION` and `bundle_version`, and the notes. It
-   fails before anything is uploaded. Then:
+6. **Publish**, after `scripts/release-receipt.sh verify release/<version> --commit <squash commit>
+   --notes release-notes/<version>.md` passes and the squash commit is on `origin/main`. Verify
+   reads only and runs nothing of the commit: the files against the receipt's hashes, the DMG's
+   name, the channel and the feed's versions against the receipt, an app built from a clean tree,
+   and at the commit to be tagged the same source tree (a squash merge's equal tree passes),
+   build.sh's `APP_VERSION` and the notes, and the notes file to upload. It fails before anything
+   is uploaded. Then:
    `gh release create v<version> --target <squash commit> --latest --title "SWTOR on Mac <version>" --notes-file release-notes/<version>.md`
    with exactly the DMG, the deltas and `appcast.xml`. The tag this creates starts no build. The
    Site workflow runs on the published release and rebuilds swonmac.com.

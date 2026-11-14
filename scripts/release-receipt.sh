@@ -21,13 +21,15 @@
 #       the gate lines when the DMG and the deltas are unchanged.
 #   scripts/release-receipt.sh gate <dir> <name> pass|fail
 #       records a gate run, after checking that <dir>'s files are the receipt's
-#   scripts/release-receipt.sh verify <dir> [--commit <rev>]
+#   scripts/release-receipt.sh verify <dir> [--commit <rev> --notes <file>]
 #       read-only, before publishing: the files in <dir> against their hashes, the DMG's name, the
 #       channel and the feed's versions against the receipt; with --commit, the commit to be
 #       tagged: its tree is the receipt's (a squash merge's equal tree passes; a tree that
 #       differs only in release-notes/<version>.md passes if those notes are the receipt's), the
-#       build was from a clean tree, and build.sh's APP_VERSION and bundle_version and the notes
-#       at that commit are the receipt's. Runs git in the current directory.
+#       build was from a clean tree, its build.sh's APP_VERSION and its notes are the receipt's,
+#       and so is <file>, the notes the publish uploads. The build number is checked with
+#       bundle_version from the build.sh beside this script; nothing of <rev> runs. Runs git in
+#       the current directory.
 #   scripts/release-receipt.sh verify <dir> --release <tag>
 #       after publishing: downloads the release's assets (gh) and compares them with the
 #       receipt, the same files and the same hashes, and names each one it compared
@@ -35,10 +37,11 @@
 # Exit status: 0 passed; 1 a check failed; 2 usage.
 set -euo pipefail
 REPO=jdrly/swtor-on-mac
+HERE=$(cd "$(dirname "$0")" && pwd)
 APP_NAME="SWTOR on Mac.app"
 
 die() { echo "release-receipt: $*" >&2; exit 1; }
-usage() { sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 fails=0
 ok() { echo "ok   $*"; }
@@ -91,7 +94,7 @@ check_versions() {
 
 # check_commit <receipt> <rev>: the commit to be tagged against the receipt
 check_commit() {
-  local r=$1 rev=$2 v b src tree state t diff want_b app_v
+  local r=$1 rev=$2 notes=$3 v b src tree state t diff want_b app_v
   v=$(field "$r" version) b=$(field "$r" build) src=$(field "$r" source)
   git rev-parse -q --verify "$rev^{commit}" >/dev/null || { no "$rev: not a commit here"; return; }
   tree=${src% *} state=${src##* }
@@ -108,15 +111,17 @@ check_commit() {
   fi
   app_v=$(git show "$rev:build.sh" | sed -n 's/^APP_VERSION=\${SWTOR_ON_MAC_VERSION:-\(.*\)}$/\1/p')
   [ "$app_v" = "$v" ] && ok "build.sh at $rev: APP_VERSION $v" || no "build.sh at $rev: APP_VERSION $app_v, the receipt $v"
-  # build.sh's own mapping at that commit
-  want_b=$(eval "$(git show "$rev:build.sh" | sed -n '/^bundle_version() {$/,/^}$/p')"; bundle_version "$v" 2>&1) || want_b="(refused: $want_b)"
-  [ "$want_b" = "$b" ] && ok "bundle_version $v = $b" || no "bundle_version $v at $rev is $want_b, the receipt has $b"
+  # the mapping of the build.sh beside this script, never code from <rev>
+  want_b=$(eval "$(sed -n '/^bundle_version() {$/,/^}$/p' "$HERE/../build.sh")"; bundle_version "$v" 2>&1) || want_b="(refused: $want_b)"
+  [ "$want_b" = "$b" ] && ok "bundle_version $v = $b" || no "bundle_version $v is $want_b, the receipt has $b"
   if git cat-file -e "$rev:release-notes/$v.md" 2>/dev/null &&
     [ "$(git show "$rev:release-notes/$v.md" | shasum -a 256 | cut -d' ' -f1)" = "$(field "$r" notes)" ]; then
     ok "release-notes/$v.md at $rev is the receipt's"
   else
     no "release-notes/$v.md at $rev isn't the receipt's notes"
   fi
+  if [ -f "$notes" ] && [ "$(sha "$notes")" = "$(field "$r" notes)" ]; then ok "the notes to upload ($notes) are the receipt's"
+  else no "the notes to upload ($notes) aren't the receipt's"; fi
 }
 
 # check_release <receipt> <tag>: the published assets, downloaded, against the receipt
@@ -178,9 +183,13 @@ case "$cmd" in
     echo "release-receipt: gate $3 $4 recorded" ;;
   verify)
     [ -f "$R" ] || die "no receipt at $R"
-    mode=${3:-} arg=${4:-}
-    case "$mode" in ''|--commit|--release) ;; *) usage ;; esac
-    [ -z "$mode" ] || [ -n "$arg" ] || usage
+    mode=${3:-} arg=${4:-} notes=""
+    case "$mode" in
+      '') [ $# = 2 ] || usage ;;
+      --release) [ $# = 4 ] || usage ;;
+      --commit) [ $# = 6 ] && [ "$5" = --notes ] || usage; notes=$6 ;;
+      *) usage ;;
+    esac
     echo "== $R: $(field "$R" version) $(field "$R" channel), source $(field "$R" source)"
     if well_formed "$R"; then
       if [ "$mode" = --release ]; then
@@ -188,7 +197,7 @@ case "$cmd" in
       else
         check_files "$R" "$dir"
         check_versions "$R" "$dir"
-        [ "$mode" != --commit ] || check_commit "$R" "$arg"
+        [ "$mode" != --commit ] || check_commit "$R" "$arg" "$notes"
       fi
       sed -n 's/^gate \([^ ]*\) \([^ ]*\) \(.*\)/gate: \1 \2 (\3)/p' "$R"
     fi

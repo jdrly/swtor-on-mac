@@ -194,7 +194,7 @@ case "$MODE" in
     # the tag goes on the commit this was built from (the dev branch), which must be pushed
     head=$(git rev-parse HEAD)
     git branch -r --contains "$head" | grep -q . || { echo "Push $head first" >&2; exit 1; }
-    scripts/release-receipt.sh verify "$OUT" --commit "$head"
+    scripts/release-receipt.sh verify "$OUT" --commit "$head" --notes "$NOTES"
     gh release create "v$VERSION" --repo "$REPO" --prerelease --target "$head" \
       --title "SWTOR on Mac $VERSION (development build)" --notes-file "$NOTES" "$DMG"
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); pre-release v$VERSION"
@@ -268,7 +268,7 @@ case "$MODE" in
     # the draft's tag goes on the commit the app was built from, which must be pushed
     head=$(git rev-parse HEAD)
     git branch -r --contains "$head" | grep -q . || { echo "Push $head first" >&2; exit 1; }
-    scripts/release-receipt.sh verify "$OUT" --commit "$head"
+    scripts/release-receipt.sh verify "$OUT" --commit "$head" --notes "$NOTES"
     echo "[release] creating the draft GitHub release v$VERSION"
     gh release create "v$VERSION" --repo "$REPO" --draft --target "$head" --title "SWTOR on Mac $VERSION" \
       --notes-file "$NOTES" "$DMG" ${deltas[@]+"${deltas[@]}"} "$OUT/appcast.xml"

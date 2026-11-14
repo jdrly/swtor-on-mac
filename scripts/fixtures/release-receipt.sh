@@ -54,8 +54,8 @@ EOF
     "$rr" write "$d" "$g/release-notes/$v.md" >/dev/null
   }
   # rr_publish <reldir> <rev>: verify, then the upload a publish makes (the stand-in gh)
-  rr_publish() { (cd "$g" && PATH="$dir/bin:$PATH" "$rr" verify "$1" --commit "$2" >"$dir/out.txt" 2>&1 &&
-    PATH="$dir/bin:$PATH" gh release create "v$v" --target "$2" "$1/SWTOR-on-Mac-$v.dmg"); }
+  rr_publish() { (cd "$g" && PATH="$dir/bin:$PATH" "$rr" verify "$1" --commit "$2" --notes "release-notes/$v.md" >"$dir/out.txt" 2>&1 &&
+    PATH="$dir/bin:$PATH" gh release create "v$v" --target "$2" --notes-file "release-notes/$v.md" "$1/SWTOR-on-Mac-$v.dmg"); }
   rr_uploaded() { grep -q '^release create' "$FX_GH_LOG" 2>/dev/null; }
   # rr_refused <what> <reldir> <rev> <expected FAIL text>: verify fails with that, and nothing is uploaded
   rr_refused() {
@@ -100,10 +100,21 @@ EOF
   rr_rel foreign; echo "path $HOME" >>"$dir/foreign/RECEIPT"
   rr_refused "a line outside the receipt's format" "$dir/foreign" "$sq" "lines outside its format"
 
+  # the notes to upload edited, not committed
+  cp "$g/release-notes/$v.md" "$dir/notes.keep"; echo "An edit." >>"$g/release-notes/$v.md"
+  rr_refused "the notes to upload edited after the build, not committed" "$dir/rc" "$sq" "the notes to upload (release-notes/$v.md) aren't the receipt's"
+  cp "$dir/notes.keep" "$g/release-notes/$v.md"
   # the commit to be tagged moves on
   sed -i.bak "s/^APP_VERSION=.*/APP_VERSION=\${SWTOR_ON_MAC_VERSION:-9.8.8}/" "$g/build.sh"
   fx_git commit -qam "9.8.8"; c=$(fx_git rev-parse HEAD)
   rr_refused "build.sh's version at the commit" "$dir/rc" "$c" "APP_VERSION 9.8.8"
+  fx_git reset -q --hard "$sq"
+  # verify runs nothing of the commit it inspects: a build.sh whose bundle_version writes a file
+  awk -v m="$dir/ran" '{ print } /^bundle_version[(][)] [{]$/ { print "  : >\"" m "\"" }' "$g/build.sh" >"$dir/build.sh.new" &&
+    mv "$dir/build.sh.new" "$g/build.sh"
+  fx_git commit -qam "bundle_version writes a file"; c=$(fx_git rev-parse HEAD)
+  rr_refused "a commit whose bundle_version runs a command" "$dir/rc" "$c" "build.sh"
+  check "release-receipt: verify ran nothing of that commit" test ! -e "$dir/ran"
   fx_git reset -q --hard "$sq"
   echo later >"$g/src/app.txt"; fx_git commit -qam "a later change"; c=$(fx_git rev-parse HEAD)
   rr_refused "a changed tree at the commit" "$dir/rc" "$c" "src/app.txt"
