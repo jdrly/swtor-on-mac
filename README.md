@@ -219,6 +219,8 @@ it. If the problem stays after Uninstall, it isn't caused by SWTOR on Mac.
   second into the first mouse-look.
 - With *Game keys by keyboard position* on, keys follow US positions, so on Czech and German
   layouts the game swaps the names of Z and Y.
+- With *Native fullscreen (own Space)* on (development builds), the game isn't drawn while another
+  app is in front, so a recording or stream of it from the same Mac freezes at every Cmd-Tab.
 - Retina Mode and the keyboard and mouse settings can only change while the launcher and the game
   are closed, because they live in Wine's registry.
 - If you open the Cartel Market right after closing it, the game sometimes ignores the press. It

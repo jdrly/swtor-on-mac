@@ -104,6 +104,17 @@ flush_cap() {
   export D9MT_FLUSH_CAP=1
 }
 
+# Native fullscreen (Settings): with SWTOR_NATIVE_FULLSCREEN=1, the Mac driver's nativefs debug
+# channel for the game, on top of its WINEDEBUG (-all, or Debug Logging's), so its NATIVEFS:
+# lines reach wine.log with and without Debug Logging. The option itself is NativeFullscreen=y
+# for swtor.exe in the prefix (som.sh). Sets nf_note (on or off) for wine.log.
+native_fullscreen() {
+  nf_note=off
+  [ "$SWTOR_NATIVE_FULLSCREEN" = 1 ] || return 0
+  nf_note=on
+  export WINEDEBUG="${WINEDEBUG:--all},warn+nativefs"
+}
+
 # The game's language, from its command line: the values of "-set lang" and "-set torsets"
 # only, their letters, digits and , . _ - (the line also holds the account name and session
 # token, which are never read). Sets game_lang ("lang=de-de torsets=..." or "not given").
@@ -125,12 +136,13 @@ game_lang() {
 # What a game start ran with, for its wine.log (session-report.sh shows it; a before/after test
 # tells its sessions apart by it). Each looks once, when the game starts; nothing watches;
 # the ones that ask the system or read files run under session_diag's deadline.
-# session_settings: Debug Logging, the Metal HUD, Game Mode and d9mt's, DXVK's and Metal's
+# session_settings: Debug Logging, the Metal HUD, Game Mode, Native fullscreen and d9mt's, DXVK's and Metal's
 # environment (D9MT_*, DXVK_*, MTL_*; a path's value left out, the rest only its letters,
 # digits and , . ; : _ + = -)
 session_settings() {
-  printf 'debug-logging=%s hud=%s game-mode=%s' "$([ -n "$D9MT_PROFILE" ] && echo on || echo off)" \
-    "$([ "$MTL_HUD_ENABLED" = 1 ] && echo on || echo off)" "$([ -n "$SWTOR_GAMEMODE_APP" ] && echo on || echo off)"
+  printf 'debug-logging=%s hud=%s game-mode=%s native-fullscreen=%s' "$([ -n "$D9MT_PROFILE" ] && echo on || echo off)" \
+    "$([ "$MTL_HUD_ENABLED" = 1 ] && echo on || echo off)" "$([ -n "$SWTOR_GAMEMODE_APP" ] && echo on || echo off)" \
+    "$([ "$SWTOR_NATIVE_FULLSCREEN" = 1 ] && echo on || echo off)"
   env | LC_ALL=C grep -E '^(D9MT|DXVK|MTL)_[A-Za-z0-9_]*=' | LC_ALL=C sort | LC_ALL=C awk '{
     n = $0; sub(/=.*/, "", n); v = substr($0, length(n) + 2)
     if (v ~ /[\/\\]/) v = "(a path)"; else { gsub(/[^A-Za-z0-9,.;:_+=-]/, "", v); v = substr(v, 1, 80) }
@@ -245,6 +257,8 @@ if [ -n "$SWTOR_ENGINE" ]; then
     *swtor.exe*)
       # Debug Logging: Wine debug channels for the game only (RAWMOUSE, THREADCPU lines)
       [ -z "$SWTOR_GAME_WINEDEBUG" ] || export WINEDEBUG="$SWTOR_GAME_WINEDEBUG"
+      # Native fullscreen: the driver's NATIVEFS lines (after Debug Logging's channels)
+      native_fullscreen
       fps_limit
       flush_cap
       game_lang "$@"
@@ -272,6 +286,9 @@ if [ -n "$SWTOR_ENGINE" ]; then
         [ -z "$fps_note" ] || echo "SWTOR on Mac frame rate limit: $fps_note" >&2
         # Fewer GPU Batches, if on (with Debug Logging, d9mt's "flush cap" line follows)
         [ -z "$flush_note" ] || echo "SWTOR on Mac flush cap: $flush_note" >&2
+        # Native fullscreen, on or off, always (the driver's own "NATIVEFS: on" proves it read
+        # the option)
+        echo "SWTOR on Mac native fullscreen: $nf_note" >&2
         # the game's language and locale (after those: the A/B switches stay the second line)
         echo "SWTOR on Mac game language: $game_lang, LANG=${LANG:-}" >&2
         # the settings, power and thermal state at the start, and the d9mt files' hashes

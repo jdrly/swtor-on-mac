@@ -18,7 +18,7 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
 - `~/Library/Application Support/SWTOR on Mac/`
   - `engine/` – the Wine engine (self-contained: its libraries are inside it), with d9mt's
     winemetal bridge, SWTOR on Mac's build of its `ntdll.so` (`lib/wine/x86_64-unix`: the msync
-    fix, see [Building](building.md); the engine's own kept as `ntdll.so.stock`) (and, while *Game keys by keyboard position* or *Raw mouse-look* is on,
+    fix, see [Building](building.md); the engine's own kept as `ntdll.so.stock`) (and, while *Game keys by keyboard position*, *Raw mouse-look* or *Native fullscreen* is on,
     SWTOR on Mac's build of its Mac driver, `winemac.so` and the PE sides
     `x86_64-windows/winemac.drv`, `i386-windows/winemac.drv`; the engine's own files are kept
     as `<name>.stock`)
@@ -110,7 +110,10 @@ Wine, and macOS leaves the game (a foreground app) and the Wine session running.
   backends): DXGI stays on wined3d, so neither Apple's D3DMetal nor the DXMT tree with its own
   winemetal is used next to d9mt's bridge;
 - with Debug Logging on, sets `WINEDEBUG` to `SWTOR_GAME_WINEDEBUG` (the Mac driver's
-  `THREADCPU` and `RAWMOUSE` lines, game only).
+  `THREADCPU` and `RAWMOUSE` lines, game only);
+- with Native fullscreen on (`SWTOR_NATIVE_FULLSCREEN=1`), adds `warn+nativefs` to the game's
+  `WINEDEBUG` (the Mac driver's `NATIVEFS:` lines, game only, with and without Debug Logging),
+  and names the setting, on or off, in `wine.log`.
 
 Leftover Wine processes are processes of SWTOR on Mac's engine (its loader, or CrossOver's
 `winetemp-<inode>-…` hard links of it, found by their real executable: Wine 11 shows

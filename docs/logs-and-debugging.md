@@ -118,7 +118,16 @@ performance. A setting you choose is kept through updates and Reinstall.
   game then found prewarmed (`hits`), still building (`late`) or not in it (`misses`);
   StretchRect and ColorFill by path from the `XFER` lines;
 - (0.1.7 and later) Settings' Fewer GPU Batches when it is on (the wrapper's `flush cap:` line)
-  and, with Debug Logging, the flush cap d9mt applies.
+  and, with Debug Logging, the flush cap d9mt applies;
+- (0.1.9 and later) Native fullscreen: the setting, on or off (the wrapper's `native fullscreen:`
+  line), and whether the Mac driver confirmed it read the option (`NATIVEFS: on`; without it
+  the engine's own driver, or one without the option, ran). From the driver's `NATIVEFS:` lines
+  (channel `nativefs`, which the wrapper turns on with the setting, Debug Logging or not): the
+  entries into the game's own Space (`enter`, `entered`), the exits by reason (`exit
+  reason=windowed`, `hidden`, `other-screen`, `display-change`, `fight`, `user`), the failures
+  (`enter failed`, `exit failed`, `stuck`, `fight`) and the longest transition (`in <ms> ms`).
+  A *warning* row flags an `enter` without `entered` or `enter failed`, `stuck`, a `fight`, or
+  the wrapper's `on` without the driver's `NATIVEFS: on`.
 
 `wine.log` starts afresh at every game start (the wrapper keeps the 4 before it as
 `wine.log.1` to `wine.log.4`, the newest first), so `--keep` saves a copy to `sessions/`.
