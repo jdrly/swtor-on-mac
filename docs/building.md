@@ -28,17 +28,18 @@
   `allow-dyld-environment-variables`, the app and Sparkle no exceptions), builds the DMG,
   notarizes and staples it, and builds the Sparkle feed (`appcast.xml` with delta updates from
   the last 5 versions in `release/updates/`, checked by `scripts/check-appcast.swift`), then
-  drafts the GitHub release (`--sign-only`, `--no-notarize`, `--no-release` for local runs;
-  `--ci`, `--feed <version>` for the two halves of a CI release, as in SWGL on Mac).
+  drafts the GitHub release (`--sign-only`, `--no-notarize`, `--no-release` for local runs
+  and the release build; `--dev` for development builds). Before it builds a release, it checks
+  the notes' title, summary and Discord invite (release-notes/README.md).
 - `scripts/ui-snapshot.sh` builds the app's windows into a small test bundle and runs it on a
   temporary virtual display (swtor-mac-proper's `tools/vd/with-vd.sh`), never on the main one:
   screenshots of the main window in its states, of Settings, of the Logs collected alert and of
   the notice (`shots`), which keys close that alert (`alertkeys`), and what the warp costs (`measure`,
   `sweep`, `findcost`, `idlecheck`, `stillcheck`: CPU, instructions, the GPU time the GPU driver
   counts for the process, frames drawn).
-- `.github/workflows/checks.yml` lints the scripts and builds the app;
-  `.github/workflows/release.yml` signs and notarizes on a `v*` tag. Both build on GitHub's
-  `xcode-27` image (macOS 27 with Xcode 27, a public preview; there is no `macos-27` label).
+- `.github/workflows/checks.yml` lints the scripts and builds the app on GitHub's `xcode-27`
+  image (macOS 27 with Xcode 27, a public preview; there is no `macos-27` label). No workflow
+  signs, notarizes or builds a release.
 
 - `scripts/build-winemac.sh` builds Wine's Mac driver (`winemac.so`, x86_64, and its PE sides
   `x86_64-windows/` and `i386-windows/winemac.drv`) from the sources the engine is built from
@@ -73,39 +74,66 @@
 
 ## Releasing
 
-Every release since 0.1.2 has been built, signed, notarized, checked and published by agents on
-my Mac. The Developer ID certificate, the notary credentials and Sparkle's EdDSA key exist only
-there. No step waits for an approval, and nobody clicks anything during a release. Publishing
-the release creates its tag `v<version>`, and the tag starts the Release workflow at once: its
-`release` environment has no protection rules and holds no secrets, so nothing asks for approval
-and the run can't sign. The agents cancel that run once the release is published. The Site
-workflow runs as usual and rebuilds swonmac.com.
+Agents build, sign, notarize, check and publish every release on my Mac. The Developer ID
+certificate, the notary credentials and Sparkle's EdDSA key exist only there. No workflow builds
+a release or signs with the Developer ID; the Checks workflow's build is ad-hoc signed and goes
+nowhere. Nobody approves a step or clicks anything once I've played the release
+candidate. [ADR 0007](adr/0007-releases-from-the-maintainers-mac.md) has the reasons. Every release has
+been built on my Mac, by agents since 0.1.2: no tag's run of the old Release workflow ever
+finished.
 
-The Release workflow and `scripts/release.sh --ci` and `--feed` still implement the route of
-[ADR 0004](adr/0004-releases-in-two-halves.md), in two halves, which no release since 0.1.2 has
-taken:
+1. **The release candidate.** The app at a commit of `main`, through the checks its changes call
+   for (the fixture groups, `scripts/test-sandbox.sh`, the d9mt pin's checks; CONTRIBUTING.md,
+   *Definition of Done*). I play it.
+2. **The version PR.** `APP_VERSION` in `build.sh`, `release-notes/<version>.md` and the
+   README's current version and *Pinned components* line, squash-merged into `main`. Its Checks
+   run includes the d9mt pin check (below).
+3. **The build**, in a clean checkout of the squash commit: `./build.sh`, then
+   `scripts/release.sh --no-release`. It signs, notarizes and staples the DMG, builds the feed
+   with deltas from the last five releases' DMGs in `release/updates/`, checks the feed with
+   `scripts/check-appcast.swift` and applies every delta. The agents record the sha256 of the
+   DMG, each delta and `appcast.xml`.
+4. **The checks of the DMG's own app**, without Wine: `codesign --verify --deep --strict`,
+   `spctl` for the app and the DMG, `stapler validate`, the `Info.plist` keys and versions, the
+   feed (`check-appcast.swift`, and it names the version), `som.sh status` in an empty sandbox
+   and `scripts/test-btm.sh`.
+5. **The binary-diff gate**, two comparisons of the DMG's app. Both have to pass.
+   - Against the release candidate I played: every Mach-O file is byte-identical or differs only
+     in its signature (compared after `codesign --remove-signature`), and d9mt's and Wine's
+     Windows files (the DLLs and `.drv` files) are byte-identical. Any other file differs only in
+     the version files (`Info.plist`, `app.properties`, `VERSIONS`), `Licenses/README.txt`,
+     `Assets.car` (actool's output isn't reproducible) and what the version PR changed.
+   - Against the last release's published app: a file differs only where the commits between the
+     two releases changed it or what it is built from. The files from `prebuilt/` (d9mt, the Mac
+     driver, `ntdll.so`) are the committed ones byte for byte, Mach-O files up to their
+     signature, and each changed script is its source at the squash commit.
 
-1. Bump `APP_VERSION` in `build.sh`, add `release-notes/<version>.md`, commit, then tag and
-   push: `git tag v<version> && git push origin main v<version>`.
-2. The Release workflow checks the d9mt pin (below), builds, signs and notarizes the app, and
-   creates the draft release `v<version>` with the DMG. Without the signing secrets it stops at
-   *Import the signing certificate*.
-3. On the Mac: `./build.sh` (it unpacks Sparkle's tools), then
-   `scripts/release.sh --feed <version>`. It downloads the notarized DMG from the draft, checks
-   it, builds and checks `appcast.xml` (and deltas from the older DMGs in `release/updates/`)
-   and uploads them to the draft.
-4. Publish the draft. The update is live once
-   `https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml` names the new
-   version.
+   A file added, removed or changed anywhere else stops the release. The first comparison shows
+   that the build being published is the one I played; the second, that nothing changed since
+   the last release that the commits don't explain.
+6. **Publish**, after checking the files against the recorded hashes, the squash commit against
+   `origin/main` and the notes against that commit's:
+   `gh release create v<version> --target <squash commit> --latest --title "SWTOR on Mac <version>" --notes-file release-notes/<version>.md`
+   with exactly the DMG, the deltas and `appcast.xml`. The tag this creates starts no build. The
+   Site workflow runs on the published release and rebuilds swonmac.com.
+7. **Verify.** Download the release's assets and compare them with the recorded hashes, and
+   check that `https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml` names
+   the new version, that the release is the latest, and that the Site run passed.
 
-Development builds (`APP_VERSION` `X.Y.Z-dev.N`, on the `dev` branch) don't go through CI:
+Changing the notes after the build doesn't rebuild anything. The change is a notes-only commit,
+the feed's `<description>` (the notes as Markdown, in CDATA) is replaced with the new notes, and
+the feed is checked again with `scripts/check-appcast.swift`. Its signatures cover the DMG and
+the deltas, not the description, so they stay valid. The feed's recorded sha256 is replaced with
+the edited file's; the DMG's and the deltas' stay as built. The release is then published from
+the notes' commit.
+
+Development builds (`APP_VERSION` `X.Y.Z-dev.N`, on the `dev` branch):
 `./build.sh && scripts/release.sh --dev`. It signs, notarizes and staples the DMG, then
-creates the GitHub pre-release `v<version>` with the DMG and
-`release-notes/<version>.md`, and no feed. The tag starts the Release workflow, which stops
-at its version check; cancel the run. The other modes and the workflow refuse dev versions.
+creates the GitHub pre-release `v<version>` with the DMG and `release-notes/<version>.md`, and
+no feed. The other modes refuse dev versions.
 
-Without CI, `./build.sh && scripts/release.sh` does everything on the Mac (sign, notarize, feed,
-draft).
+`./build.sh && scripts/release.sh` also does everything in one go (sign, notarize, feed, a draft
+release with the DMG, the deltas and the feed), without the gates above.
 
 ## d9mt pin
 
@@ -113,7 +141,7 @@ draft).
 `COMMIT` of `scripts/build-d9mt.sh`, that commit is on `jdrly/d9mt`'s `main`, and d9mt's `Checks`
 workflow has a green run of exactly that commit (a push, a nightly run or a run by hand; a pull
 request's run tests another tree and doesn't count). The Checks workflow runs it on every pull
-request and the Release workflow before it builds. A pin older than d9mt's CI (before `45fcedb`)
+request, the version PR's included. A pin older than d9mt's CI (before `45fcedb`)
 passes with a note. Exit status 1 means the pin fails; 2 means GitHub didn't answer or d9mt's run
 hasn't finished, which is no verdict: run it again.
 

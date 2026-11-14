@@ -44,4 +44,4 @@ never to Broadsword or SWTOR customer support.
   after the version in the title. The site leaves them out.
 - Support links both [Discord](https://discord.gg/AnV3fZWz2b) and the GitHub issues: not everybody
   who plays has a GitHub account.
-- The Release workflow stops when the title, the summary or the Discord invite is missing.
+- `scripts/release.sh` stops a release build when the title, the summary or the Discord invite is missing.

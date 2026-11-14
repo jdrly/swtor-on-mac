@@ -1,6 +1,6 @@
 # Checks every pull request and every push to main: the scripts and workflows lint clean, the
-# d9mt pin is green on d9mt's main, and the app builds. No secrets and read-only access; signing and notarizing happen only in
-# release.yml. (The installer's end-to-end test, scripts/test-sandbox.sh, needs the official
+# d9mt pin is green on d9mt's main, and the app builds. No secrets and read-only access; no workflow
+# signs, notarizes or builds a release (docs/building.md, *Releasing*). (The installer's end-to-end test, scripts/test-sandbox.sh, needs the official
 # SWTOR Mac app installed, so it runs on a developer's Mac, not here; its fixture groups,
 # scripts/test-fixtures.sh, need neither that app nor Wine and run here on the built app.)
 name: Checks
