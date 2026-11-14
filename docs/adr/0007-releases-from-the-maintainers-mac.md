@@ -42,8 +42,8 @@ fully automated, no need for manual intervention from me", run by "agents on my 
   only in its signature, d9mt's and Wine's Windows files are byte-identical, and any other file
   differs only in its version or where the version PR changed it. Against the last release as
   published, a file differs only where the commits between the two releases changed it or what
-  it is built from, and the files from `prebuilt/` are the committed ones byte for byte. A
-  difference anywhere else stops the release.
+  it is built from, and the files from `prebuilt/` are the committed ones byte for byte (Mach-O
+  files up to their signature). A difference anywhere else stops the release.
 - Exactly those files are published: `gh release create v<version> --target <squash commit>
   --latest` with the DMG, the deltas, `appcast.xml` and the notes. Then the assets are
   downloaded again and compared with the hashes recorded for them, and
