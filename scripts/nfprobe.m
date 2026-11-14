@@ -141,27 +141,38 @@ static void waitEvent(NSArray<NSString *> *names, NSUInteger mark, double until,
 
 /* ---- the end of a run ---- */
 
-static int finish(void)
+/* Prints the run's one verdict line and returns the exit status. Only the first call prints: a
+   later one (the watchdog after end() has printed) returns the status already printed. */
+static atomic_flag verdictOnce = ATOMIC_FLAG_INIT;
+static atomic_int verdictCode;
+
+static int finishWith(NSString *enterR, NSString *exitR)
 {
-    NSString *result = enterResult;
-    if ([run isEqualToString:@"control"] && !([enterResult isEqualToString:@"entered"] && [exitResult isEqualToString:@"exited"]))
+    if (atomic_flag_test_and_set(&verdictOnce)) return atomic_load(&verdictCode);
+    NSString *result = enterR;
+    if ([run isEqualToString:@"control"] && !([enterR isEqualToString:@"entered"] && [exitR isEqualToString:@"exited"]))
         result = @"no verdict";
     int code = [result isEqualToString:@"no verdict"] ? 12 : [result isEqualToString:@"refused"] ? 10
-        : [result isEqualToString:@"entered"] && [exitResult isEqualToString:@"exited"] ? 0 : 11;
-    printf("verdict run=%s result=%s exit=%s\n", run.UTF8String, result.UTF8String, exitResult.UTF8String);
+        : [result isEqualToString:@"entered"] && [exitR isEqualToString:@"exited"] ? 0 : 11;
+    atomic_store(&verdictCode, code);
+    printf("verdict run=%s result=%s exit=%s\n", run.UTF8String, result.UTF8String, exitR.UTF8String);
+    fflush(stdout);
     return code;
+}
+
+static int finish(void)
+{
+    return finishWith(enterResult, exitResult);
 }
 
 static void end(void)
 {
     atomic_store(&rendering, false);
     dispatch_semaphore_wait(renderDone, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
-    int code = finish();
     if (helper.running) [helper terminate];
     [win orderOut:nil];
     [win close];
-    fflush(stdout);
-    exit(code);
+    exit(finish());
 }
 
 /* ---- the frame counter ---- */
@@ -726,10 +737,8 @@ int main(int argc, char **argv)
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(limit * NSEC_PER_SEC)),
                        dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
                            say(@"watchdog: the run took longer than %.0f s", limit);
-                           enterResult = [enterResult isEqualToString:@"entered"] ? enterResult : @"failed";
-                           if ([enterResult isEqualToString:@"entered"]) exitResult = @"failed";
-                           fflush(stdout);
-                           _exit(finish());
+                           BOOL in = [enterResult isEqualToString:@"entered"];
+                           _exit(finishWith(in ? @"entered" : @"failed", in ? @"failed" : @"-"));
                        });
 
         [ProbeApp sharedApplication];
