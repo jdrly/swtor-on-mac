@@ -23,7 +23,9 @@
   release. `scripts/build-d9mt.sh --check-air-codegen <file>` runs only that guard.)
 - `build.sh` assembles `dist/SWTOR on Mac.app` with Sparkle (pinned download; ad-hoc signed;
   `--install` copies it to /Applications). Needs Xcode 27 (macOS 27 SDK); the app runs on
-  macOS 26 and later.
+  macOS 26 and later. The app's `Resources/VERSIONS` (in Collect Logs too) names its components
+  and the source tree it was built from: `source <git tree id of HEAD> clean`, or `changed` when
+  the working tree had changes, or `source unknown` outside a git checkout.
 - `scripts/release.sh` signs a copy with the Developer ID (hardened runtime; the helpers get
   `allow-dyld-environment-variables`, the app and Sparkle no exceptions), builds the DMG,
   notarizes and staples it, and builds the Sparkle feed (`appcast.xml` with delta updates from
@@ -91,8 +93,13 @@ finished.
 3. **The build**, in a clean checkout of the squash commit: `./build.sh`, then
    `scripts/release.sh --no-release`. It signs, notarizes and staples the DMG, builds the feed
    with deltas from the last five releases' DMGs in `release/updates/`, checks the feed with
-   `scripts/check-appcast.swift` and applies every delta. The agents record the sha256 of the
-   DMG, each delta and `appcast.xml`.
+   `scripts/check-appcast.swift` and applies every delta. It then writes the **receipt**,
+   `release/<version>/RECEIPT` (`scripts/release-receipt.sh`): the version, build and channel, the
+   source tree the app was built from (the `source` line of its `VERSIONS`: git's tree id and
+   whether the working tree was clean), the notes' sha256 and the sha256 of the DMG, each delta
+   and `appcast.xml`. No keys, user names or paths. Each gate below that passes on these files
+   is added with `scripts/release-receipt.sh gate release/<version> <name> pass`, which first
+   checks that the files are still the receipt's.
 4. **The checks of the DMG's own app**, without Wine: `codesign --verify --deep --strict`,
    `spctl` for the app and the DMG, `stapler validate`, the `Info.plist` keys and versions, the
    feed (`check-appcast.swift`, and it names the version), `som.sh status` in an empty sandbox
@@ -111,21 +118,30 @@ finished.
    A file added, removed or changed anywhere else stops the release. The first comparison shows
    that the build being published is the one I played; the second, that nothing changed since
    the last release that the commits don't explain.
-6. **Publish**, after checking the files against the recorded hashes, the squash commit against
-   `origin/main` and the notes against that commit's:
+6. **Publish**, after `scripts/release-receipt.sh verify release/<version> --commit <squash commit>`
+   passes and the squash commit is on `origin/main`. Verify reads only: the files against the
+   receipt's hashes, the DMG's name, the channel and the feed's versions against the receipt, an
+   app built from a clean tree, and at the commit to be tagged the same source tree (a squash
+   merge's equal tree passes), build.sh's `APP_VERSION` and `bundle_version`, and the notes. It
+   fails before anything is uploaded. Then:
    `gh release create v<version> --target <squash commit> --latest --title "SWTOR on Mac <version>" --notes-file release-notes/<version>.md`
    with exactly the DMG, the deltas and `appcast.xml`. The tag this creates starts no build. The
    Site workflow runs on the published release and rebuilds swonmac.com.
-7. **Verify.** Download the release's assets and compare them with the recorded hashes, and
-   check that `https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml` names
+7. **Verify.** `scripts/release-receipt.sh verify release/<version> --release v<version>`
+   downloads the release's assets and compares them with the receipt, the same files with the
+   same hashes, naming each one. Then check that `https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml` names
    the new version, that the release is the latest, and that the Site run passed.
 
 Changing the notes after the build doesn't rebuild anything. The change is a notes-only commit,
 the feed's `<description>` (the notes as Markdown, in CDATA) is replaced with the new notes, and
 the feed is checked again with `scripts/check-appcast.swift`. Its signatures cover the DMG and
-the deltas, not the description, so they stay valid. The feed's recorded sha256 is replaced with
-the edited file's; the DMG's and the deltas' stay as built. The release is then published from
-the notes' commit.
+the deltas, not the description, so they stay valid. `scripts/release-receipt.sh write
+release/<version> release-notes/<version>.md` then writes the receipt again with the new feed and
+notes; with the DMG and the deltas unchanged it keeps the gate runs. The release is published from
+the notes' commit, whose tree may differ from the receipt's only in `release-notes/<version>.md`.
+
+Development builds' `--dev` writes a receipt too (the DMG only) and verifies it against `HEAD`
+before it creates the pre-release; so does the one-go `scripts/release.sh` below before its draft.
 
 Development builds (`APP_VERSION` `X.Y.Z-dev.N`, on the `dev` branch):
 `./build.sh && scripts/release.sh --dev`. It signs, notarizes and staples the DMG, then

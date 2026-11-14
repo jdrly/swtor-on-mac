@@ -5,8 +5,11 @@
 #   release/<version>/SWTOR-on-Mac-<version>.dmg         signed, notarized, stapled
 #   release/<version>/SWTOR-on-Mac-<version>-from-<old>.delta   delta updates from older versions
 #   release/<version>/appcast.xml                       the feed, with only this version
+#   release/<version>/RECEIPT                           the source tree and the files' hashes
+#                                                       (scripts/release-receipt.sh; not --no-notarize)
 #   release/updates/                                    DMGs of this and the 5 previous versions
-# then creates a draft GitHub release v<version> with the DMG, the deltas and appcast.xml.
+# then, after scripts/release-receipt.sh verify against HEAD, creates a draft GitHub release
+# v<version> at HEAD with the DMG, the deltas and appcast.xml.
 # Publishing the draft makes the update live: the app reads
 # https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml.
 #
@@ -181,6 +184,7 @@ package
 
 case "$MODE" in
   --dev)
+    scripts/release-receipt.sh write "$OUT" "$NOTES"
     if [ -n "$DEV_NO_RELEASE" ]; then
       echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); no GitHub pre-release (--no-release)"
       exit 0
@@ -190,6 +194,7 @@ case "$MODE" in
     # the tag goes on the commit this was built from (the dev branch), which must be pushed
     head=$(git rev-parse HEAD)
     git branch -r --contains "$head" | grep -q . || { echo "Push $head first" >&2; exit 1; }
+    scripts/release-receipt.sh verify "$OUT" --commit "$head"
     gh release create "v$VERSION" --repo "$REPO" --prerelease --target "$head" \
       --title "SWTOR on Mac $VERSION (development build)" --notes-file "$NOTES" "$DMG"
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); pre-release v$VERSION"
@@ -253,12 +258,19 @@ for d in ${deltas[@]+"${deltas[@]}"}; do
   echo "  ${d##*/}: applies to $old, signature valid"
 done
 
+# The receipt of a release build: its source tree and the files' hashes (scripts/release-receipt.sh)
+case "$MODE" in ""|--no-release) scripts/release-receipt.sh write "$OUT" "$NOTES" ;; esac
+
 case "$MODE" in
   --no-notarize|--no-release)
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); no GitHub release ($MODE)" ;;
   *)
+    # the draft's tag goes on the commit the app was built from, which must be pushed
+    head=$(git rev-parse HEAD)
+    git branch -r --contains "$head" | grep -q . || { echo "Push $head first" >&2; exit 1; }
+    scripts/release-receipt.sh verify "$OUT" --commit "$head"
     echo "[release] creating the draft GitHub release v$VERSION"
-    gh release create "v$VERSION" --repo "$REPO" --draft --title "SWTOR on Mac $VERSION" \
+    gh release create "v$VERSION" --repo "$REPO" --draft --target "$head" --title "SWTOR on Mac $VERSION" \
       --notes-file "$NOTES" "$DMG" ${deltas[@]+"${deltas[@]}"} "$OUT/appcast.xml"
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); publish the draft to make the update live" ;;
 esac

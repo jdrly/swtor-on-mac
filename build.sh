@@ -252,11 +252,19 @@ EOF
 # update checks; som.sh and the app read it)
 printf 'version=%s\nbuild=%s\nchannel=%s\nauthor=%s\ngithub=%s\nrepo=%s\nfeed=%s\n' "$APP_VERSION" "$BUNDLE_VERSION" \
   "$CHANNEL" "$APP_AUTHOR" "$GITHUB_URL" "$REPO_URL" "$(plutil -extract SUFeedURL raw src/Info.plist)" >"$R/app.properties"
-printf 'app %s\nd9mt %s\nengine %s\nwinemac %s\nntdll %s\nsparkle %s\nsdk %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
+# source: the git tree id of HEAD the app was built from, and "changed" when the working tree
+# had changes (tracked or untracked, outside .gitignore), so the app isn't that tree; "unknown"
+# outside a git checkout. scripts/release-receipt.sh checks it against the commit to be tagged.
+if tree=$(git -C "$ROOT" rev-parse -q --verify 'HEAD^{tree}' 2>/dev/null); then
+  if [ -z "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then SOURCE="$tree clean"; else SOURCE="$tree changed"; fi
+else
+  SOURCE=unknown
+fi
+printf 'app %s\nd9mt %s\nengine %s\nwinemac %s\nntdll %s\nsparkle %s\nsdk %s\nsource %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
   "$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)" \
   "$(for p in $WINEMAC_PATCHES; do printf '%s %s ' "${p#winemac-}" "$(shasum -a 256 "patches/$p.patch" | cut -c1-12)"; done | sed 's/ $//')" \
   "${NTDLL_PATCH#ntdll-} $(shasum -a 256 "patches/$NTDLL_PATCH.patch" | cut -c1-12)" \
-  "$SPARKLE_VERSION" "$sdk" >"$R/VERSIONS"
+  "$SPARKLE_VERSION" "$sdk" "$SOURCE" >"$R/VERSIONS"
 
 # The Liquid Glass icon from Icon Composer's document (Assets.car, CFBundleIconName), plus the
 # .icns actool makes from it (CFBundleIconFile). actool needs absolute paths.
