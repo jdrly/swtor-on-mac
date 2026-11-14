@@ -28,8 +28,9 @@
 # its own, kept from start to start; only here, the suite's section 4d checks the other
 # switches); nativefs (Native fullscreen: som.sh set nativefs as a dry run on a planted install,
 # the app's Mac driver even with the other driver settings off, with a control that fails; the
-# wrapper's nativefs channel and lines; the session report's block on made-up logs; only here,
-# the suite's sections 4b and 6b check the real install and wrapper); self (this
+# wrapper's nativefs channel and lines; the session report's block on made-up logs; the Mac
+# driver's decision with scripts/test-nativefs-decide.sh (needs clang); only here, the suite's
+# sections 4b and 6b check the real install and wrapper); self (this
 # script's own promises, each on a run of its own: a wrong session report fails the checks, a
 # check that starts Wine or the app fails the run, the cleanup removes the root and nothing beside
 # it).
@@ -116,7 +117,7 @@ for g in $FX_GROUPS; do
     d9mt-pin) fx_d9mt_pin "$REPO/scripts/check-d9mt-pin.sh" "$REPO" "$ROOT/d9mt-pin" ;;
     air-codegen) fx_air_codegen "$REPO/scripts/air-codegen-guard.sh" "$REPO/scripts/build-d9mt.sh" "$ROOT/air-codegen" ;;
     d9mt-ab) fx_d9mt_ab "$REPO/scripts/d9mt-ab.sh" "$ROOT/d9mt-ab" ;;
-    nativefs) fx_nativefs "$APP" "$APP/Contents/Resources/wine-wrapper.sh" "$ROOT/nativefs" ;;
+    nativefs) fx_nativefs "$APP" "$APP/Contents/Resources/wine-wrapper.sh" "$ROOT/nativefs" "$REPO/scripts/test-nativefs-decide.sh" ;;
     self) fx_self "$REPO/scripts/test-fixtures.sh" "$APP" "$ROOT/self" ;;
   esac
 done
