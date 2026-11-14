@@ -157,8 +157,8 @@ With the setting on:
   `DllOverrides` under `AppDefaults\swtor_RC2.exe` in the prefix), so d9mt and its Metal bridge
   stay out of the Direct3D 12 process. `swtor.exe` keeps d9mt;
 - `AppDefaults\swtor_RC2.exe` gets the values `swtor.exe` has (`GrabPointer`, *Game keys by
-  keyboard position*, *Raw mouse-look* and its speed, `ThreadCpuStats`), and follows them when
-  they change;
+  keyboard position*, *Raw mouse-look* and its speed, *Native fullscreen*, `ThreadCpuStats`),
+  and follows them when they change;
 - with a Mullion driver and Debug Logging on, the wrapper turns on my fork's diagnostic switches
   for the client, which the fork leaves off by default: `MULLION_SESSION_HEADER=1` (a header with
   the build, the Mac, its GPU family and the switches, once per process) and `MULLION_STATS=1` (a

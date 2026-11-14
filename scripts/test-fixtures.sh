@@ -38,7 +38,8 @@
 # fork's archives: installed, named in env from its VERSION, the engine's files kept and put
 # back, d9mt's bridge untouched, v0.5-alpha.3's tree switched to the fork's build, a wrong
 # download, a VERSION of another commit or another engine's tree refused, env without
-# DirectX 12 while Mullion isn't in place; also the suite's section 17b); dx12-gptk
+# DirectX 12 while Mullion isn't in place, swtor_RC2.exe's NativeFullscreen following
+# Native fullscreen, with a control that fails; also the suite's section 17b); dx12-gptk
 # (development builds' som.sh dx12-gptk: D3DMetal from made-up Game Porting Toolkit images into a planted engine, the wrong ones
 # refused, and gptk_restore; also the suite's section 17c); nativefs (Native fullscreen: som.sh set nativefs as a dry run on a planted install,
 # the app's Mac driver even with the other driver settings off, with a control that fails; the

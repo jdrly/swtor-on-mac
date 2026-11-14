@@ -550,9 +550,9 @@ set_reg() {
 
 # DirectX 12's per-program Wine settings, straight in the prefix's user.reg (no Wine may run, as
 # for set_reg). With dx12_on, swtor_RC2.exe gets the values swtor.exe has (the mouse-look fix,
-# game keys by position, raw mouse-look and its speed, ThreadCpuStats) and Wine's builtin d3d9,
-# so d9mt and its Metal bridge stay out of the Direct3D 12 process. Otherwise every
-# AppDefaults\swtor_RC2.exe key goes. (The DllOverrides value only counts without a d3d9 entry in
+# game keys by position, raw mouse-look and its speed, native fullscreen, ThreadCpuStats) and
+# Wine's builtin d3d9, so d9mt and its Metal bridge stay out of the Direct3D 12 process.
+# Otherwise every AppDefaults\swtor_RC2.exe key goes. (The DllOverrides value only counts without a d3d9 entry in
 # WINEDLLOVERRIDES, which Wine asks first: env has d3d9=n,b for every process, so the wrapper
 # also sets WINEDLLOVERRIDES=d3d9=b for swtor_RC2.exe. That one is what keeps d9mt out.)
 dx12_reg() {
@@ -563,6 +563,7 @@ dx12_reg() {
     set_reg "$k\\\\Mac Driver" PhysicalKeyboard "$([ "$(setting physkeys)" = on ] && echo y || echo n)"
     set_reg "$k\\\\Mac Driver" RawMouseWhenCursorHidden "$([ "$(setting rawmouse)" = on ] && echo y || echo n)"
     set_reg "$k\\\\Mac Driver" RawMouseGameControllerScale "$(setting mousespeed)"
+    set_reg "$k\\\\Mac Driver" NativeFullscreen "$([ "$(setting nativefs)" = on ] && echo y || echo n)"
     set_reg "$k\\\\Mac Driver" ThreadCpuStats y
     set_reg "$k\\\\DllOverrides" d3d9 builtin
   elif [ -f "$reg" ] && grep -qiF "[$k" "$reg"; then
@@ -615,7 +616,7 @@ cmd_set() {
   esac
   write_settings "$key" "$value"
   # (swtor_RC2.exe's values follow swtor.exe's, from the settings just written)
-  case "$key" in physkeys|rawmouse|mousespeed|dx12) dx12_reg ;; esac
+  case "$key" in physkeys|rawmouse|mousespeed|nativefs|dx12) dx12_reg ;; esac
   write_env >/dev/null
   write_dxvk_conf
   echo "@done $key=$value. It takes effect the next time the game starts."
