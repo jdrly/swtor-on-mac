@@ -73,13 +73,23 @@
 
 ## Releasing
 
-Sparkle's EdDSA key never leaves Jan's Mac, so a release comes in two halves:
+Every release since 0.1.2 has been built, signed, notarized, checked and published by agents on
+my Mac. The Developer ID certificate, the notary credentials and Sparkle's EdDSA key exist only
+there. No step waits for an approval, and nobody clicks anything during a release. Publishing
+the release creates its tag `v<version>`, and the tag starts the Release workflow at once: its
+`release` environment has no protection rules and holds no secrets, so nothing asks for approval
+and the run can't sign. The agents cancel that run once the release is published. The Site
+workflow runs as usual and rebuilds swonmac.com.
+
+The Release workflow and `scripts/release.sh --ci` and `--feed` still implement the route of
+[ADR 0004](adr/0004-releases-in-two-halves.md), in two halves, which no release since 0.1.2 has
+taken:
 
 1. Bump `APP_VERSION` in `build.sh`, add `release-notes/<version>.md`, commit, then tag and
    push: `git tag v<version> && git push origin main v<version>`.
-2. The Release workflow (after approval in the `release` environment) checks the d9mt pin
-   (below), builds, signs and notarizes the app, and creates the draft release `v<version>`
-   with the DMG.
+2. The Release workflow checks the d9mt pin (below), builds, signs and notarizes the app, and
+   creates the draft release `v<version>` with the DMG. Without the signing secrets it stops at
+   *Import the signing certificate*.
 3. On the Mac: `./build.sh` (it unpacks Sparkle's tools), then
    `scripts/release.sh --feed <version>`. It downloads the notarized DMG from the draft, checks
    it, builds and checks `appcast.xml` (and deltas from the older DMGs in `release/updates/`)
