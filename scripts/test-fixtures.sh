@@ -37,7 +37,10 @@
 # pass; the downloaded assets are compared; the app's VERSIONS names its source tree; only here);
 # version-table (the release and development versions in order through build.sh's bundle_version,
 # the packaged wrapper's update check and the app's Installer.isNewer (needs swiftc), with a wrong
-# mapping that must fail; only here); self (this
+# mapping that must fail; only here); exception-ports (the packaged hold-launcher starts its
+# programs without the exception ports it inherited, so Rosetta can't forward a hardware exception
+# to a dead one; an x86_64 probe faults behind a dead port, with a control that fails; needs clang,
+# lipo and Rosetta, skipped without them; only here); self (this
 # script's own promises, each on a run of its own: a wrong session report fails the checks, a
 # check that starts Wine or the app fails the run, the cleanup removes the root and nothing beside
 # it).
@@ -84,11 +87,13 @@ pass=0 fail=0
 . scripts/fixtures/release-receipt.sh
 # shellcheck source=scripts/fixtures/version-table.sh
 . scripts/fixtures/version-table.sh
+# shellcheck source=scripts/fixtures/exception-ports.sh
+. scripts/fixtures/exception-ports.sh
 APP="dist/SWTOR on Mac.app"
 if [ $# -gt 0 ] && [ -d "$1" ]; then APP=$1; shift; fi
 APP="$(cd "$APP" 2>/dev/null && pwd)" || { echo "no app at $APP; run ./build.sh" >&2; exit 1; }
 [ -x "$APP/Contents/Resources/session-report.sh" ] || { echo "no session-report.sh in $APP" >&2; exit 1; }
-FX_ALL="session-report field-kit job-sandbox orphan-as is-launcher eval-exit bridge system-reports d9mt-pin air-codegen d9mt-ab nativefs release-receipt version-table self"
+FX_ALL="session-report field-kit job-sandbox orphan-as is-launcher eval-exit bridge system-reports d9mt-pin air-codegen d9mt-ab nativefs release-receipt version-table exception-ports self"
 FX_GROUPS="${*:-$FX_ALL}"
 for g in $FX_GROUPS; do
   case " $FX_ALL " in *" $g "*) ;; *) echo "unknown group $g (groups: $FX_ALL)" >&2; exit 2 ;; esac
@@ -131,6 +136,7 @@ for g in $FX_GROUPS; do
     nativefs) fx_nativefs "$APP" "$APP/Contents/Resources/wine-wrapper.sh" "$ROOT/nativefs" "$REPO/scripts/test-nativefs-decide.sh" ;;
     release-receipt) fx_release_receipt "$REPO/scripts/release-receipt.sh" "$REPO/build.sh" "$APP" "$ROOT/release-receipt" ;;
     version-table) fx_version_table "$REPO/build.sh" "$APP/Contents/Resources/wine-wrapper.sh" "$REPO/src/native/App.swift" "$ROOT/version-table" ;;
+    exception-ports) fx_exception_ports "$APP" "$ROOT/exception-ports" ;;
     self) fx_self "$REPO/scripts/test-fixtures.sh" "$APP" "$ROOT/self" ;;
   esac
 done
