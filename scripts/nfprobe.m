@@ -141,20 +141,19 @@ static void waitEvent(NSArray<NSString *> *names, NSUInteger mark, double until,
 
 /* ---- the end of a run ---- */
 
-/* Prints the run's one verdict line and returns the exit status. Only the first call prints: a
-   later one (the watchdog after end() has printed) returns the status already printed. */
+/* Prints the run's one verdict line and returns the exit status for its caller to exit with. Only
+   the first call prints; a later one (the watchdog while end() finishes, or the reverse) returns -1,
+   and its caller doesn't exit. The runner's own time limit covers a process that never gets there. */
 static atomic_flag verdictOnce = ATOMIC_FLAG_INIT;
-static atomic_int verdictCode;
 
 static int finishWith(NSString *enterR, NSString *exitR)
 {
-    if (atomic_flag_test_and_set(&verdictOnce)) return atomic_load(&verdictCode);
+    if (atomic_flag_test_and_set(&verdictOnce)) return -1;
     NSString *result = enterR;
     if ([run isEqualToString:@"control"] && !([enterR isEqualToString:@"entered"] && [exitR isEqualToString:@"exited"]))
         result = @"no verdict";
     int code = [result isEqualToString:@"no verdict"] ? 12 : [result isEqualToString:@"refused"] ? 10
         : [result isEqualToString:@"entered"] && [exitR isEqualToString:@"exited"] ? 0 : 11;
-    atomic_store(&verdictCode, code);
     printf("verdict run=%s result=%s exit=%s\n", run.UTF8String, result.UTF8String, exitR.UTF8String);
     fflush(stdout);
     return code;
@@ -165,6 +164,13 @@ static int finish(void)
     return finishWith(enterResult, exitResult);
 }
 
+/* Exits with the verdict's status, or waits for the watchdog that is printing its own. */
+static void exitWith(int code)
+{
+    while (code < 0) pause();
+    exit(code);
+}
+
 static void end(void)
 {
     atomic_store(&rendering, false);
@@ -172,7 +178,7 @@ static void end(void)
     if (helper.running) [helper terminate];
     [win orderOut:nil];
     [win close];
-    exit(finish());
+    exitWith(finish());
 }
 
 /* ---- the frame counter ---- */
@@ -513,12 +519,12 @@ static void leave(void)
     if (!screens.count) {
         say(@"no screen: this session has no window server display");
         enterResult = @"no verdict";
-        exit(finish());
+        exitWith(finish());
     }
     if (displayMode && screens.count < 2) {
         say(@"no second display attached");
         enterResult = @"no verdict";
-        exit(finish());
+        exitWith(finish());
     }
     target = displayMode ? screens.lastObject : screens.firstObject;
     targetID = screenID(target);
@@ -738,7 +744,8 @@ int main(int argc, char **argv)
                        dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
                            say(@"watchdog: the run took longer than %.0f s", limit);
                            BOOL in = [enterResult isEqualToString:@"entered"];
-                           _exit(finishWith(in ? @"entered" : @"failed", in ? @"failed" : @"-"));
+                           int code = finishWith(in ? @"entered" : @"failed", in ? @"failed" : @"-");
+                           if (code >= 0) _exit(code);
                        });
 
         [ProbeApp sharedApplication];
