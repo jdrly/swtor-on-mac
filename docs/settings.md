@@ -49,7 +49,7 @@ the one used last) and the selected pane's settings. Changes take effect the nex
 | Mouse | Raw mouse-look | on | While the game hides the pointer to turn the camera, the mouse's own moves from GameController's `GCMouse`, sent by an input thread of the Mac driver as they come, the macOS pointer frozen (see below): SWTOR on Mac's build of Wine's Mac driver in its engine and `RawMouseWhenCursorHidden=y` for `swtor.exe`; off, `n` (and the engine's own driver if *Game keys by keyboard position* is off too). Only while the launcher and the game are closed |
 | Mouse | Mouse-Look Speed | 1× | `RawMouseGameControllerScale` for `swtor.exe` (0.5× to 3×): a factor on the macOS pointer's speed, which raw mouse-look matches at 1× |
 | Updates | Check for updates automatically | on | Sparkle's automatic checks and the daily check at the game's start |
-| Troubleshooting | Debug Logging | off | `DXVK_LOG_LEVEL=info`, `D9MT_PROFILE=1` (with d9mt's `STATS` and `PACE` lines every second: frame times, and how evenly the game calls Present and how its thread's time per frame splits into d9mt's D3D9 calls and the game's own work), `D9MT_MEMSTATS=1`, `D9MT_DEBUG_FILE=C:\d9mt\flags.txt` (d9mt's live debug flags, see [Logs and debugging](logs-and-debugging.md#debug-logging-session-reports-and-live-d9mt-flags); else `DXVK_LOG_LEVEL=warn`), and `SWTOR_GAME_WINEDEBUG=-all,warn+rawmouse,warn+threadcpu`: the wrapper sets it as the game's `WINEDEBUG`, so the app's Mac driver logs `THREADCPU` (from `swtor.exe` only, `ThreadCpuStats=y` in the prefix) (the CPU time of the game's busiest threads and of the wineserver, once a second) and `RAWMOUSE` (raw mouse-look, once a second while it moves) |
+| Troubleshooting | Debug Logging | off | `DXVK_LOG_LEVEL=info`, `D9MT_PROFILE=1` (with d9mt's `STATS` and `PACE` lines every second: frame times, and how evenly the game calls Present and how its thread's time per frame splits into d9mt's D3D9 calls and the game's own work), `D9MT_MEMSTATS=1`, `D9MT_DEBUG_FILE=C:\d9mt\flags.txt` (d9mt's live debug flags, see [Logs and debugging](logs-and-debugging.md#debug-logging-session-reports-and-live-d9mt-flags); else `DXVK_LOG_LEVEL=warn`), and `SWTOR_GAME_WINEDEBUG=-all,warn+rawmouse,warn+threadcpu`: the wrapper sets it as the game's `WINEDEBUG`, so the app's Mac driver logs `THREADCPU` (from `swtor.exe` only, `ThreadCpuStats=y` in the prefix) (the CPU time of the game's busiest threads and of the wineserver, once a second) and `RAWMOUSE` (raw mouse-look, once a second while it moves, and a line when it ends because the game's window isn't on the active Space) |
 | Play Button | Quit SWTOR on Mac after launching | off | The app quits once **Play SWTOR** has opened the official app (the app's own preference) |
 
 They are kept in `~/Library/Application Support/SWTOR on Mac/settings.conf`; `env` and
@@ -103,4 +103,9 @@ messages. With the setting on:
   (SWTOR puts the pointer back where mouse-look began), and the prefix keeps Windows mouse
   acceleration settings untouched (SWTOR does not apply them itself);
 - the pointer is hidden as before, with a blank cursor image, never by turning the cursor off
-  (that would drop the game out of Direct presentation, the Metal HUD's *Direct*).
+  (that would drop the game out of Direct presentation, the Metal HUD's *Direct*);
+- mouse-look needs the game's window on the Space you're looking at: if you change Space while
+  holding the button and the game stays the active app (an empty desktop), the pointer is free
+  there and the game loses the mouse capture, as when you switch to another app. Back on the
+  game's Space, holding the button turns the camera again. Mission Control isn't covered: macOS
+  doesn't tell apps it opened.
