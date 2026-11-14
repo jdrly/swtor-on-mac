@@ -101,12 +101,12 @@ OLD_ENGINE_SHA256=203f9e9fd6c2cc77e6525d798a434ced326145db34a356355e05659d3445fd
 # commit, size and sha256 (the Mullion pin; scripts/check-mullion-pin.sh checks it against the
 # fork's CI), downloaded only when DirectX 12 is on with a Mullion driver. Its source is this
 # block: commit, name, URL, size, sha256 and the files taken from it change together.
-MULLION_COMMIT=63955f910b867dc928e5c66a0b90b63f96383805
-MULLION_TITLE="Mullion (jdrly/mullion 63955f9)"
-MULLION_URL=https://github.com/jdrly/mullion/releases/download/swtor-builds/mullion-swtor-63955f910b867dc928e5c66a0b90b63f96383805.tar.xz
-MULLION_API_URL=https://api.github.com/repos/jdrly/mullion/releases/assets/745722781
-MULLION_SIZE=9082172
-MULLION_SHA256=73e96fa408656b15455ab40ba7ede882a288a87c202ad77b387b7fb46ec999ab
+MULLION_COMMIT=0009110ac37cb4482c4aff7611515729277b1b52
+MULLION_TITLE="Mullion (jdrly/mullion 0009110)"
+MULLION_URL=https://github.com/jdrly/mullion/releases/download/swtor-builds/mullion-swtor-0009110ac37cb4482c4aff7611515729277b1b52.tar.xz
+MULLION_API_URL=https://api.github.com/repos/jdrly/mullion/releases/assets/745767308
+MULLION_SIZE=9084828
+MULLION_SHA256=8bd6c90396dfefe08e9371c8500205efecb9e38fbdf8c77e523d6be9978b47e7
 # what of it goes into the engine's dxmt tree (lib/wine/dxgi/dxmt), as the archive has them
 # (x86_64 only: the engine is x86_64, and Mullion has no 32-bit build)
 MULLION_FILES="x86_64-windows/d3d10core.dll x86_64-windows/d3d11.dll x86_64-windows/d3d12.dll

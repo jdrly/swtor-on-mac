@@ -78,8 +78,8 @@ includes the session report below). Turn Debug Logging off again afterwards: it 
 performance. A setting you choose is kept through updates and Reinstall.
 
 **DirectX 12 on Mullion (development builds).** With Debug Logging on, the DirectX 12 client also
-gets my fork's `MULLION_SESSION_HEADER=1` and `MULLION_STATS=1`: a `Mullion: session` header and
-`STATS`, `HITCH` and `COMPILE` lines in d9mt's form, in `wine.log` and in Mullion's own
+gets my fork's `MULLION_SESSION_HEADER=1`, `MULLION_STATS=1` and `MULLION_MEMSTATS=1`: a
+`Mullion: session` header and `STATS`, `HITCH`, `COMPILE` and `DIAG MEM` lines in d9mt's form, in `wine.log` and in Mullion's own
 `swtor_RC2_d3d12.log` (the fork's `docs/swtor/README.md` lists every line). The session report
 below reads their numbers, but still names d9mt in its labels and doesn't yet attribute a
 Mullion hitch to the driver. What these switches cost on DirectX 12 has not been measured.

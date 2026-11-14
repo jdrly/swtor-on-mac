@@ -228,15 +228,16 @@ dx12_swap() {
       export MULLION_LOG_PATH="$LOG_DIR" MULLION_DIAG_PATH="$LOG_DIR"
       [ "$SWTOR_DX12_DRIVER" != mullion-mtl3 ] || export MULLION_D3D12_METAL4=0
       # Debug Logging (on: env has D9MT_PROFILE, as for the settings line): my fork's diagnostic
-      # switches, off by default there: the session header, a STATS line each second, and HITCH
-      # and COMPILE lines for a frame of MULLION_HITCH_MS (its default, 50) or longer
-      [ -z "$D9MT_PROFILE" ] || export MULLION_SESSION_HEADER=1 MULLION_STATS=1 ;;
+      # switches, off by default there: the session header, a STATS line each second, HITCH and
+      # COMPILE lines for a frame of MULLION_HITCH_MS (its default, 50) or longer, and a DIAG MEM
+      # line every 5 s
+      [ -z "$D9MT_PROFILE" ] || export MULLION_SESSION_HEADER=1 MULLION_STATS=1 MULLION_MEMSTATS=1 ;;
   esac
   # D3DMetal imported by som.sh dx12-gptk: ntdll loads the import's libd3dshared, the one the
   # gptk tree's links name, not lib/external's (which every other process keeps loading)
   [ -z "${SWTOR_DX12_LIBD3DSHARED:-}" ] || export CX_APPLEGPTK_LIBD3DSHARED_PATH="$SWTOR_DX12_LIBD3DSHARED"
   # (the DXGI tree as compatdb's swtor-dx12 rule in env names it)
-  dx12_note="swtor_RC2.exe, driver ${SWTOR_DX12_DRIVER:-?} (dxgi=$(printf '%s\n' "$WINE_COMPATDB" | sed -n 's/^name=swtor-dx12;exe=swtor_RC2\.exe;dxgi=//p'))${D3DM_MTL4:+, D3DM_MTL4=$D3DM_MTL4}${MULLION_D3D12_METAL4:+, MULLION_D3D12_METAL4=$MULLION_D3D12_METAL4}${MULLION_SESSION_HEADER:+, MULLION_SESSION_HEADER=$MULLION_SESSION_HEADER}${MULLION_STATS:+, MULLION_STATS=$MULLION_STATS}${MULLION_CONFIG:+, MULLION_CONFIG=$MULLION_CONFIG}${SWTOR_DX12_DRIVER_VERSION:+, $SWTOR_DX12_DRIVER_VERSION}"
+  dx12_note="swtor_RC2.exe, driver ${SWTOR_DX12_DRIVER:-?} (dxgi=$(printf '%s\n' "$WINE_COMPATDB" | sed -n 's/^name=swtor-dx12;exe=swtor_RC2\.exe;dxgi=//p'))${D3DM_MTL4:+, D3DM_MTL4=$D3DM_MTL4}${MULLION_D3D12_METAL4:+, MULLION_D3D12_METAL4=$MULLION_D3D12_METAL4}${MULLION_SESSION_HEADER:+, MULLION_SESSION_HEADER=$MULLION_SESSION_HEADER}${MULLION_STATS:+, MULLION_STATS=$MULLION_STATS}${MULLION_MEMSTATS:+, MULLION_MEMSTATS=$MULLION_MEMSTATS}${MULLION_CONFIG:+, MULLION_CONFIG=$MULLION_CONFIG}${SWTOR_DX12_DRIVER_VERSION:+, $SWTOR_DX12_DRIVER_VERSION}"
 }
 
 # wine.log is written anew at every game start: keep the last 4 sessions' as wine.log.1 (the

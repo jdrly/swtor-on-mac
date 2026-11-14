@@ -112,7 +112,7 @@ With the setting on:
   process keeps wined3d. A rule that names an exe applies after the `exe=*` rules, whatever the
   line order;
 - with a Mullion driver, the setting downloads my fork's build of Mullion (`MULLION_*` in
-  `som.sh`: commit `63955f9`, 9 MB, checked against its pinned sha256, its `VERSION` against the
+  `som.sh`: commit `0009110`, 9 MB, checked against its pinned sha256, its `VERSION` against the
   pinned commit) and installs it over the engine's
   `dxgi/dxmt` tree, the engine's own files kept as `<name>.stock` (see [What it
   changes](how-it-works.md#what-it-changes)). A download or tree that isn't the expected one is
@@ -132,10 +132,12 @@ With the setting on:
   for the client, which the fork leaves off by default: `MULLION_SESSION_HEADER=1` (a header with
   the build, the Mac, its GPU family and the switches, once per process) and `MULLION_STATS=1` (a
   `STATS` line each second, and `HITCH` and `COMPILE` lines for a frame of 50 ms or more,
-  `MULLION_HITCH_MS`'s default). With Debug Logging off it sets neither;
+  `MULLION_HITCH_MS`'s default) and `MULLION_MEMSTATS=1` (a `DIAG MEM` line every 5 s: Metal's
+  allocation, the process footprint, the budget and the system's swap). With Debug Logging off
+  it sets none of them (Mullion's `MULLION-MEMORY-PRESSURE` line is on either way);
 - `wine.log`'s header names it: `SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion
-  (dxgi=dxmt), MULLION_SESSION_HEADER=1, MULLION_STATS=1, Mullion (jdrly/mullion 63955f9),
-  v0.5-alpha.3-129-g63955f9, codegen 340b2df89397 airconv 104` (the Mullion switches and
+  (dxgi=dxmt), MULLION_SESSION_HEADER=1, MULLION_STATS=1, MULLION_MEMSTATS=1, Mullion (jdrly/mullion 0009110),
+  v0.5-alpha.3-130-g0009110, codegen 3f6f0338eb82 airconv 104` (the Mullion switches and
   `MULLION_CONFIG` the client got, the pin, then the `git describe` line and the codegen line of
   the build's `VERSION`), or `driver gptk (dxgi=gptk), D3DMetal 4.0b2 (the
   engine's)`, with `MULLION_D3D12_METAL4=0` or `D3DM_MTL4=0` for a Metal 3 driver. The D3DMetal
