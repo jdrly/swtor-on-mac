@@ -97,7 +97,10 @@ with 0.1.8 stay in the cache and don't compile again after the update. Its graph
   [#202](https://github.com/jdrly/d9mt/pull/202), [#203](https://github.com/jdrly/d9mt/pull/203)).
 
 The app gives the pointer back when *Raw mouse-look* is on and the game's window isn't on the
-active Space ([#124](https://github.com/jdrly/swtor-on-mac/pull/124)). The session report names
+active Space ([#124](https://github.com/jdrly/swtor-on-mac/pull/124)). The launcher's hook starts
+the game without the exception ports it inherited, so Rosetta hands a hardware exception to Wine
+instead of a port whose owner is gone, and the game no longer freezes there
+([#134](https://github.com/jdrly/swtor-on-mac/pull/134)). The session report names
 PACE's rows for what they measure ([#128](https://github.com/jdrly/swtor-on-mac/pull/128)).
 Development builds get a *Native fullscreen (own Space)* setting
 ([#127](https://github.com/jdrly/swtor-on-mac/pull/127)). Release builds show it only while it
