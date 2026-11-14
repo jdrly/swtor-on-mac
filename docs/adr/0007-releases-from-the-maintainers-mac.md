@@ -37,14 +37,16 @@ fully automated, no need for manual intervention from me", run by "agents on my 
 - Exactly that DMG's app is checked without Wine: its signature, Gatekeeper's assessment and the
   stapled ticket, its `Info.plist`, the feed, `som.sh status` in an empty sandbox and
   `scripts/test-btm.sh`.
-- The binary-diff gate ties the release to what was tested. The DMG's app is compared with the
-  release candidate I played and with the last release as published: every Mach-O file is
-  byte-identical or differs only in its signature, d9mt's and Wine's Windows files are
-  byte-identical, and any other file differs only where the commits between them changed it. A difference
-  anywhere else stops the release.
-- Exactly those files are published, unchanged: `gh release create v<version> --target
-  <squash commit> --latest` with the DMG, the deltas, `appcast.xml` and the notes. Then the
-  assets are downloaded again and compared with the hashes taken at build time, and
+- The binary-diff gate ties the release to what was tested, in two comparisons of the DMG's
+  app. Against the release candidate I played, every Mach-O file is byte-identical or differs
+  only in its signature, d9mt's and Wine's Windows files are byte-identical, and any other file
+  differs only in its version or where the version PR changed it. Against the last release as
+  published, a file differs only where the commits between the two releases changed it or what
+  it is built from, and the files from `prebuilt/` are the committed ones byte for byte. A
+  difference anywhere else stops the release.
+- Exactly those files are published: `gh release create v<version> --target <squash commit>
+  --latest` with the DMG, the deltas, `appcast.xml` and the notes. Then the assets are
+  downloaded again and compared with the hashes recorded for them, and
   `releases/latest/download/appcast.xml` has to name the new version.
 - Nobody approves a step and nobody clicks anything after the release candidate has passed and
   I have played it.
@@ -67,9 +69,11 @@ fully automated, no need for manual intervention from me", run by "agents on my 
 - The binary-diff gate and the publish and verify steps are scripts outside this repository, so
   nothing here enforces them yet; #47 adds a record of the tested files and a check of it.
 - A change to the release notes after the build changes `appcast.xml`, which embeds them, but not
-  the DMG or the deltas: the feed's `<description>` is swapped and the feed checked again with
-  `scripts/check-appcast.swift`.
-- The release notes' format (title, summary, Discord invite) is no longer checked by a workflow.
+  the DMG or the deltas: the feed's `<description>` is swapped, the feed checked again with
+  `scripts/check-appcast.swift`, and its new hash recorded in place of the old one. The DMG's
+  and the deltas' hashes stay as built.
+- The release notes' format (title, summary, Discord invite) is checked by
+  `scripts/release.sh` when it builds a release, no longer by a workflow.
 
 ## Alternatives considered
 

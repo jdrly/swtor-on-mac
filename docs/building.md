@@ -75,8 +75,9 @@
 ## Releasing
 
 Agents build, sign, notarize, check and publish every release on my Mac. The Developer ID
-certificate, the notary credentials and Sparkle's EdDSA key exist only there, and no workflow
-builds or signs anything. Nobody approves a step or clicks anything once I've played the release
+certificate, the notary credentials and Sparkle's EdDSA key exist only there. No workflow builds
+a release or signs with the Developer ID; the Checks workflow's build is ad-hoc signed and goes
+nowhere. Nobody approves a step or clicks anything once I've played the release
 candidate. [ADR 0007](adr/0007-releases-from-the-maintainers-mac.md) has the reasons. Every release has
 been built on my Mac, by agents since 0.1.2: no tag's run of the old Release workflow ever
 finished.
@@ -96,15 +97,20 @@ finished.
    `spctl` for the app and the DMG, `stapler validate`, the `Info.plist` keys and versions, the
    feed (`check-appcast.swift`, and it names the version), `som.sh status` in an empty sandbox
    and `scripts/test-btm.sh`.
-5. **The binary-diff gate.** The DMG's app is compared with the release candidate I played and
-   with the last release's published app. Every Mach-O file is byte-identical or differs only in
-   its signature (compared after `codesign --remove-signature`), d9mt's and Wine's Windows files
-   (the DLLs and `.drv` files) are byte-identical, and any other file differs only where the
-   commits between them changed it:
-   the version files (`Info.plist`, `app.properties`, `VERSIONS`), `Licenses/README.txt`,
-   `Assets.car` (actool's output isn't reproducible), and the files those commits touched, each
-   equal to its source at the squash commit. A file added, removed or changed anywhere else stops
-   the release. This is what shows that the build being published is the one that was tested.
+5. **The binary-diff gate**, two comparisons of the DMG's app. Both have to pass.
+   - Against the release candidate I played: every Mach-O file is byte-identical or differs only
+     in its signature (compared after `codesign --remove-signature`), and d9mt's and Wine's
+     Windows files (the DLLs and `.drv` files) are byte-identical. Any other file differs only in
+     the version files (`Info.plist`, `app.properties`, `VERSIONS`), `Licenses/README.txt`,
+     `Assets.car` (actool's output isn't reproducible) and what the version PR changed.
+   - Against the last release's published app: a file differs only where the commits between the
+     two releases changed it or what it is built from. The files from `prebuilt/` (d9mt, the Mac
+     driver, `ntdll.so`) are the committed ones byte for byte, Mach-O files up to their
+     signature, and each changed script is its source at the squash commit.
+
+   A file added, removed or changed anywhere else stops the release. The first comparison shows
+   that the build being published is the one I played; the second, that nothing changed since
+   the last release that the commits don't explain.
 6. **Publish**, after checking the files against the recorded hashes, the squash commit against
    `origin/main` and the notes against that commit's:
    `gh release create v<version> --target <squash commit> --latest --title "SWTOR on Mac <version>" --notes-file release-notes/<version>.md`
@@ -117,8 +123,9 @@ finished.
 Changing the notes after the build doesn't rebuild anything. The change is a notes-only commit,
 the feed's `<description>` (the notes as Markdown, in CDATA) is replaced with the new notes, and
 the feed is checked again with `scripts/check-appcast.swift`. Its signatures cover the DMG and
-the deltas, not the description, so they stay valid. The release is then published from the
-notes' commit.
+the deltas, not the description, so they stay valid. The feed's recorded sha256 is replaced with
+the edited file's; the DMG's and the deltas' stay as built. The release is then published from
+the notes' commit.
 
 Development builds (`APP_VERSION` `X.Y.Z-dev.N`, on the `dev` branch):
 `./build.sh && scripts/release.sh --dev`. It signs, notarizes and staples the DMG, then

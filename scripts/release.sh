@@ -33,7 +33,7 @@
 #   scripts/release.sh --dev --no-release   the same without the pre-release
 #
 # Releases are built, checked and published on the maintainer's Mac (docs/building.md,
-# *Releasing*; ADR 0007). CI builds and signs nothing.
+# *Releasing*; ADR 0007). CI builds no release and holds no signing material.
 #
 # Overrides: IDENTITY, NOTARY_PROFILE, or NOTARY_KEY/NOTARY_KEY_ID/NOTARY_ISSUER (an App Store
 # Connect API key file instead of the keychain profile); RELEASE_DIR (default
