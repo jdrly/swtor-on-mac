@@ -126,7 +126,7 @@ fork's SWTOR workflow has a green push run of exactly that commit. The Checks wo
 every pull request. Its exit statuses are the d9mt pin's. At install, `som.sh` also refuses an
 archive whose `VERSION` names another commit than `MULLION_COMMIT`.
 
-`dx12` pins the fork's `23f4799`.
+`dx12` pins the fork's `6027c1e`.
 
 `main` pins d9mt `f5439a6`, d9mt main after jdrly/d9mt#190: the driver of 0.1.8, the one
 release that changes the AIR codegen on purpose. Since `1d33ea4` it adds:
