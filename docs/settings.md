@@ -94,7 +94,7 @@ messages. With the setting on:
 
 ## DirectX 12 (experimental, development builds)
 
-Development builds have two more settings at the end of the Graphics pane, to try Broadsword's
+Development builds have three more settings at the end of the Graphics pane, to try Broadsword's
 DirectX 12 client (`swtor_RC2.exe`, which the patcher puts next to `swtor.exe`). A release build
 neither shows nor applies them: `som.sh set dx12` refuses there, and a `dx12=on` left in
 `settings.conf` by a development build does nothing.
@@ -103,6 +103,7 @@ neither shows nor applies them: `som.sh set dx12` refuses there, and a `dx12=on`
 |---|---|---|
 | DirectX 12 (experimental) | off | `SWTOR_DX12=1` in `env`: when the launcher starts `…\retailclient\swtor.exe`, the wrapper starts `swtor_RC2.exe` from the same folder with the same arguments. If that file isn't there, it starts `swtor.exe` as always and says so in `wine.log` and `hold.log`. Only while the launcher and the game are closed (it changes the prefix's registry) |
 | DirectX 12 Driver | Mullion | `SWTOR_DX12_DRIVER` in `env`: `mullion`, Mullion as my fork [jdrly/mullion](https://github.com/jdrly/mullion) builds it (Metal 4 where the GPU has it), `mullion-mtl3`, Mullion on Metal 3 (the wrapper sets `MULLION_D3D12_METAL4=0` for the game), `gptk`, Apple's D3DMetal from the engine (Metal 4 where macOS has it), or `gptk-mtl3`, D3DMetal on Metal 3 (`D3DM_MTL4=0`). Only while the launcher and the game are closed (a switch to or from Mullion changes the engine's files) |
+| DirectX 12 Frame Rate Limit | off | With a Mullion driver, `MULLION_CONFIG="d3d12.preferredMaxFrameRate=<n>"` in `env` (off: no line), one of the Frame Rate Limit's rates: Mullion's option for the most frames a second the DirectX 12 client presents. `env` has one `MULLION_CONFIG` line, its options separated by `;`. With a D3DMetal driver it does nothing. The Frame Rate Limit above is d9mt's and doesn't reach the DirectX 12 client |
 
 With the setting on:
 
@@ -111,7 +112,7 @@ With the setting on:
   process keeps wined3d. A rule that names an exe applies after the `exe=*` rules, whatever the
   line order;
 - with a Mullion driver, the setting downloads my fork's build of Mullion (`MULLION_*` in
-  `som.sh`: commit `124bfd5`, 9 MB, checked against its pinned sha256, its `VERSION` against the
+  `som.sh`: commit `0009110`, 9 MB, checked against its pinned sha256, its `VERSION` against the
   pinned commit) and installs it over the engine's
   `dxgi/dxmt` tree, the engine's own files kept as `<name>.stock` (see [What it
   changes](how-it-works.md#what-it-changes)). A download or tree that isn't the expected one is
@@ -127,9 +128,18 @@ With the setting on:
 - `AppDefaults\swtor_RC2.exe` gets the values `swtor.exe` has (`GrabPointer`, *Game keys by
   keyboard position*, *Raw mouse-look* and its speed, `ThreadCpuStats`), and follows them when
   they change;
+- with a Mullion driver and Debug Logging on, the wrapper turns on my fork's diagnostic switches
+  for the client, which the fork leaves off by default: `MULLION_SESSION_HEADER=1` (a header with
+  the build, the Mac, its GPU family and the switches, once per process) and `MULLION_STATS=1` (a
+  `STATS` line each second, and `HITCH` and `COMPILE` lines for a frame of 50 ms or more,
+  `MULLION_HITCH_MS`'s default) and `MULLION_MEMSTATS=1` (a `DIAG MEM` line every 5 s: Metal's
+  allocation, the process footprint, the budget and the system's swap). With Debug Logging off
+  it sets none of them (Mullion's `MULLION-MEMORY-PRESSURE` line is on either way);
 - `wine.log`'s header names it: `SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion
-  (dxgi=dxmt), Mullion (jdrly/mullion 124bfd5), v0.5-alpha.3-120-g124bfd5, codegen airconv 103`
-  (the pin, then the `git describe` line and AIR codegen of the build's `VERSION`), or `driver gptk (dxgi=gptk), D3DMetal 4.0b2 (the
+  (dxgi=dxmt), MULLION_SESSION_HEADER=1, MULLION_STATS=1, MULLION_MEMSTATS=1, Mullion (jdrly/mullion 0009110),
+  v0.5-alpha.3-130-g0009110, codegen 3f6f0338eb82 airconv 104` (the Mullion switches and
+  `MULLION_CONFIG` the client got, the pin, then the `git describe` line and the codegen line of
+  the build's `VERSION`), or `driver gptk (dxgi=gptk), D3DMetal 4.0b2 (the
   engine's)`, with `MULLION_D3D12_METAL4=0` or `D3DM_MTL4=0` for a Metal 3 driver. The D3DMetal
   comes from the framework's `Info.plist`, or from the import (see below).
 

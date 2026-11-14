@@ -101,12 +101,12 @@ OLD_ENGINE_SHA256=203f9e9fd6c2cc77e6525d798a434ced326145db34a356355e05659d3445fd
 # commit, size and sha256 (the Mullion pin; scripts/check-mullion-pin.sh checks it against the
 # fork's CI), downloaded only when DirectX 12 is on with a Mullion driver. Its source is this
 # block: commit, name, URL, size, sha256 and the files taken from it change together.
-MULLION_COMMIT=124bfd5f3f166b77926abf553649b4a1ccb8b8bf
-MULLION_TITLE="Mullion (jdrly/mullion 124bfd5)"
-MULLION_URL=https://github.com/jdrly/mullion/releases/download/swtor-builds/mullion-swtor-124bfd5f3f166b77926abf553649b4a1ccb8b8bf.tar.xz
-MULLION_API_URL=https://api.github.com/repos/jdrly/mullion/releases/assets/745350848
-MULLION_SIZE=9026716
-MULLION_SHA256=944d5367f0550f4c451eb864da9b63c159f94cbd52b695d2241ac9d4309f7edf
+MULLION_COMMIT=0009110ac37cb4482c4aff7611515729277b1b52
+MULLION_TITLE="Mullion (jdrly/mullion 0009110)"
+MULLION_URL=https://github.com/jdrly/mullion/releases/download/swtor-builds/mullion-swtor-0009110ac37cb4482c4aff7611515729277b1b52.tar.xz
+MULLION_API_URL=https://api.github.com/repos/jdrly/mullion/releases/assets/745767308
+MULLION_SIZE=9084828
+MULLION_SHA256=8bd6c90396dfefe08e9371c8500205efecb9e38fbdf8c77e523d6be9978b47e7
 # what of it goes into the engine's dxmt tree (lib/wine/dxgi/dxmt), as the archive has them
 # (x86_64 only: the engine is x86_64, and Mullion has no 32-bit build)
 MULLION_FILES="x86_64-windows/d3d10core.dll x86_64-windows/d3d11.dll x86_64-windows/d3d12.dll
@@ -426,9 +426,11 @@ status() {
 #               Broadsword's DirectX 12 client, swtor_RC2.exe, instead of swtor.exe
 #   dx12driver  its driver, one of DX12_DRIVERS: gptk (Apple's D3DMetal from the engine, Metal 4
 #               where macOS has it) or gptk-mtl3 (D3DMetal on Metal 3, D3DM_MTL4=0)
+#   dx12fps     "DirectX 12 Frame Rate Limit", development builds only: off or one of FPS_LIMITS;
+#               with a Mullion driver, Mullion's d3d12.preferredMaxFrameRate in env's MULLION_CONFIG
 # With physkeys or rawmouse on, the engine's Mac driver is the app's patched build
 # (Resources/wine/), else the engine's own (install_winemac).
-SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery flushcap dx12 dx12driver"
+SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery flushcap dx12 dx12driver dx12fps"
 MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
 HUD_POSITIONS="topleft topcenter topright centerleft centered centerright bottomleft bottomcenter bottomright"
 FPS_LIMITS="off 30 40 45 60"
@@ -437,7 +439,7 @@ setting_default() {
   case "$1" in
     retina|gamemode|vsync|updates|rawmouse) echo on ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
-    hud|physkeys|fpslimit|fpsbattery|flushcap|dx12) echo off ;;
+    hud|physkeys|fpslimit|fpsbattery|flushcap|dx12|dx12fps) echo off ;;
     dx12driver) echo mullion ;;
     memory) echo auto ;;
     mousespeed) echo 1 ;;
@@ -455,7 +457,7 @@ setting_valid() { # <key> <value>
     memory:auto|memory:low|memory:medium|memory:high|memory:ultra|memory:unlimited) return 0 ;;
     mousespeed:*) in_list "$2" "$MOUSE_SPEEDS" && return 0 ;;
     hudpos:*) in_list "$2" "$HUD_POSITIONS" && return 0 ;;
-    fpslimit:*) in_list "$2" "$FPS_LIMITS" && return 0 ;;
+    fpslimit:*|dx12fps:*) in_list "$2" "$FPS_LIMITS" && return 0 ;;
     dx12driver:*) in_list "$2" "$DX12_DRIVERS" && return 0 ;;
   esac
   return 1
@@ -575,7 +577,7 @@ dx12_reg() {
 cmd_set() {
   local key="${1:-}" value="${2:-}"
   setting_valid "$key" "$value" || { echo "@error Unknown setting: $key=$value"; exit 2; }
-  case "$key" in dx12|dx12driver) [ "$CHANNEL" = dev ] || die "DirectX 12 is in development builds only." ;; esac
+  case "$key" in dx12|dx12driver|dx12fps) [ "$CHANNEL" = dev ] || die "DirectX 12 is in development builds only." ;; esac
   [ -f "$MANIFEST" ] || die "SWTOR on Mac is not installed."
   # an install from 0.0.x runs on its own engine until Reinstall upgrades it: settings written
   # for this version's engine would break it
@@ -1374,7 +1376,7 @@ EOF
 }
 
 write_env() {
-  local gm hud dbg upd fps notify_log="" ab="" dx12_rule="" dx12_env="" tree drv=""
+  local gm hud dbg upd fps notify_log="" ab="" dx12_rule="" dx12_env="" tree drv="" mcfg=""
   say "Writing the settings file $SOM/env"
   gm="SWTOR_GAMEMODE_APP=\"$SOM/gamemode/SWTOR.app\""
   [ "$(setting gamemode)" = on ] || gm="#$gm   (Game Mode is off in Settings)"
@@ -1441,7 +1443,13 @@ SWTOR_DX12_DRIVER_VERSION=\"$(gptk_version)\""
         # libd3dshared (the one the tree's links name), not lib/external's
         [ ! -f "$GPTK_IMPORT/IMPORTED" ] || drv="$drv
 SWTOR_DX12_LIBD3DSHARED=\"$GPTK_IMPORT/libd3dshared.dylib\"" ;;
-      mullion*) tree=dxmt ;;
+      mullion*) tree=dxmt
+        # Mullion's options for the client (option=value pairs, ; between them, all in the one
+        # MULLION_CONFIG line): the DirectX 12 Frame Rate Limit, if one is set
+        [ "$(setting dx12fps)" = off ] || mcfg="${mcfg:+$mcfg;}d3d12.preferredMaxFrameRate=$(setting dx12fps)"
+        [ -z "$mcfg" ] || drv="
+# Mullion's options (Settings: DirectX 12 Frame Rate Limit)
+MULLION_CONFIG=\"$mcfg\"" ;;
     esac
     dx12_rule="
 name=swtor-dx12;exe=swtor_RC2.exe;dxgi=$tree"

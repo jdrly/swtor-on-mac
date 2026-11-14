@@ -108,6 +108,12 @@ final class GameSettings {
     Binding(get: { self.values["dx12driver"] ?? "mullion" }, set: { self.set("dx12driver", $0) })
   }
 
+  // DirectX 12 Frame Rate Limit (development builds): Mullion's d3d12.preferredMaxFrameRate
+  // (som.sh dx12fps, the Frame Rate Limit's values)
+  var dx12FpsLimit: Binding<String> {
+    Binding(get: { self.values["dx12fps"] ?? "off" }, set: { self.set("dx12fps", $0) })
+  }
+
   // Mouse-Look Speed: a factor on the macOS pointer's speed (som.sh MOUSE_SPEEDS)
   static let mouseSpeeds = ["0.5", "0.75", "1", "1.25", "1.5", "1.75", "2", "2.5", "3"]
 
@@ -325,6 +331,15 @@ struct SettingsView: View {
           Text("DirectX 12 Driver")
         }
         .disabled(settings.values["dx12"] != "on")
+        Picker(selection: settings.dx12FpsLimit) {
+          ForEach(GameSettings.fpsLimits, id: \.0) { value, title in Text(title).tag(value) }
+        } label: {
+          Text("DirectX 12 Frame Rate Limit")
+          Text("With a Mullion driver: Mullion keeps the DirectX 12 client at or below this rate. "
+               + "Off: no limit from Mullion.")
+        }
+        .disabled(settings.values["dx12"] != "on"
+                  || !(settings.values["dx12driver"] ?? "mullion").hasPrefix("mullion"))
       }
       .disabled(settings.running)
       #endif
