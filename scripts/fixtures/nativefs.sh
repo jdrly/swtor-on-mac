@@ -11,9 +11,11 @@
 # - session-report.sh's Native fullscreen block on made-up logs: a clean session, an enter
 #   without entered, a stuck exit, a fight, the wrapper's on without the driver's NATIVEFS: on,
 #   and the setting off. Each bad log is flagged; the clean one and the off one are not.
+# - the driver's decision itself (scripts/test-nativefs-decide.sh: the plain C cut out of
+#   patches/winemac-native-fullscreen.patch, built with clang, and two broken stubs that fail).
 # Sourced; check, piped and the counters come from lib.sh.
 #
-#   fx_nativefs <app> <wine-wrapper.sh> <folder>
+#   fx_nativefs <app> <wine-wrapper.sh> <folder> <test-nativefs-decide.sh>
 
 # fx_nf_set <som.sh> <value>: som.sh set nativefs <value> as a dry run in the planted install;
 # FX_RC its exit status, $FX_NF_D/set.txt what it printed
@@ -38,9 +40,11 @@ fx_nf_wrap() {
 fx_nf_report() { "$FX_NF_SR" "$FX_NF_D/$1.log" >"$FX_NF_D/$1.txt" 2>&1 || true; }
 # fx_nf_in <name> <regex>: a line of that report matches (grep -E)
 fx_nf_in() { grep -qE -- "$2" "$FX_NF_D/$1.txt"; }
+# fx_nf_decide <test-nativefs-decide.sh> <folder>: the decision test, its output in <folder>/decide.txt
+fx_nf_decide() { TMPDIR="$2" "$1" >"$2/decide.txt" 2>&1; }
 
 fx_nativefs() {
-  local app=$1 wrapper=$2 d=$3 som out dbg
+  local app=$1 wrapper=$2 d=$3 decide=$4 som out dbg
   FX_NF_D=$d FX_NF_SR="$app/Contents/Resources/session-report.sh"
   mkdir -p "$d"
 
@@ -139,4 +143,8 @@ fx_nativefs() {
   echo "$head" >"$d/before.log"
   fx_nf_report before
   check "nativefs: report: a log without the wrapper's line (0.1.8 and older) has no Native fullscreen row" eval '! fx_nf_in before "Native fullscreen"'
+
+  # 4. the Mac driver's decision, built from the patch (its two broken stubs must fail)
+  check "nativefs: the driver's decision passes its test, and the stubs that never enter or ignore the player's exit fail" \
+    fx_nf_decide "$decide" "$d"
 }

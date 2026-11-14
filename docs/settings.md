@@ -80,6 +80,17 @@ toggle in `src/native/Settings.swift`. With the setting on, the driver logs `NAT
 `wine.log` (see [Logs and debugging](logs-and-debugging.md)); a driver build without the option
 ignores it, and then no `NATIVEFS: on` line comes.
 
+What the driver does with it on (`patches/winemac-native-fullscreen.patch`): the game's window
+goes into its Space when it has no title bar and covers exactly one screen, for 300 ms, with
+SWTOR the active app; it comes out when the game goes windowed or hides the window, and moves to
+another screen's Space when the game covers that one. In the Space the Dock and menu bar are
+hidden; leave it with Control-Option-Command-F (the Window menu) or the game's display setting.
+Leaving by hand keeps the game out until its next switch to fullscreen. With "Displays have
+separate Spaces" off and more than one screen it doesn't enter (a Space would blank the other
+screens), and after a display change it waits a second before it decides again. On a notched
+MacBook the Space ends below the camera housing, so the game's window is a little shorter than
+the panel.
+
 **Raw mouse-look** ports [SWGL on Mac](https://github.com/jdrly/swgl-on-mac)'s two mouse
 patches to SWTOR. SWTOR has no raw input: while you hold a mouse button it hides the pointer,
 reads the pointer's position from its window messages and puts it back to the window's centre

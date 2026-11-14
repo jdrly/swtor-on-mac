@@ -6,3 +6,4 @@ patches, in this order:
   patches/winemac-swgl-relative-mouse.patch sha256 a29084da5cbe05309af6b90395a9cf36ef846113ebc1c8c50a6485ddcbf49c47
   patches/winemac-swgl-input-thread.patch sha256 0528f6f470621905df199192d098a1934ad209c025baf3bad0dc8c4a238ba9cf
   patches/winemac-swtor-mouse.patch sha256 fcc024b9657f0452c631e0602f305b99f48f4e7618dbb08aa993d269b2c8533d
+  patches/winemac-native-fullscreen.patch sha256 c88c6292432c1c9111a408bc9c3e7a3c3c8eda2f0770664b7eb2df6667d40aea

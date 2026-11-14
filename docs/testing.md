@@ -100,3 +100,18 @@ exits 1. `--control-without-toggle` is its failing control, and `--display` adds
 display that reports what happens to the window when that display goes away. Run it in a logged-in
 GUI session that nobody is using: each run takes the screen for a few seconds. The probe isn't part
 of the app.
+
+`scripts/test-nativefs-decide.sh` tests the Mac driver's native fullscreen decision without
+AppKit, Wine or a GUI: it cuts the plain C between the "nativefs decision" markers out of
+`patches/winemac-native-fullscreen.patch`, builds `scripts/nativefs-decide-test.c` against it with
+`clang` and runs it (which windows qualify, the 300 ms and 150 ms waits, d9mt's style-then-frame
+order, another screen, the fight guard, failed entries and exits, the player's exit, the settle
+after a display change), then builds it against two broken stubs, one that never enters and one
+that ignores the player's exit, which must fail. `scripts/test-fixtures.sh` runs it in its
+`nativefs` group. `scripts/nfwinprobe.c` is the window probe for the same patch, built like the
+keyboard probe and run as `swtor.exe` under the engine with the app's Mac driver: a popup covering
+the primary monitor goes windowed (the style, then the rect, as d9mt does), fullscreen again, is
+hidden, shown and closed, and every window message it gets is logged without times, so a run with
+`NativeFullscreen=y` compares line by line with one with `n` or with the engine's own driver. It
+needs a logged-in GUI session and the app active (a click on its window, or a helper that hands
+activation over).
