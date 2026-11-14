@@ -91,7 +91,7 @@ with 0.1.8 stay in the cache and don't compile again after the update. Its graph
   start loads it. The temporary file of about 9 MB that a quit could leave behind is cleaned up
   ([jdrly/d9mt#196](https://github.com/jdrly/d9mt/pull/196)).
 - Indexed triangle fans drawn as triangle lists ([#197](https://github.com/jdrly/d9mt/pull/197)).
-  SWTOR doesn't draw any.
+  None showed up in the SWTOR logs checked, so the game shouldn't look different.
 - Counters and switches for the speed work, off unless a tester turns them on
   ([#193](https://github.com/jdrly/d9mt/pull/193), [#201](https://github.com/jdrly/d9mt/pull/201),
   [#202](https://github.com/jdrly/d9mt/pull/202), [#203](https://github.com/jdrly/d9mt/pull/203)).
@@ -100,7 +100,8 @@ The app gives the pointer back when *Raw mouse-look* is on and the game's window
 active Space ([#124](https://github.com/jdrly/swtor-on-mac/pull/124)). The session report names
 PACE's rows for what they measure ([#128](https://github.com/jdrly/swtor-on-mac/pull/128)).
 Development builds get a *Native fullscreen (own Space)* setting
-([#127](https://github.com/jdrly/swtor-on-mac/pull/127)); release builds don't show it yet.
+([#127](https://github.com/jdrly/swtor-on-mac/pull/127)). Release builds show it only while it
+is on, so it can be turned off again.
 
 [docs/building.md](docs/building.md#d9mt-pin) lists everything the pin brings.
 
