@@ -78,44 +78,32 @@ Uninstall and every Settings pane.
 
 ## Current version
 
-The current release is [0.1.7.1](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.7.1),
-published on 11 November 2026. Every release lists its changes on the
+The current release is [0.1.8](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.8),
+published on 14 November 2026. Every release lists its changes on the
 [releases page](https://github.com/jdrly/swtor-on-mac/releases) and on
 [swonmac.com](https://swonmac.com).
 
-0.1.7.1 makes new installs work again. athei's release of the Wine engine went offline, so Install
-stopped at the engine's download. The same file, byte for byte, now comes from
-[jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/tag/cx-26.3.0-8), see
-[ADR 0006](docs/adr/0006-engine-downloaded-from-jdrly-wine-engine.md). Collect Logs now also reads
-macOS 27's kernel panic reports, which have a plain-text System Profile after their JSON.
+0.1.8 is the one release that changes the code that compiles the game's shaders on purpose (AIR
+codegen `25fc2491`, no lineage). After the update the game compiles its shaders again, once, and
+Metal rebuilds its pipeline archives. Its graphics driver, d9mt
+[`f5439a6`](https://github.com/jdrly/d9mt/tree/f5439a625c3c30697d53ac658f86801ca6083e7f), brings:
 
-Everything else is 0.1.7. Its graphics driver, d9mt
-[`1d33ea4`](https://github.com/jdrly/d9mt/tree/1d33ea43785a56de329c5ff6583cca65ed3e9cf0), brings:
+- Shaders in the format Apple's toolchain writes for the macOS the game runs on: AIR 2.8 and
+  Metal 4.0 on macOS 26, AIR 2.9 and Metal 4.1 on macOS 27 and later, see
+  [jdrly/d9mt#167](https://github.com/jdrly/d9mt/pull/167).
+- A newer dxbc-spirv ([#168](https://github.com/jdrly/d9mt/pull/168)), and vertex positions in
+  Apple's position-invariance form, so passes that compute the same position land on the same
+  depth ([#172](https://github.com/jdrly/d9mt/pull/172)).
+- Fixed-function drawing fixes: flat shading is honoured, fog whose start and end are equal no
+  longer covers everything, pre-transformed geometry isn't cut by the 3D scene's clip planes, cube and volume textures
+  work, and a wireframe draw is a wireframe, see
+  [#169](https://github.com/jdrly/d9mt/pull/169), [#173](https://github.com/jdrly/d9mt/pull/173)
+  and [#165](https://github.com/jdrly/d9mt/pull/165).
+- Metal's pipeline archives in a folder per AIR codegen and target. The first start deletes the
+  folders earlier versions left behind ([#174](https://github.com/jdrly/d9mt/pull/174)).
 
-- Fewer ways for the GPU to fault: empty texture slots get an empty texture of the kind the shader
-  expects, vertex reads and draw counts stay inside the game's buffers, every pipeline is resident,
-  and a copy after a render pass waits for its vertex work. None of these is proven to be the cause
-  of the GPU faults a few players saw.
-- No flickering anti-aliasing lines on M1–M4 Macs: lossless texture compression is off for
-  anti-aliased textures there, see [jdrly/d9mt#140](https://github.com/jdrly/d9mt/pull/140).
-- A suspected fix for a startup crash on an M1 Mac with macOS 26.1: pipelines are described to
-  Metal without unused vertex buffer slots and colour outputs, see
-  [jdrly/d9mt#156](https://github.com/jdrly/d9mt/pull/156) and
-  [#157](https://github.com/jdrly/d9mt/pull/157).
-- Clearer logs: a `D9MT-GPU-ERROR` line when the GPU fails a frame and a `D9MT-FATAL` line that names
-  where a crash happened, see [jdrly/d9mt#134](https://github.com/jdrly/d9mt/pull/134) and
-  [#155](https://github.com/jdrly/d9mt/pull/155).
-
-Updating from 0.1.6 keeps your compiled shaders: the code that compiles them is unchanged (AIR
-codegen `38243f7b`, lineage 0.1.5.1). Metal rebuilds some of its own pipelines once after the
-update. The app adds the *Fewer GPU Batches (Experimental)* setting, and Collect Logs adds
-extracts of macOS's system reports and a side-by-side view of the last few game starts.
-
-`main` is building 0.1.8, the one release that changes the code that compiles the game's shaders
-on purpose (AIR codegen `25fc2491`, no lineage). After that update the game compiles its shaders
-again, once, and Metal rebuilds its pipeline archives. d9mt deletes the archives earlier versions
-left behind on the first start. [docs/building.md](docs/building.md#d9mt-pin) lists what the
-pinned d9mt brings.
+[docs/building.md](docs/building.md#d9mt-pin) lists everything the pin brings, the switches that
+are off by default included.
 
 ## Install
 
@@ -445,7 +433,7 @@ that holds its EdDSA key, which never leaves that Mac. [docs/building.md](docs/b
 | Wine sources for the Mac driver and `ntdll.so`, athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), codeload tar.gz; the same archive in [jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-d23b39774528237cafe49f9a073286f854b779c0-source.tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006, only to configure that build | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
-`main` pins d9mt `f5439a6` for 0.1.8. Release 0.1.7.1 was built from `main` with d9mt `1d33ea4`, as was release 0.1.7. Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
+Release 0.1.8 was built from `main` with d9mt `f5439a6`. Release 0.1.7.1 was built from `main` with d9mt `1d33ea4`, as was release 0.1.7. Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
 `release/0.1.5` branch with the d9mt build it shipped.
 
 ## Documentation
