@@ -189,13 +189,20 @@ code.
 
 **Session report**
 `session-report.sh`: a summary of the last game session from `wine.log` (frame rate, hitches,
-compile waits, memory, d9mt's pipeline state cache); `--compare` puts 2 to 5 sessions side by
-side, `--mark` counts a fixed interval after the mark (docs/logs-and-debugging.md).
+compile waits, memory, the GPU's failures, d9mt's pipeline state cache), for d9mt and Mullion;
+`--compare` puts 2 to 5 sessions side by side, `--mark` counts a fixed interval after the mark
+(docs/logs-and-debugging.md).
+
+**Renderer**
+What a session drew with, as the session report names it: DirectX 9 on d9mt, or the DirectX 12
+client on Mullion or on D3DMetal (the wrapper's `SWTOR on Mac DirectX 12:` line in `wine.log`,
+and Mullion's session header). Sessions on different renderers compare side by side, never as an
+A/B/A (docs/logs-and-debugging.md).
 
 **Instrumented** / **ordinary play**
-Frame times from d9mt's profiling (Debug Logging on, `D9MT_PROFILE`) are *instrumented*; play
-with Debug Logging off is *ordinary play*, whose frame times only the Metal HUD shows. A report
-never calls instrumented numbers the player's frame rate.
+Frame times from d9mt's profiling (Debug Logging on, `D9MT_PROFILE`) or Mullion's `MULLION_STATS`
+(Debug Logging on) are *instrumented*; play with Debug Logging off is *ordinary play*, whose frame
+times only the Metal HUD shows. A report never calls instrumented numbers the player's frame rate.
 
 **Mark**
 In a before/after field test: one Cmd-Tab away from the game and back, standing at the spot; the

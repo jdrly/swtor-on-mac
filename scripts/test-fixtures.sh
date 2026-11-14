@@ -7,7 +7,9 @@
 #   scripts/test-fixtures.sh [path/to/SWTOR on Mac.app] [group...]
 #
 # Groups (default: all): session-report (the suite's section 6f: the packaged session-report.sh on
-# a sample log); field-kit (what a before/after field test reads: session-report.sh's
+# a sample log); session-report-dx12 (session-report.sh on a DirectX 12 session: a copy of my
+# Mullion fork's sample log, D3DMetal, d9mt's GPU lines, different renderers side by side; only
+# here); field-kit (what a before/after field test reads: session-report.sh's
 # measurement, interval, missing percentiles and A/B/A, the wrapper's lines at a game start,
 # Collect Logs' comparison of the kept starts; only here); job-sandbox (the suite's end under a job runner, on planted sandboxes, with copies
 # that fail; only here, so the suite's counts stay); orphan-as (the suite's orphan_as: argv[0]
@@ -57,6 +59,8 @@ REPO="$PWD"
 pass=0 fail=0
 # shellcheck source=scripts/fixtures/session-report.sh
 . scripts/fixtures/session-report.sh
+# shellcheck source=scripts/fixtures/session-report-dx12.sh
+. scripts/fixtures/session-report-dx12.sh
 # shellcheck source=scripts/fixtures/job-sandbox.sh
 . scripts/fixtures/job-sandbox.sh
 # shellcheck source=scripts/fixtures/orphan.sh
@@ -91,7 +95,7 @@ APP="dist/SWTOR on Mac.app"
 if [ $# -gt 0 ] && [ -d "$1" ]; then APP=$1; shift; fi
 APP="$(cd "$APP" 2>/dev/null && pwd)" || { echo "no app at $APP; run ./build.sh" >&2; exit 1; }
 [ -x "$APP/Contents/Resources/session-report.sh" ] || { echo "no session-report.sh in $APP" >&2; exit 1; }
-FX_ALL="session-report field-kit job-sandbox orphan-as is-launcher eval-exit bridge system-reports d9mt-pin mullion-pin air-codegen d9mt-ab dx12 dx12-mullion dx12-gptk self"
+FX_ALL="session-report session-report-dx12 field-kit job-sandbox orphan-as is-launcher eval-exit bridge system-reports d9mt-pin mullion-pin air-codegen d9mt-ab dx12 dx12-mullion dx12-gptk self"
 FX_GROUPS="${*:-$FX_ALL}"
 for g in $FX_GROUPS; do
   case " $FX_ALL " in *" $g "*) ;; *) echo "unknown group $g (groups: $FX_ALL)" >&2; exit 2 ;; esac
@@ -121,6 +125,7 @@ for g in $FX_GROUPS; do
   echo "== $g"
   case $g in
     session-report) fx_session_report "$APP/Contents/Resources/session-report.sh" "$ROOT/session-report" ;;
+    session-report-dx12) fx_session_report_dx12 "$APP/Contents/Resources/session-report.sh" "$REPO/scripts/fixtures/mullion-session.log" "$ROOT/session-report-dx12" ;;
     field-kit) fx_field_kit "$APP" "$APP/Contents/Resources/wine-wrapper.sh" "$ROOT/field-kit" ;;
     job-sandbox) fx_job_sandbox "$ROOT/job-sandbox" ;;
     orphan-as) fx_orphan_as "$ROOT/orphan-as" ;;
