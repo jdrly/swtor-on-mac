@@ -34,8 +34,11 @@
 #             re-cleared (format, size, aspects), why, and the D3D9 call it came from;
 #             RESTORE-SUMMARY when the game released its device (not every exit does)
 #   PACE      once a second (d9mt 4b7ab26 and later): the interval between the game's
-#             Present calls (min/avg/max, sd), the Present thread's time per frame inside d9mt
-#             and outside it, its CPU time split into d9mt's and the game's own
+#             Present calls (min/avg/max, sd); d9mt's share of each frame, as per-device
+#             outer-entry time (the D3D9 calls on the device, from any thread, that began while
+#             no other was open: not the Present thread's time), and the rest of the frame; cpu
+#             (GetThreadTimes, the whole process's CPU time on Wine for macOS) less d9mt's busy
+#             time as gameCpu, which is therefore not the game thread's CPU either (d9mt #81)
 #   THREADCPU once a second (the app's Mac driver, 0.1.0-dev.2 and later): CPU time of the
 #             game process, its busiest threads and the session's wineserver, in ms
 #   RAWMOUSE  once a second while raw mouse-look moves (0.1.0-dev.2 and later): moves by
