@@ -236,8 +236,8 @@ fx_dx12_mullion() {
   check "dx12-mullion: dx12 on again, nativefs on: NativeFullscreen=y for swtor_RC2.exe, Mullion installed ($FX_RC)" \
     eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor_RC2.exe y && fx_dxm_mullion'
   fx_dxm set nativefs off
-  check "dx12-mullion: nativefs off, DirectX 12 on: NativeFullscreen=n for both, the engine's own Mac driver ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor.exe n && fx_dxm_nf swtor_RC2.exe n && cmp -s "$e/lib/wine/x86_64-unix/winemac.so.stock" "$e/lib/wine/x86_64-unix/winemac.so"'
+  check "dx12-mullion: nativefs off, DirectX 12 on: NativeFullscreen=n for both, the app's Mac driver kept for raw mouse-look (on by default) ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor.exe n && fx_dxm_nf swtor_RC2.exe n && grep -qx rawmouse=on "$FX_DXM_SOM/settings.conf" && cmp -s "$d/dev/Resources/wine/winemac.so" "$e/lib/wine/x86_64-unix/winemac.so"'
   # the control: a dx12_reg that doesn't write NativeFullscreen; the same check must fail
   mkdir -p "$d/control"
   cp -R "$d/dev/Resources" "$d/control/"
