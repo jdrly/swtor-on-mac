@@ -91,7 +91,7 @@ REG
 printf '%s\n' "\$@" >"$FX_DX12_W/args"
 printf 'WINEDLLOVERRIDES=%s\nD3DM_MTL4=%s\nMULLION_D3D12_METAL4=%s\nMULLION_LOG_PATH=%s\nMULLION_DIAG_PATH=%s\nCX_APPLEGPTK_LIBD3DSHARED_PATH=%s\n' "\${WINEDLLOVERRIDES-<unset>}" "\${D3DM_MTL4-<unset>}" \
   "\${MULLION_D3D12_METAL4-<unset>}" "\${MULLION_LOG_PATH-<unset>}" "\${MULLION_DIAG_PATH-<unset>}" "\${CX_APPLEGPTK_LIBD3DSHARED_PATH-<unset>}" >"$FX_DX12_W/seen"
-printf 'MULLION_SESSION_HEADER=%s\nMULLION_STATS=%s\nMULLION_MEMSTATS=%s\nMULLION_CONFIG=%s\n' "\${MULLION_SESSION_HEADER-<unset>}" "\${MULLION_STATS-<unset>}" "\${MULLION_MEMSTATS-<unset>}" "\${MULLION_CONFIG-<unset>}" >>"$FX_DX12_W/seen"
+printf 'MULLION_SESSION_HEADER=%s\nMULLION_STATS=%s\nMULLION_MEMSTATS=%s\nMULLION_CONFIG=%s\nMULLION_TRACE_DIR=%s\n' "\${MULLION_SESSION_HEADER-<unset>}" "\${MULLION_STATS-<unset>}" "\${MULLION_MEMSTATS-<unset>}" "\${MULLION_CONFIG-<unset>}" "\${MULLION_TRACE_DIR-<unset>}" >>"$FX_DX12_W/seen"
 STUB
   # (hold-launcher's stand-in: no Wine session to start; --run-game <log> <lang> <wine> <args>)
   printf '#!/bin/bash\ncase "$1" in --run-game) shift 3; exec "$@" ;; esac\nexit 0\n' >"$FX_DX12_W/bin-real/hold-launcher"

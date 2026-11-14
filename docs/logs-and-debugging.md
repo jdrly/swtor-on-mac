@@ -38,6 +38,14 @@ those names, a home folder or a token is left out of the zip, and `left-out.txt`
 **Settings > Debug Logging** only when asked: it makes the logs much more detailed for the next
 game start, at some cost in performance, so turn it off again afterwards.
 
+**DirectX 12 on Mullion (development builds).** Mullion writes into the same folder, so its files
+go into the zip, redacted and leak-checked like the others: `swtor_RC2_d3d12.log` and
+`swtor_RC2_dxgi.log` (its log lines), `swtor_RC2.exe.flight` (the flight record: the last events
+of every thread, written when the GPU removes the device, a command buffer doesn't complete or
+the game crashes) and, only with a `MULLION_TRACE_*` switch set by hand, its trace log
+`mullion.log`, with the start before it as `mullion.prev.log`. A trace's shader files go into a
+`shaders/` folder there, which Collect Logs doesn't read: they are the game's own shaders.
+
 `system-reports/` has extracts of macOS's own reports in `/Library/Logs/DiagnosticReports` of the
 last 48 hours (or since the game's last start, if that is longer). They tell "the Mac froze and
 logged me out" and "the Mac restarted" apart from a game crash. Only extracts, never whole files,
@@ -95,7 +103,9 @@ switches cost on DirectX 12 has not been measured.
 - the app version, Wine engine and d9mt the session ran on (0.1.0-dev.1 and later: the
   wrapper's first line in `wine.log`; also in `effective-env.txt`, and Collect Logs'
   `system-info.txt` names the engine in place); (0.1.7 and later) when it started, the
-  SHA-256 of the d9mt files that ran, the app's settings (Debug Logging, the HUD, Game Mode,
+  SHA-256 of the d9mt files that ran (DirectX 12 on Mullion: of the `d3d12.dll` and
+  `winemetal.so` in the engine's `dxmt` tree, the wrapper's `driver files:` line in place of
+  `d9mt files:`), the app's settings (Debug Logging, the HUD, Game Mode,
   d9mt's and DXVK's environment, paths left out), and the power source, energy mode and
   macOS's thermal warnings at the start;
 - **Measurement**: every frame time in the log comes from d9mt's profiling or Mullion's

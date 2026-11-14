@@ -119,9 +119,11 @@ With the setting on:
   refused with the reason, and the setting stays as it was. Another driver, the setting off, or a
   release build's Reinstall puts the engine's own tree back. If Reinstall can't install Mullion,
   it says so and goes on: `env` then leaves DirectX 12 out, with a line saying why, and the game
-  starts as `swtor.exe`. Mullion's logs (`swtor_RC2_<dll>.log`) and its flight record
-  (`swtor_RC2.exe.flight`, written when the GPU removes the device) go into SWTOR on Mac's log
-  folder (`MULLION_LOG_PATH`, `MULLION_DIAG_PATH`), so Collect Logs has them;
+  starts as `swtor.exe`. Mullion's logs (`swtor_RC2_<dll>.log`), its flight record
+  (`swtor_RC2.exe.flight`, written when the GPU removes the device) and its trace log
+  (`mullion.log`, with a `MULLION_TRACE_*` switch set by hand) go into SWTOR on Mac's log
+  folder (`MULLION_LOG_PATH`, `MULLION_DIAG_PATH`, `MULLION_TRACE_DIR`), so Collect Logs has
+  them;
 - the client gets Wine's builtin `d3d9` (`WINEDLLOVERRIDES=d3d9=b` from the wrapper, and
   `DllOverrides` under `AppDefaults\swtor_RC2.exe` in the prefix), so d9mt and its Metal bridge
   stay out of the Direct3D 12 process. `swtor.exe` keeps d9mt;

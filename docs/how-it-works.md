@@ -60,7 +60,9 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
   (d9mt warnings; the 4 starts before it as `wine.log.1` to `wine.log.4`), `hold.log`
   (also a line per Wine start that is not the game: its time, the command's first word and who
   started it; and a line when the game ends: how long it ran, its exit code or signal, its
-  language), `launch-env.txt`, `effective-env.txt`
+  language), `launch-env.txt`, `effective-env.txt`; in a development build with DirectX 12 on
+  Mullion also Mullion's `swtor_RC2_d3d12.log`, `swtor_RC2_dxgi.log`, `swtor_RC2.exe.flight`
+  and, with a trace switch set by hand, `mullion.log`, `mullion.prev.log` and `shaders/`
 
 ## The wrapper and the Wine session
 

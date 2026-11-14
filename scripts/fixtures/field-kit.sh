@@ -172,7 +172,7 @@ warn:  STATS t=40 /' "$R/b.log" >"$R/b-hidden.log"
 
   # 6. The wrapper's lines, its functions on stand-ins: no path, no home folder
   local fns="$R/wrapper-fns.sh" pm="$R/pmset" pfx="$R/prefix" eng="$R/engine" line
-  sed -n '/^session_settings() {/,/^}/p; /^session_conditions() {/,/^}/p; /^d9mt_files() {/,/^}/p; /^session_diag() {/,/^}/p' "$wrapper" >"$fns"
+  sed -n '/^session_settings() {/,/^}/p; /^session_conditions() {/,/^}/p; /^file_hashes() {/,/^}/p; /^d9mt_files() {/p; /^session_diag() {/,/^}/p' "$wrapper" >"$fns"
   cat >"$pm" <<'PM'
 #!/bin/bash
 case "$*" in
@@ -191,8 +191,8 @@ PM
   check "wrapper: the settings line, paths left out" eval 'fk_in "$R/wrapper-lines.txt" "^debug-logging=on hud=on game-mode=on D9MT_AIR_CACHE=\(a path\) D9MT_DEBUG_FILE=\(a path\) D9MT_PROFILE=1 DXVK_CONFIG=d3d9\.presentInterval=0;d3d9\.x=1 MTL_HUD_ENABLED=1$" && ! grep -qF "$HOME" "$R/wrapper-lines.txt"'
   check "wrapper: the conditions line" fk_in "$R/wrapper-lines.txt" '^power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80$'
   check "wrapper: the d9mt files' hashes, a missing one named" fk_in "$R/wrapper-lines.txt" "^d3d9\.dll $(printf d9mt | /usr/bin/shasum -a 256 | cut -c1-12), winemetal\.so missing$"
-  check "wrapper: the lines go into wine.log after the language" eval 'grep -A4 "SWTOR on Mac game language:" "$wrapper" | piped "SWTOR on Mac settings: \$(session_settings)" && grep -A4 "SWTOR on Mac game language:" "$wrapper" | piped "SWTOR on Mac d9mt files: \$diag_files"'
-  check "wrapper: the bounded probes run before wine.log takes stderr" eval 'grep -B3 "rotate_wine_log\$" "$wrapper" | piped "session_diag 2>/dev/null"'
+  check "wrapper: the lines go into wine.log after the language" eval 'grep -A4 "SWTOR on Mac game language:" "$wrapper" | piped "SWTOR on Mac settings: \$(session_settings)" && grep -A5 "SWTOR on Mac game language:" "$wrapper" | piped "SWTOR on Mac \${files%_files} files: \$diag_files"'
+  check "wrapper: the bounded probes run before wine.log takes stderr" eval 'grep -B3 "rotate_wine_log\$" "$wrapper" | piped "session_diag \"\$files\" 2>/dev/null"'
   # a pmset that hangs, ignores TERM and has a child: the probes end at the deadline, as
   # unknown, the d9mt files still hashed, nothing of the stand-in left
   cat >"$R/slow-pmset" <<'PM'
@@ -210,7 +210,7 @@ PM
   local t0 t1 left=""
   t0=$(date +%s)
   line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$R/slow-pmset" SWTOR_DIAG_TIMEOUT=1 SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
-    /bin/bash -c '. "$1"; session_diag 2>/dev/null; echo "$diag_conditions|$diag_files"' - "$fns" 2>&1)
+    /bin/bash -c '. "$1"; session_diag d9mt_files 2>/dev/null; echo "$diag_conditions|$diag_files"' - "$fns" 2>&1)
   t1=$(date +%s)
   sleep 0.3
   for p in $(cat "$R/slow.pids" 2>/dev/null); do kill -0 "$p" 2>/dev/null && left="$left $p"; done
@@ -234,7 +234,7 @@ SL
   chmod 755 "$R/sleep-log-bin/sleep"; rm -f "$R/slow.pids" "$R/sleeps.txt"
   local asked
   env -i PATH="$R/sleep-log-bin:/usr/bin:/bin" FK_SLEEP_LOG="$R/sleeps.txt" HOME="$HOME" SWTOR_PMSET="$R/slow-pmset" SWTOR_DIAG_TIMEOUT=1 SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
-    /bin/bash -c '. "$1"; session_diag 2>/dev/null' - "$fns" >/dev/null 2>&1
+    /bin/bash -c '. "$1"; session_diag d9mt_files 2>/dev/null' - "$fns" >/dev/null 2>&1
   sleep 0.3
   for p in $(cat "$R/slow.pids" 2>/dev/null); do kill -0 "$p" 2>/dev/null && kill -KILL "$p" 2>/dev/null; done
   asked=$(awk '{ s += $1 } END { printf "%.2f", s }' "$R/sleeps.txt" 2>/dev/null)
@@ -243,7 +243,7 @@ SL
   in_budget=$(awk -v s="${asked:-0}" 'BEGIN { print (s >= 1.1 && s <= 1.3) ? "yes" : "no" }')
   check "wrapper: a hanging pmset: the waits asked for add up to the deadline (${asked:-none} s for 1 s + 0.2 s)" eval '[ -s "$R/sleeps.txt" ] && [ "$in_budget" = yes ]'
   line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$pm" SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
-    /bin/bash -c '. "$1"; session_diag 2>/dev/null; echo "$diag_conditions|$diag_files"' - "$fns" 2>&1)
+    /bin/bash -c '. "$1"; session_diag d9mt_files 2>/dev/null; echo "$diag_conditions|$diag_files"' - "$fns" 2>&1)
   check "wrapper: the probes within the deadline give their lines" eval '[ "$line" = "power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80|d3d9.dll $(printf d9mt | /usr/bin/shasum -a 256 | cut -c1-12), winemetal.so missing" ]'
 
   # 7. Collect Logs: three arms and an older start in one zip; the old start cut, its first

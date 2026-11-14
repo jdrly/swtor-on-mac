@@ -152,22 +152,27 @@ session_conditions() {
     END { if (w != "") print w; else if (notes) print "none" }')
   echo "power ${ps:-unknown}, energy mode ${em:-unknown}, thermal warnings ${th:-unknown}"
 }
-# d9mt_files: the first 12 hex digits of the SHA-256 of d9mt's d3d9.dll in the prefix and its
-# bridge in the engine (what ran, whatever the version label says)
-d9mt_files() {
+# file_hashes <file>...: each file's name and the first 12 hex digits of its SHA-256 (what ran,
+# whatever the version label says), or "missing"
+file_hashes() {
   local f h out=""
-  for f in "$SWTOR_PREFIX/drive_c/windows/system32/d3d9.dll" "$SWTOR_ENGINE/lib/wine/x86_64-unix/winemetal.so"; do
+  for f in "$@"; do
     h=$(/usr/bin/shasum -a 256 "$f" 2>/dev/null | cut -c1-12)
     out="$out${out:+, }${f##*/} ${h:-missing}"
   done
   echo "$out"
 }
+# d9mt_files: d9mt's d3d9.dll in the prefix and its bridge in the engine
+d9mt_files() { file_hashes "$SWTOR_PREFIX/drive_c/windows/system32/d3d9.dll" "$SWTOR_ENGINE/lib/wine/x86_64-unix/winemetal.so"; }
+# driver_files: DirectX 12 on Mullion: the d3d12.dll and the bridge of the engine's dxmt tree,
+# where Mullion is installed (swtor_RC2.exe loads neither of d9mt's files)
+driver_files() { file_hashes "$SWTOR_ENGINE/lib/wine/dxgi/dxmt/x86_64-windows/d3d12.dll" "$SWTOR_ENGINE/lib/wine/dxgi/dxmt/x86_64-unix/winemetal.so"; }
 
-# session_diag: session_conditions and d9mt_files, each in a process group of its own, both
-# bounded by one deadline of SWTOR_DIAG_TIMEOUT s (default 2; they take about 70 ms): what isn't
-# done by then is "unknown", its group is ended (TERM, KILL 0.2 s later) and waited for, so a
-# stalled pmset or file read never holds the game's start longer, and nothing of it stays.
-# Sets diag_conditions and diag_files.
+# session_diag <d9mt_files|driver_files>: session_conditions and that one, each in a process
+# group of its own, both bounded by one deadline of SWTOR_DIAG_TIMEOUT s (default 2; they take
+# about 70 ms): what isn't done by then is "unknown", its group is ended (TERM, KILL 0.2 s later)
+# and waited for, so a stalled pmset or file read never holds the game's start longer, and
+# nothing of it stays. Sets diag_conditions and diag_files.
 session_diag() {
   local d pc pf i=0 n
   diag_conditions=unknown diag_files=unknown
@@ -175,7 +180,7 @@ session_diag() {
   n=$((${SWTOR_DIAG_TIMEOUT:-2} * 20))
   set -m
   session_conditions </dev/null >"$d/c" 2>/dev/null & pc=$!
-  d9mt_files </dev/null >"$d/f" 2>/dev/null & pf=$!
+  "$1" </dev/null >"$d/f" 2>/dev/null & pf=$!
   set +m
   while { kill -0 "$pc" || kill -0 "$pf"; } 2>/dev/null && [ "$i" -lt "$n" ]; do sleep 0.05; i=$((i + 1)); done
   kill -TERM -- "-$pc" "-$pf" 2>/dev/null && sleep 0.2
@@ -223,9 +228,12 @@ dx12_swap() {
   case "$SWTOR_DX12_DRIVER" in
     gptk-mtl3) export D3DM_MTL4=0 ;;
     mullion*)
-      # Mullion's logs (swtor_RC2_<dll>.log) and its flight record (swtor_RC2.exe.flight, when
-      # the GPU removes the device) in the log folder, which Collect Logs bundles
-      export MULLION_LOG_PATH="$LOG_DIR" MULLION_DIAG_PATH="$LOG_DIR"
+      # Mullion's logs (swtor_RC2_<dll>.log), its flight record (swtor_RC2.exe.flight, when
+      # the GPU removes the device) and its trace log (mullion.log and mullion.prev.log, only
+      # with a MULLION_TRACE_* switch set by hand) in the log folder, which Collect Logs bundles
+      # through its redaction and leak check. (The trace's shader files go into a shaders/
+      # folder there, which it doesn't read: the game's own shaders stay out of a bundle.)
+      export MULLION_LOG_PATH="$LOG_DIR" MULLION_DIAG_PATH="$LOG_DIR" MULLION_TRACE_DIR="$LOG_DIR"
       [ "$SWTOR_DX12_DRIVER" != mullion-mtl3 ] || export MULLION_D3D12_METAL4=0
       # Debug Logging (on: env has D9MT_PROFILE, as for the settings line): my fork's diagnostic
       # switches, off by default there: the session header, a STATS line each second, HITCH and
@@ -316,8 +324,11 @@ if [ -n "$SWTOR_ENGINE" ]; then
       # the launcher quits (~30 s after starting the game).
       # SWTOR_LOG_FILTER set: keep the game's Wine/d9mt output in wine.log.
       if [ -n "$SWTOR_LOG_FILTER" ]; then
+        # the files whose hashes wine.log names: d9mt's, or Mullion's for swtor_RC2.exe on it
+        files=d9mt_files
+        case "$game_exe $SWTOR_DX12_DRIVER" in "swtor_RC2.exe mullion"*) files=driver_files ;; esac
         # (before stderr goes to wine.log: the job control's messages, if any, go nowhere)
-        session_diag 2>/dev/null
+        session_diag "$files" 2>/dev/null
         rotate_wine_log
         exec >/dev/null 2>"$LOG_DIR/wine.log"
         # what this session runs on (session-report.sh shows it)
@@ -332,10 +343,11 @@ if [ -n "$SWTOR_ENGINE" ]; then
         [ -z "$dx12_note" ] || echo "SWTOR on Mac DirectX 12: $dx12_note" >&2
         # the game's language and locale (after those: the A/B switches stay the second line)
         echo "SWTOR on Mac game language: $game_lang, LANG=${LANG:-}" >&2
-        # the settings, power and thermal state at the start, and the d9mt files' hashes
+        # the settings, power and thermal state at the start, and the files' hashes ("d9mt
+        # files:", or "driver files:" on Mullion, as session-report.sh reads them)
         echo "SWTOR on Mac settings: $(session_settings)" >&2
         echo "SWTOR on Mac conditions: $diag_conditions" >&2
-        echo "SWTOR on Mac d9mt files: $diag_files" >&2
+        echo "SWTOR on Mac ${files%_files} files: $diag_files" >&2
       else
         exec >/dev/null 2>/dev/null
       fi
