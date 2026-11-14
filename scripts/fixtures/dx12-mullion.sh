@@ -225,7 +225,7 @@ fx_dx12_mullion() {
   # Native fullscreen with DirectX 12 on: swtor_RC2.exe gets swtor.exe's NativeFullscreen, at a
   # change of either setting
   fx_dxm set nativefs on
-  check "dx12-mullion: nativefs on, DirectX 12 on: NativeFullscreen=y for swtor.exe and swtor_RC2.exe, the app's Mac driver ($FX_RC)" \
+  check "dx12-mullion: nativefs on, DirectX 12 on: NativeFullscreen=y for swtor.exe and swtor_RC2.exe, the app's Mac driver ($FX_RC: $(tail -n 1 "$d/out.txt"))" \
     eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor.exe y && fx_dxm_nf swtor_RC2.exe y && cmp -s "$d/dev/Resources/wine/winemac.so" "$e/lib/wine/x86_64-unix/winemac.so"'
   fx_dxm set dx12 off
   check "dx12-mullion: dx12 off, nativefs on: swtor_RC2.exe's keys gone, swtor.exe keeps NativeFullscreen=y ($FX_RC)" \
