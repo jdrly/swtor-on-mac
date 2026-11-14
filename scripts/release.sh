@@ -32,18 +32,11 @@
 #                                    install reads) stays on the last release.
 #   scripts/release.sh --dev --no-release   the same without the pre-release
 #
-# Releases from GitHub Actions (.github/workflows/release.yml) come in two halves, so
-# Sparkle's EdDSA key never leaves Jan's Mac:
-#   scripts/release.sh --ci          (CI) sign, package, notarize, and create the draft release
-#                                    with the DMG only
-#   scripts/release.sh --ci-dry-run  (CI) the same without a release (the workflow keeps the DMG
-#                                    as a short-lived artifact)
-#   scripts/release.sh --feed <ver>  (Mac) download the notarized DMG from the draft release,
-#                                    build and check the feed, and upload appcast.xml and the
-#                                    deltas to the draft
+# Releases are built, checked and published on the maintainer's Mac (docs/building.md,
+# *Releasing*; ADR 0007). CI builds and signs nothing.
 #
 # Overrides: IDENTITY, NOTARY_PROFILE, or NOTARY_KEY/NOTARY_KEY_ID/NOTARY_ISSUER (an App Store
-# Connect API key file instead of the keychain profile, as in CI); RELEASE_DIR (default
+# Connect API key file instead of the keychain profile); RELEASE_DIR (default
 # release), DOWNLOAD_URL_PREFIX (where the appcast points, default the version's GitHub
 # release), ED_KEY_FILE (a private EdDSA key file instead of the keychain, for test keys),
 # RELEASE_NOTES (the notes file).
@@ -53,8 +46,7 @@ MODE="${1:-}"
 DEV_NO_RELEASE=""
 if [ "$MODE" = --dev ] && [ "${2:-}" = --no-release ]; then DEV_NO_RELEASE=1; fi
 case "$MODE" in
-  ""|--sign-only|--no-notarize|--no-release|--ci|--ci-dry-run|--dev) ;;
-  --feed) [ -n "${2:-}" ] || { echo "usage: $0 --feed <version>" >&2; exit 2; } ;;
+  ""|--sign-only|--no-notarize|--no-release|--dev) ;;
   *) echo "unknown option: $MODE" >&2; exit 2 ;;
 esac
 IDENTITY="${IDENTITY:-Developer ID Application: Jan Drly (3JT82CY6ZK)}"
@@ -62,11 +54,7 @@ PROFILE="${NOTARY_PROFILE:-swgl-notary}"
 REPO=jdrly/swtor-on-mac
 SRC="dist/SWTOR on Mac.app"
 ENT="$PWD/src/entitlements"
-if [ "$MODE" = --feed ]; then
-  VERSION="$2"
-else
-  VERSION="$(plutil -extract CFBundleShortVersionString raw "$SRC/Contents/Info.plist")"
-fi
+VERSION="$(plutil -extract CFBundleShortVersionString raw "$SRC/Contents/Info.plist")"
 # Development builds never go into a feed or a regular release, and releases are never dev builds.
 case "$VERSION:$MODE" in
   *-dev.*:--dev|*-dev.*:--sign-only) ;;
@@ -89,22 +77,28 @@ else
 fi
 
 case "$MODE" in
-  ""|--no-notarize|--no-release|--feed)
+  ""|--no-notarize|--no-release)
     [ -x "$SPARKLE_BIN/generate_appcast" ] || { echo "Missing $SPARKLE_BIN; run ./build.sh" >&2; exit 1; } ;;
 esac
-if [ "$MODE" != --sign-only ] && [ "$MODE" != --ci-dry-run ]; then
+if [ "$MODE" != --sign-only ]; then
   if [ ! -f "$NOTES" ]; then
     [ "$MODE" = --no-notarize ] || { echo "Missing release notes: $NOTES" >&2; exit 1; }
     echo "[release] note: no release notes ($NOTES)"
   fi
 fi
+# A release's notes in the format swonmac.com reads (release-notes/README.md): the title, then a
+# one-sentence summary, and the Discord invite in Support.
+case "$MODE" in
+  ""|--no-release)
+    [ "$(head -n 1 "$NOTES")" = "## SWTOR on Mac $VERSION" ] || { echo "$NOTES must start with: ## SWTOR on Mac $VERSION" >&2; exit 1; }
+    summary="$(awk 'NR > 1 && NF { print; exit }' "$NOTES")"
+    case "$summary" in ''|'#'*|'- '*|'* '*) echo "$NOTES needs a one-sentence summary right after the title" >&2; exit 1 ;; esac
+    grep -q 'discord.gg/AnV3fZWz2b' "$NOTES" || { echo "$NOTES needs the Discord invite in Support" >&2; exit 1; } ;;
+esac
 case "$MODE$DEV_NO_RELEASE" in
-  ""|--ci|--dev)
+  ""|--dev)
     gh auth status >/dev/null 2>&1 || { echo "gh is not logged in" >&2; exit 1; }
     ! gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1 || { echo "Release v$VERSION already exists" >&2; exit 1; } ;;
-  --feed)
-    [ "$(gh release view "v$VERSION" --repo "$REPO" --json isDraft --jq .isDraft 2>/dev/null)" = true ] ||
-      { echo "No draft release v$VERSION (the CI workflow creates it)" >&2; exit 1; } ;;
 esac
 
 sign() { codesign --force --timestamp --options runtime --sign "$IDENTITY" "$@"; }
@@ -183,42 +177,15 @@ package() {
   fi
 }
 
-# --feed: the notarized DMG from the draft release, checked, and the app inside it.
-fetch_draft() {
-  echo "[release] $VERSION: downloading the DMG from the draft release"
-  rm -rf "$OUT"
-  mkdir -p "$OUT"
-  gh release download "v$VERSION" --repo "$REPO" --pattern "${DMG##*/}" --dir "$OUT"
-  xcrun stapler validate "$DMG"
-  spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
-  local mnt
-  mnt="$(mktemp -d)"
-  attach "$DMG" "$mnt"
-  ditto "$mnt/SWTOR on Mac.app" "$APP"
-  detach "$mnt"
-  rm -rf "$mnt"
-  spctl --assess --type execute --verbose=2 "$APP"
-  [ "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$VERSION" ] ||
-    { echo "The DMG's app is not version $VERSION" >&2; exit 1; }
-}
-
-if [ "$MODE" = --feed ]; then
-  fetch_draft
-else
-  package
-fi
+package
 
 case "$MODE" in
-  --ci-dry-run)
-    echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); no GitHub release (--ci-dry-run)"
-    exit 0 ;;
   --dev)
     if [ -n "$DEV_NO_RELEASE" ]; then
       echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); no GitHub pre-release (--no-release)"
       exit 0
     fi
-    # A pre-release never becomes releases/latest. The tag also starts the Release workflow,
-    # which stops at its version check for dev versions (release.yml); cancel the run anyway.
+    # A pre-release never becomes releases/latest.
     echo "[release] creating the GitHub pre-release v$VERSION (DMG only, no feed)"
     # the tag goes on the commit this was built from (the dev branch), which must be pushed
     head=$(git rev-parse HEAD)
@@ -226,12 +193,6 @@ case "$MODE" in
     gh release create "v$VERSION" --repo "$REPO" --prerelease --target "$head" \
       --title "SWTOR on Mac $VERSION (development build)" --notes-file "$NOTES" "$DMG"
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); pre-release v$VERSION"
-    exit 0 ;;
-  --ci)
-    echo "[release] creating the draft GitHub release v$VERSION (DMG only)"
-    gh release create "v$VERSION" --repo "$REPO" --draft --title "SWTOR on Mac $VERSION" \
-      --notes-file "$NOTES" "$DMG"
-    echo "[release] draft v$VERSION created; on the Mac, run scripts/release.sh --feed $VERSION"
     exit 0 ;;
 esac
 
@@ -295,10 +256,6 @@ done
 case "$MODE" in
   --no-notarize|--no-release)
     echo "[release] $DMG ($(du -h "$DMG" | cut -f1)); no GitHub release ($MODE)" ;;
-  --feed)
-    echo "[release] adding the feed to the draft release v$VERSION"
-    gh release upload "v$VERSION" --repo "$REPO" --clobber "$OUT/appcast.xml" ${deltas[@]+"${deltas[@]}"}
-    echo "[release] draft v$VERSION complete; publish it to make the update live" ;;
   *)
     echo "[release] creating the draft GitHub release v$VERSION"
     gh release create "v$VERSION" --repo "$REPO" --draft --title "SWTOR on Mac $VERSION" \

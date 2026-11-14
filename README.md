@@ -423,11 +423,12 @@ against the real install:
 
 `scripts/build-d9mt.sh`, `scripts/build-winemac.sh` and `scripts/build-ntdll.sh` build the
 binaries in `prebuilt/` reproducibly from pinned sources. `build.sh` assembles `dist/SWTOR on
-Mac.app` from a fresh clone and needs Xcode 27. Since 0.1.2, agents build, sign, notarize,
-check and publish every release on my Mac, which holds the signing certificate and Sparkle's
-EdDSA key, with no approval step. The tag's Release workflow run is cancelled.
-[docs/building.md](docs/building.md) has the details. [ADR 0004](docs/adr/0004-releases-in-two-halves.md)
-records the CI route in two halves, which those releases don't take.
+Mac.app` from a fresh clone and needs Xcode 27. Agents build, sign, notarize, check and
+publish every release on my Mac, which holds the signing certificate and Sparkle's EdDSA key,
+with no approval step. Before publishing, a binary-diff gate compares the release's app with the
+release candidate I played and with the last release. No workflow builds or signs a release.
+[docs/building.md](docs/building.md) has the steps, and
+[ADR 0007](docs/adr/0007-releases-from-the-maintainers-mac.md) the reasons.
 
 ## Pinned components
 
