@@ -37,7 +37,7 @@ probe() {
   echo "== $name"
   "$out/nfprobe" "$name" "$@" > "$out/$name.txt" 2>&1 &
   pid=$!
-  ( sleep "$limit"; kill -TERM "$pid" 2>/dev/null; sleep 3; kill -KILL "$pid" 2>/dev/null ) &
+  ( sleep "$limit"; kill -TERM "$pid" 2>/dev/null; sleep 3; kill -KILL "$pid" 2>/dev/null ) 2>/dev/null &
   w=$!
   wait "$pid"; rc=$?
   pkill -P "$w" sleep 2>/dev/null; kill "$w" 2>/dev/null; wait "$w" 2>/dev/null
