@@ -74,10 +74,12 @@ fx_version_table() {
   else bad "version-table: bundle_version: $(printf '%s\n' "$out" | head -3 | tr '\n' ';')"; fi
   # the control: dev.N as .N instead of .(1000 + N)
   sed 's/\$((1000 + n))/$n/g' "$buildsh" >"$dir/build-wrong.sh"
-  if grep -q '\$((1000 + n))' "$dir/build-wrong.sh" || [ -z "$(vt_bundle_table "$dir/build-wrong.sh")" ]; then
+  out=$(vt_bundle_table "$dir/build-wrong.sh")
+  if grep -q '\$((1000 + n))' "$dir/build-wrong.sh" || [ -z "$out" ]; then
     bad "version-table: a bundle_version without 1000 + N passes the table"
   else
-    ok "version-table: a bundle_version without 1000 + N fails it ($(vt_bundle_table "$dir/build-wrong.sh" | head -1))"
+    ok "version-table: a bundle_version without 1000 + N fails it (${out%%
+*})"
   fi
   vt_pairs >"$dir/pairs.txt"
   n=$(wc -l <"$dir/pairs.txt" | tr -d ' ')
