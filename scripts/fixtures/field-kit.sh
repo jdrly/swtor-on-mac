@@ -122,7 +122,7 @@ fx_field_kit() {
   "$SR" --mark 60 --compare "$R/a.log" "$R/b.log" "$R/a2.log" >"$R/aba.txt" 2>&1 || true
   check "field: each arm in a block of its own" eval 'fk_in "$R/aba.txt" "^  A: a\.log$" && fk_in "$R/aba.txt" "^  B: b\.log$" && fk_in "$R/aba.txt" "^  C: a2\.log$" && fk_in "$R/aba.txt" "^    SWTOR on Mac, Wine engine, d9mt +0\.1\.7-dev\.4 cx-26\.3\.0-8 d9mt 9999999$" && fk_in "$R/aba.txt" "^    Game start +2026-11-01 20:20:00$"'
   check "field: three columns" fk_in "$R/aba.txt" '^  FPS: average +60\.0 +62\.0 +59\.0$'
-  check "field: A/B/A drift and B against the A mean" eval 'fk_in "$R/aba.txt" "^The last three as A/B/A \(A, B, C: a\.log, b\.log, a2\.log\):$" && fk_in "$R/aba.txt" "^  FPS: average +A 60\.0, A again 59\.0 \(drift -1\.00\); B 62\.0: \+2\.50 against the A mean \(\+4\.2%\)$" && fk_in "$R/aba.txt" "^  Game thread CPU \(ms/s, median\) +A 800, A again 800 \(drift \+0\.00\); B 700: -100\.00 against the A mean"'
+  check "field: A/B/A drift and B against the A mean" eval 'fk_in "$R/aba.txt" "^The last three as A/B/A \(A, B, C: a\.log, b\.log, a2\.log\):$" && fk_in "$R/aba.txt" "^  FPS: average +A 60\.0, A again 59\.0 \(drift -1\.00\); B 62\.0: \+2\.50 against the A mean \(\+4\.2%\)$" && fk_in "$R/aba.txt" "^  Process CPU \(PACE, ms/s, median\) +A 800, A again 800 \(drift \+0\.00\); B 700: -100\.00 against the A mean"'
   check "field: no significance claimed" fk_in "$R/aba.txt" 'one sitting: no significance test'
   "$SR" --mark 60 --compare "$R/a.log" "$R/b.log" "$R/b.log" >"$R/notaba.txt" 2>&1 || true
   check "field: first and last differ: not an A/B/A, no numbers" eval 'fk_in "$R/notaba.txt" "the first and the last differ in build: not an A/B/A" && ! fk_in "$R/notaba.txt" "drift"'

@@ -34,8 +34,11 @@
 #             re-cleared (format, size, aspects), why, and the D3D9 call it came from;
 #             RESTORE-SUMMARY when the game released its device (not every exit does)
 #   PACE      once a second (d9mt 4b7ab26 and later): the interval between the game's
-#             Present calls (min/avg/max, sd), the Present thread's time per frame inside d9mt
-#             and outside it, its CPU time split into d9mt's and the game's own
+#             Present calls (min/avg/max, sd); d9mt's share of each frame, as per-device
+#             outer-entry time (the D3D9 calls on the device, from any thread, that began while
+#             no other was open: not the Present thread's time), and the rest of the frame; cpu
+#             (GetThreadTimes, the whole process's CPU time on Wine for macOS) less d9mt's busy
+#             time as gameCpu, which is therefore not the game thread's CPU either (d9mt #81)
 #   THREADCPU once a second (the app's Mac driver, 0.1.0-dev.2 and later): CPU time of the
 #             game process, its busiest threads and the session's wineserver, in ms
 #   RAWMOUSE  once a second while raw mouse-look moves (0.1.0-dev.2 and later): moves by
@@ -606,7 +609,7 @@ analyze() {
         qs(psd, 1, np); qs(pmax, 1, np); qs(pd9, 1, np); qs(pgame, 1, np); qs(pgmax, 1, np); qs(pwait, 1, np)
         printf "pace_seconds=%d\n", np
         printf "pace_present_sd=%.2f ms median, %.2f p90 (max interval: %.1f median, %.1f p90)\n", pct(psd, np, 0.5), pct(psd, np, 0.9), pct(pmax, np, 0.5), pct(pmax, np, 0.9)
-        printf "pace_frame=d9mt %.1f ms (of it waiting %.1f), game %.1f ms (worst frame of a second: %.1f median, %.1f p90)\n", pct(pd9, np, 0.5), pct(pwait, np, 0.5), pct(pgame, np, 0.5), pct(pgmax, np, 0.5), pct(pgmax, np, 0.9)
+        printf "pace_frame=d9mt %.1f ms, device blocked %.1f ms (any thread), game %.1f ms (worst frame of a second: %.1f median, %.1f p90)\n", pct(pd9, np, 0.5), pct(pwait, np, 0.5), pct(pgame, np, 0.5), pct(pgmax, np, 0.5), pct(pgmax, np, 0.9)
         if (npc) {
           qs(pcpu, 1, npc); qs(pbusy, 1, npc); qs(pgc, 1, npc)
           printf "pace_cpu=%d ms/s median (d9mt %d, game %d), %d p90\n", pct(pcpu, npc, 0.5), pct(pbusy, npc, 0.5), pct(pgc, npc, 0.5), pct(pcpu, npc, 0.9)
@@ -764,7 +767,7 @@ report() {
   row "PACE seconds" pace_seconds
   row "  Present interval sd" pace_present_sd
   row "  per frame (medians)" pace_frame
-  row "  game thread CPU" pace_cpu
+  row "  process CPU (PACE)" pace_cpu
   row "THREADCPU seconds" threadcpu_seconds
   row "  game process CPU" cpu_process
   row "  its busiest thread" cpu_busiest
@@ -877,7 +880,7 @@ FPS: average|fps_avg|
 Frame time: average (ms)|ft_avg|
 Seconds below 58 fps (%)|below58| pp
 Game process CPU (ms/s, median)|cpu_process_med|
-Game thread CPU (ms/s, median)|pace_cpu_med|
+Process CPU (PACE, ms/s, median)|pace_cpu_med|
 ROWS
   echo "  (one sitting: no significance test. A difference no larger than the drift shows nothing;"
   echo "   a speed claim needs the same A/B/A again on another day)"
