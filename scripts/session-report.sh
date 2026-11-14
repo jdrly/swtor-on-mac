@@ -529,8 +529,8 @@ analyze() {
       print "renderer=" r
       print "rclass=" rclass
       # what the numbers are, and what is left out or lost
-      # (Mullion: its STATS, HITCH or COMPILE lines, else the Mac driver'"'"'s THREADCPU alone)
-      if (prof) print "mode=instrumented: Debug Logging on (" (!mull ? "d9mt profiling" : dprof ? "Mullion'"'"'s MULLION_STATS" : "the Mac driver'"'"'s THREADCPU") "): not ordinary play'"'"'s frame times"
+      # (DirectX 12: Mullion'"'"'s STATS, HITCH or COMPILE lines, else the Mac driver'"'"'s THREADCPU alone)
+      if (prof) print "mode=instrumented: Debug Logging on (" (rclass == "dx9" ? "d9mt profiling" : dprof ? "Mullion'"'"'s MULLION_STATS" : "the Mac driver'"'"'s THREADCPU") "): not ordinary play'"'"'s frame times"
       else if (rclass == "d3dmetal") print "mode=ordinary play: D3DMetal logs no frame times, the Metal HUD only"
       else print "mode=ordinary play (Debug Logging off): no frame times in the log, the Metal HUD only"
       if (nw) {

@@ -73,6 +73,8 @@ fx_session_report_dx12() {
   # 5. D3DMetal: named, and no numbers to read
   sdx_head "swtor_RC2.exe, driver gptk (dxgi=gptk), D3DMetal 4.0b3 (imported: Evaluation environment for Windows games 4.0 beta 3)" >"$R/gptk.log"
   "$SR" "$R/gptk.log" >"$R/gptk.txt" 2>&1 || true
+  { cat "$R/gptk.log"; sed -n '$p' "$R/threadcpu.log"; } >"$R/gptk-threadcpu.log"
+  check "dx12 report: D3DMetal with the Mac driver's THREADCPU: not credited to d9mt" eval '"$SR" "$R/gptk-threadcpu.log" | grep -E "^  Measurement +instrumented: Debug Logging on \(the Mac driver.s THREADCPU\)" >/dev/null'
   check "dx12 report: D3DMetal named, and that it logs no numbers" eval 'sdx_in "$R/gptk.txt" "^  Renderer +DirectX 12 on D3DMetal 4\.0b3 \(imported: Evaluation environment for Windows games 4\.0 beta 3\) \(driver gptk\): the driver logs no numbers$" && sdx_in "$R/gptk.txt" "^  Measurement +ordinary play: D3DMetal logs no frame times" && sdx_in "$R/gptk.txt" "^  \(no STATS lines: D3DMetal logs no frame numbers"'
 
   # 6. DirectX 9 on d9mt: its build, its GPU lines (d9mt writes the error and hang lines with no
