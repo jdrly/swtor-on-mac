@@ -107,8 +107,8 @@ are off by default included.
 
 `main` is building 0.1.9, with d9mt
 [`9b64581`](https://github.com/jdrly/d9mt/tree/9b645818ef07383b1235afe6b06f3deefeafb9e6). It keeps
-0.1.8's shader compiler (AIR codegen `25fc2491`, no lineage), so nothing recompiles after that
-update. Metal's pipeline archive now survives quitting the game, and the temporary file each quit
+0.1.8's shader compiler (AIR codegen `25fc2491`, no lineage), so the shaders compiled with 0.1.8
+stay in the cache and don't compile again after that update. Metal's pipeline archive now survives quitting the game, and the temporary file each quit
 left behind is gone ([jdrly/d9mt#196](https://github.com/jdrly/d9mt/pull/196)).
 
 ## Install
