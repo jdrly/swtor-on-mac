@@ -162,8 +162,28 @@ request, the version PR's included. A pin older than d9mt's CI (before `45fcedb`
 passes with a note. Exit status 1 means the pin fails; 2 means GitHub didn't answer or d9mt's run
 hasn't finished, which is no verdict: run it again.
 
-`main` pins d9mt `f5439a6`, d9mt main after jdrly/d9mt#190: the driver of 0.1.8, the one
-release that changes the AIR codegen on purpose. Since `1d33ea4` it adds:
+`main` pins d9mt `9b64581`, d9mt main after jdrly/d9mt#206: the driver of 0.1.9. Since `f5439a6`
+it adds:
+
+- Metal's pipeline archive written at the bridge's DLL detach, before Wine's exit kill, instead
+  of only from `atexit` inside it, so a session's archive loads at the next start; and Metal's
+  leftover `*.metallib` temporaries older than 600 s removed from the archive folder, #196;
+- indexed triangle fans drawn as triangle lists, #197;
+- the CS command that only reached a stub no longer sent, #192;
+- PACE's d9mt share measured as per-device outer-entry time, #201, and the STATS window's
+  StretchRect and ColorFill counters read under the device lock, #205;
+- `D9MT_DIAG_BURN_US`, off unless set: a CPU cost of known size per Present, the control for a
+  speed guard, #203;
+- profiler counters and the per-function profiler build, #193, #202, #204 and #206, which run
+  only with `D9MT_PROFILE` or in a profiler build, and the hash suite's profile variant, #195.
+
+None of them changes the AIR codegen: the bridge reports `25fc2491…` with no lineage, as 0.1.8's
+did, so players keep the shaders 0.1.8 compiled. #196 changes the bridge's Metal side
+(`winemetal_unix.c` and the PE side's `DllMain`), which is outside the id. `AIR_LINEAGE` stays
+0.1.8: a later id would have to carry back to 0.1.8's cache, the one players have.
+
+`f5439a6`, d9mt main after jdrly/d9mt#190, was the driver of 0.1.8, the one release that changes
+the AIR codegen on purpose. Since `1d33ea4` it added:
 
 - the AIR target per macOS, #167: AIR 2.8 and Metal 4.0 on macOS 26, AIR 2.9 and Metal 4.1 on
   macOS 27 and later, in the bitcode and in the container. `D9MT_AIR_LEGACY=1` writes 0.1.7's
@@ -182,8 +202,8 @@ release that changes the AIR codegen on purpose. Since `1d33ea4` it adds:
   the bridge's code. #181 lists the codegen's files in byte order in the bridge's build, so the
   AIR codegen id no longer depends on the locale of the shell that starts the build.
 
-#167, #168 and #172 change the AIR codegen, so the bridge reports a new id, `25fc2491…`, with no
-lineage: every player's shaders recompile once after the update to 0.1.8. #175 changes no codegen
+#167, #168 and #172 changed the AIR codegen, so the bridge reports a new id, `25fc2491…`, with no
+lineage: every player's shaders recompiled once after the update to 0.1.8. #175 changes no codegen
 and is off by default. Metal's pipeline archives are rebuilt too, and #174 deletes the folders
 earlier versions left behind on the first start; a folder that a running game still holds stays
 until that game has ended. `scripts/build-d9mt.sh` records the id in `AIR_CODEGEN` and stops a
