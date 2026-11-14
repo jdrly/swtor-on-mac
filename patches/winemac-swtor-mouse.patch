@@ -129,30 +129,35 @@ diff -ru a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
   *              WineLocalizedString
   *
   * Look up a localized string by its ID in the dictionary.
-@@ -906,6 +989,22 @@
+@@ -906,6 +989,27 @@
      {
          [self updateFullscreenWindows];
          [self adjustWindowLevels];
 +
 +        /* Raw mouse-look (SWTOR on Mac): a Space change can take the target
-+           window off screen while the app stays active (an empty desktop).
-+           The pointer must not stay frozen there, and the button's release
-+           goes elsewhere, so give up the capture as deactivation does. */
++           window off screen while the app stays active (an empty desktop). */
 +        if (raw_mouse_when_cursor_hidden)
 +        {
 +            if (relativeMouseMode && lastTargetWindow && ![lastTargetWindow isOnActiveSpace])
-+            {
-+                if (macdrv_rawmouse_warn_on)
-+                    fprintf(stderr, "warn:rawmouse:%s RAWMOUSE relative mode ended: the window is not on the active Space\n",
-+                            __func__);
-+                [self releaseMouseCapture];
-+            }
++                [self relativeTargetLeftActiveSpace];
 +            [self updateRelativeMouseMode];
 +        }
++    }
++
++    /* Raw mouse-look (SWTOR on Mac): relative mode is about to end because its
++       window is on another Space, by a Space change or by a move that came
++       first.  The pointer must not stay frozen there, and the button's release
++       goes elsewhere, so give up the capture as deactivation does. */
++    - (void) relativeTargetLeftActiveSpace
++    {
++        if (macdrv_rawmouse_warn_on)
++            fprintf(stderr, "warn:rawmouse:%s RAWMOUSE relative mode ended: the window is not on the active Space\n",
++                    __func__);
++        [self releaseMouseCapture];
      }
  
      - (void) sendDisplaysChanged:(BOOL)activating
-@@ -1193,7 +1292,8 @@
+@@ -1193,7 +1297,8 @@
      {
          return raw_mouse_when_cursor_hidden && clientWantsCursorHidden &&
                 lastTargetWindow && [NSApp isActive] && ![windowsBeingDragged count] &&
@@ -162,7 +167,7 @@ diff -ru a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
      }
  
      /* CGWarpMouseCursorPosition moves the cursor without an event, but the next
-@@ -1243,12 +1343,14 @@
+@@ -1243,12 +1348,14 @@
  
              [self setUpGameControllerMice];
              [self discardGameControllerMouseMotion];
@@ -177,7 +182,7 @@ diff -ru a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
              /* GCMouse motion from now on is dropped; count what was handed over. */
              __atomic_store_n(&gc_mouse_target_hwnd, NULL, __ATOMIC_RELEASE);
              [self applyGameControllerMouseMotion];
-@@ -1400,6 +1502,7 @@
+@@ -1400,6 +1507,7 @@
      {
          uint64_t now_ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
          NSTimeInterval now = now_ns / (double)NSEC_PER_SEC;
@@ -185,7 +190,7 @@ diff -ru a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
          int dx, dy;
  
          __atomic_store_n(&gc_mouse_last_delta_ns, now_ns, __ATOMIC_RELAXED);
-@@ -1412,8 +1515,16 @@
+@@ -1412,8 +1520,16 @@
              return;
          }
  
@@ -204,7 +209,7 @@ diff -ru a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
          dx = gcMouseRemainderX;
          dy = gcMouseRemainderY;
          gcMouseRemainderX -= dx;
-@@ -1482,6 +1593,14 @@
+@@ -1482,6 +1598,14 @@
          return gcMouseQueue && last && clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - last < 5 * NSEC_PER_SEC;
      }
  
@@ -219,7 +224,7 @@ diff -ru a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
      /* Let relativeModeCursorPosition follow the motion GCMouse handed over. */
      - (void) applyGameControllerMouseMotion
      {
-@@ -1909,7 +2028,7 @@
+@@ -1909,7 +2033,7 @@
              /* The window server sometimes names another app's window that sits
                 behind ours, which would drop the move. While we are active, take
                 our frontmost window under the point instead. */
@@ -228,19 +233,23 @@ diff -ru a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
              {
                  for (NSWindow* window in [NSApp orderedWindows])
                  {
-@@ -1927,6 +2046,11 @@
+@@ -1927,6 +2051,15 @@
                  targetWindow = nil;
          }
  
 +        /* Raw mouse-look (SWTOR on Mac): a window on another Space gets no moves,
 +           so the pointer over this one isn't the game's hidden one. */
 +        if (raw_mouse_when_cursor_hidden && targetWindow && ![targetWindow isOnActiveSpace])
++        {
++            if (relativeMouseMode)
++                [self relativeTargetLeftActiveSpace];
 +            targetWindow = nil;
++        }
 +
          if ([targetWindow isKindOfClass:[WineWindow class]])
          {
              CGPoint point = CGEventGetLocation([anEvent CGEvent]);
-@@ -2028,10 +2152,12 @@
+@@ -2028,10 +2161,12 @@
                  mouseMoveDeltaX = 0;
                  mouseMoveDeltaY = 0;
              }
@@ -254,7 +263,7 @@ diff -ru a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
                  /* GCMouse reports this motion (see -setUpGameControllerMice). */
                  macdrv_note_left_out_mouse_move(eventDeltaX * scale, eventDeltaY * scale);
                  mouseMoveDeltaX = 0;
-@@ -2045,8 +2171,19 @@
+@@ -2045,8 +2180,19 @@
  
                  /* Add event delta to accumulated delta error */
                  /* deltaY is already flipped */
