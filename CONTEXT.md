@@ -209,6 +209,12 @@ _Avoid_: “beta”, “nightly”.
 (`state-off`, `vsync-off`, `cold=<name>`, …), kept in `d9mt-ab.env`, which only a development
 build reads (docs/updates.md, *Development builds*).
 
+**Receipt**
+`release/<version>/RECEIPT`, written by `scripts/release.sh`: the source tree a release
+candidate was built from and the sha256 of its DMG, deltas, feed and notes, with the gates run on
+exactly those files. `scripts/release-receipt.sh verify` checks it before and after publishing
+(docs/building.md, *Releasing*).
+
 **Feed**
 `appcast.xml` of the latest GitHub release, signed with Sparkle's EdDSA key, which the app and
 the wrapper's daily check read (docs/updates.md).
