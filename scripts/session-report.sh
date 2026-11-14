@@ -65,6 +65,15 @@
 #             app's settings the game started with (Debug Logging, HUD, Game Mode, d9mt's and
 #             DXVK's environment, paths left out), the power source, Low Power Mode and
 #             macOS's thermal warning at the start, and the d9mt files' SHA-256
+#   D9MT-GPU-ERROR, D9MT-GPU-LOST, D9MT-GPU-HUNG  the GPU failed a command buffer, d9mt's
+#             canary saw command buffers not run to their end, d9mt ended a game whose GPU stopped
+#   DirectX 12 (development builds): the wrapper's "DirectX 12:" line (swtor_RC2.exe and its
+#             driver) and "driver files:" line; with Mullion, my fork's "Mullion: session" and
+#             "Mullion: mac" header (Debug Logging on), and STATS, HITCH, COMPILE and DIAG MEM in
+#             d9mt's form (HITCH's driver share is inDriverMs, its categories included; DIAG MEM
+#             adds the process footprint and the swap), MULLION-DEVICE-REMOVED, MULLION-GPU-ERROR,
+#             MULLION-GPU-HUNG, MULLION-SHADER-TOTALS and MULLION-PIPELINE-TOTALS. Mullion logs no
+#             window visibility (every second counts as shown, no mark); D3DMetal logs no numbers
 #
 # What the numbers are. Every frame time comes from d9mt's profiling (STATS, PACE, HITCH: Debug
 # Logging on, D9MT_PROFILE), so it is instrumented, not ordinary play's: "Measurement" says
@@ -154,6 +163,7 @@ analyze() {
     # from Present as well).
     NR == FNR {
       if ($0 ~ / (STATS|PACE) t=| HITCH frame=| COMPILE frame=| THREADCPU [0-9.]+ s: /) prof = 1
+      if ($0 ~ / STATS t=| HITCH frame=| COMPILE frame=/) dprof = 1    # the driver'"'"'s own
       if ($0 ~ / STATS t=/) {
         t1 = num(field("t")); reset = nw && t1 < p1T
         # a window of 2 s or more: a frame that long, or Present not called (no STATS between)
@@ -230,10 +240,71 @@ analyze() {
         ivhi = ke < nw ? lineof[ke + 1] : FNR + 1e9
       }
     }
-    FNR <= 5 && /^SWTOR on Mac [^:]*: engine / { header = 1 }
+    FNR <= 5 && /^SWTOR on Mac [^:]*: engine / {
+      header = 1
+      if (index($0, ", d9mt ")) { d9id = $0; sub(/.*, d9mt /, "", d9id); sub(/, started .*/, "", d9id) }
+    }
     /^SWTOR on Mac settings: / { settings = $0; sub(/^SWTOR on Mac settings: /, "", settings) }
     /^SWTOR on Mac conditions: / { conds = $0; sub(/^SWTOR on Mac conditions: /, "", conds) }
     /^SWTOR on Mac d9mt files: / { dfiles = $0; sub(/^SWTOR on Mac d9mt files: /, "", dfiles) }
+    /^SWTOR on Mac driver files: / { drfiles = $0; sub(/^SWTOR on Mac driver files: /, "", drfiles) }
+    # DirectX 12 (development builds): the client and its driver ("mullion", "mullion-mtl3",
+    # "gptk", ...) and the driver'"'"'s build after it. "swtor_RC2.exe not found ...: starting
+    # swtor.exe" is a DirectX 9 session.
+    FNR <= 12 && /^SWTOR on Mac DirectX 12: swtor_RC2\.exe, driver / {
+      dx12 = $0; sub(/^SWTOR on Mac DirectX 12: swtor_RC2\.exe, driver /, "", dx12)
+      drv = dx12; sub(/ .*/, "", drv)
+      if (index(dx12, ", Mullion ")) { mwrap = dx12; sub(/.*, Mullion /, "", mwrap) }
+      if (index(dx12, ", D3DMetal ")) { dmver = dx12; sub(/.*, D3DMetal /, "", dmver) }
+    }
+    # Mullion'"'"'s session header (my fork, MULLION_SESSION_HEADER: Debug Logging on)
+    / Mullion: session / {
+      msess = 1; l = $0; sub(/.* Mullion: session /, "", l)
+      mver = l; sub(/ .*/, "", mver)
+      if (index(l, " (")) { mrepo = l; sub(/^[^(]*\(/, "", mrepo); sub(/[ )].*/, "", mrepo) }
+      mfl = field("fl"); mm4 = field("metal4")
+    }
+    / Mullion: mac / { mfam = field("family"); mmac = field("macOS"); mbuild = field("build") }
+    # The GPU failed: a command buffer (each line, and those the limiter left out), d9mt'"'"'s canary
+    # (the session'"'"'s count so far, or the total at the device'"'"'s release), a stuck command buffer
+    # (d9mt ends the game; Mullion goes on waiting), a removed device (Mullion). d9mt writes the
+    # error and the hang lines straight to stderr, with no Wine prefix.
+    / MULLION-GPU-ERROR at=/ { ngerr += 1 + suppressed(); if (gerr1 == "") gerr1 = field("error"); next }
+    /(^| )D9MT-GPU-ERROR / {
+      ngerr += 1 + suppressed()
+      if (gerr1 == "") { gerr1 = $0; sub(/.*D9MT-GPU-ERROR [^ ]+ /, "", gerr1); sub(/:.*/, "", gerr1) }
+      next
+    }
+    /(^| )D9MT-GPU-LOST: / {
+      l = $0
+      if (sub(/.*; /, "", l) && l ~ /^[0-9]+ this session/) { sub(/ .*/, "", l); if (num(l) > glost) glost = num(l) }
+      l = $0
+      if (sub(/.*D9MT-GPU-LOST: /, "", l) && l ~ /^[0-9]+ command buffers of this session/) { sub(/ .*/, "", l); if (num(l) > glost) glost = num(l) }
+      next
+    }
+    / MULLION-GPU-HUNG at=/ {
+      nhung++
+      if (hung1 == "") hung1 = sprintf("status %s after %d ms; Mullion went on waiting", field("status"), num(field("waitedMs")))
+      next
+    }
+    /(^| )D9MT-GPU-HUNG: / { nhung++; if (hung1 == "") hung1 = "d9mt ended the game"; next }
+    / MULLION-DEVICE-REMOVED at=/ {
+      ndrm++
+      if (drm1 == "") drm1 = sprintf("%s, cause %s, frame %s", field("reason"), field("cause"), field("frame"))
+      next
+    }
+    # Mullion'"'"'s totals: failed shaders at the end (the last line counts), and the pipelines made
+    # after the first Present at each queue'"'"'s release (MULLION_D3D12_GPU_ERRORS; summed)
+    / MULLION-SHADER-TOTALS / {
+      shtot = sprintf("%d failed%s, %d draws skipped, %d dumped", num(field("failed")),
+        (field("byStep") != "" ? " (" field("byStep") ")" : ""), num(field("skippedDraws")), num(field("dumped")))
+      next
+    }
+    / MULLION-PIPELINE-TOTALS / {
+      npt++; ptlate += num(field("late")); ptms += num(field("ms"))
+      if (num(field("longestMs")) > ptmax) ptmax = num(field("longestMs"))
+      next
+    }
 
     /D9MT: pipeline wait budget/ { budget = $0; sub(/.*budget /, "", budget); sub(/ per frame.*/, "", budget) }
     /D9MT: attachment load\/store optimization off/ { attoff = 1 }
@@ -340,14 +411,18 @@ analyze() {
       if (hid[kw + 1] || !ink(kw + 1)) next    # in the second the next STATS line closes
       nh++
       dt = num(field("dtMs")); hitchMs += dt
-      in9 = num(field("inD9mtMs"))
-      # the frame is d9mt'"'"'s when most of it was spent inside d9mt, or waiting on its render thread
+      # the driver'"'"'s time on the game'"'"'s thread: d9mt'"'"'s inD9mtMs, Mullion'"'"'s inDriverMs (its
+      # categories, pipelineWait among them, add up to it)
+      in9 = field("inD9mtMs"); if (in9 == "") in9 = field("inDriverMs"); in9 = num(in9)
+      # the frame is the driver'"'"'s when most of it was spent inside the driver, or waiting on
+      # d9mt'"'"'s render thread
       line = $0; cs = line; sub(/.*\| cs: /, "", cs)
       split(cs, cw, " "); rw = 0
       for (i in cw) if (cw[i] ~ /^renderWait=/) { v = cw[i]; sub(/.*\//, "", v); rw = num(v) }
       if (in9 + rw >= dt / 2) { nd++; dMs += dt } else { ng++; gMs += dt }
-      # categories: "name=count/ms[/MiB]" between the first and the second "|"
-      mid = line; sub(/^[^|]*\| /, "", mid); sub(/ \| cs:.*/, "", mid)
+      # categories: "name=count/ms[/MiB]" between the first and the second "|" (d9mt'"'"'s "| cs:",
+      # Mullion'"'"'s "| queue:")
+      mid = line; sub(/^[^|]*\| /, "", mid); sub(/ \| (cs|queue):.*/, "", mid)
       nc = split(mid, parts, " ")
       for (i = 1; i <= nc; i++) {
         if (parts[i] !~ /=/) continue
@@ -431,12 +506,32 @@ analyze() {
       if (!ink(kw + 1)) next
       a = num(field("allocatedMiB")); if (a > diagPeak) diagPeak = a
       fr = num(field("frame")); if (fr > lastFrame) lastFrame = fr
+      # Mullion'"'"'s: the process footprint and the system'"'"'s swap at each sample
+      v = field("footprintMiB"); if (v != "") { hasfp = 1; if (num(v) > fpPeak) fpPeak = num(v) }
+      v = field("swapMiB"); if (v != "") { hasswap = 1; if (num(v) > swapPeak) swapPeak = num(v) }
       next
     }
     END {
       print "stats=" nall + 0
+      # the renderer: DirectX 12 by the wrapper'"'"'s line or Mullion'"'"'s header, else DirectX 9 on d9mt
+      mull = drv ~ /^mullion/ || (drv == "" && msess)
+      rclass = mull ? "mullion" : drv ~ /^gptk/ ? "d3dmetal" : drv != "" ? "dx12" : "dx9"
+      if (mull && msess) {
+        r = "DirectX 12 on Mullion " mver (mrepo != "" ? " (" mrepo ")" : "")
+        if (mfam != "") r = r ", " mfam
+        if (mm4 != "") r = r ", Metal 4 " mm4
+        if (mfl != "") r = r ", feature level " mfl
+        if (mmac != "") r = r ", macOS " mmac (mbuild != "" ? " (" mbuild ")" : "")
+      } else if (mull) r = "DirectX 12 on Mullion" (mwrap != "" ? " " mwrap : "") " (driver " drv "; no session header: Debug Logging off, or a build without it)"
+      else if (rclass == "d3dmetal") r = "DirectX 12 on D3DMetal" (dmver != "" ? " " dmver : "") " (driver " drv "): the driver logs no numbers"
+      else if (rclass == "dx12") r = "DirectX 12 on " drv
+      else r = "DirectX 9 on d9mt" (d9id != "" ? " " d9id : "")
+      print "renderer=" r
+      print "rclass=" rclass
       # what the numbers are, and what is left out or lost
-      if (prof) print "mode=instrumented: Debug Logging on (d9mt profiling): not ordinary play'"'"'s frame times"
+      # (DirectX 12: Mullion'"'"'s STATS, HITCH or COMPILE lines, else the Mac driver'"'"'s THREADCPU alone)
+      if (prof) print "mode=instrumented: Debug Logging on (" (rclass == "dx9" ? "d9mt profiling" : dprof ? "Mullion'"'"'s MULLION_STATS" : "the Mac driver'"'"'s THREADCPU") "): not ordinary play'"'"'s frame times"
+      else if (rclass == "d3dmetal") print "mode=ordinary play: D3DMetal logs no frame times, the Metal HUD only"
       else print "mode=ordinary play (Debug Logging off): no frame times in the log, the Metal HUD only"
       if (nw) {
         if (marklen > 0 && !marked) print "interval=the whole session" (skip ? sprintf(" after the first %d s", skip) : "") ": no mark (no return to the game window)"
@@ -450,7 +545,8 @@ analyze() {
       }
       d = ""
       if (!header) d = d "; no SWTOR on Mac line at the start (the log'"'"'s start is missing, or SWTOR on Mac 0.0.x)"
-      if (marklen > 0 && nw && !marked) d = d "; no mark"
+      if (mull) d = d "; the driver doesn'"'"'t report window visibility: every second counts as shown; no mark"
+      else if (marklen > 0 && nw && !marked) d = d "; no mark"
       if (ivshort || ivempty) d = d "; the interval is short"
       if (ivdev) d = d "; no interval: a second device after the mark"
       if (marked && !ivshort && !ivempty && !ivdev && ivcov < marklen) d = d sprintf("; %d s of the interval in a STATS window that began before it or ended after it (left out)", marklen - ivcov)
@@ -468,6 +564,7 @@ analyze() {
       if (settings != "") print "settings=" settings
       if (conds != "") print "conditions=" conds
       if (dfiles != "") print "d9mt_files=" dfiles
+      if (drfiles != "") print "driver_files=" drfiles
       if (nall) {
         printf "duration=%d\n", nall
         if (hsecs) printf "hidden=%d s, not counted below (%.1f fps)\n", hsecs, hframes / hsecs
@@ -486,7 +583,9 @@ analyze() {
           print "fps_low1=missing (see below)"
           printf "slow33=%d\nslow50=%d\n", s33, s50
         }
-        if (frames) {
+        # (Mullion has no no-op passes, re-clears or attachment optimization)
+        if (frames && mull) printf "rp=%.1f\ncb=%.1f\ndraws=%.0f\n", rp / frames, cb / frames, dr / frames
+        else if (frames) {
           printf "rp=%.1f\nskip=%.1f\ncb=%.1f\ndraws=%.0f\nrestore=%.2f\n", rp / frames, skp / frames, cb / frames, dr / frames, rst / frames
           printf "saved_mib_frame=%.1f\n", saved / frames
           printf "saved_gib=%.1f\n", saved / 1024
@@ -507,9 +606,17 @@ analyze() {
           printf "compiles=%d shaders, %d pipelines\n", csh, cpso
           printf "compile_waits=%d / %.0f ms\n", cwaits, cwaitMs
         }
-        printf "att=%s\n", attoff ? "off" : "n/a"
+        if (rclass == "dx9") printf "att=%s\n", attoff ? "off" : "n/a"
       }
       if (diagPeak > memPeak) printf "mem_peak=%d\n", diagPeak
+      if (hasfp) printf "footprint_peak=%d\n", fpPeak
+      if (hasswap) printf "swap_peak=%d\n", swapPeak
+      if (ndrm) print "device_removed=" drm1 (ndrm > 1 ? sprintf(" (%d devices)", ndrm) : "")
+      if (ngerr) printf "gpu_errors=%d (the first: %s)\n", ngerr, gerr1
+      if (nhung) printf "gpu_hung=%d (the first: %s)\n", nhung, hung1
+      if (glost) printf "gpu_lost=%d command buffers\n", glost
+      if (shtot != "") print "shaders_failed=" shtot
+      if (npt) printf "pipelines_late=%d made after the first Present, %.0f ms in all, the longest %.1f ms\n", ptlate, ptms, ptmax
       printf "hitches=%d\n", nh
       if (nh) {
         printf "hitch_ms=%.0f\n", hitchMs
@@ -640,8 +747,20 @@ row() {
   printf '%s\n' "$line"
 }
 
+# classes <first> <count>: the renderers of those sessions (rclass), each once
+classes() {
+  local i c cl=""
+  for ((i = $1; i < $1 + $2; i++)); do
+    c=$(get rclass "${AN[$i]}")
+    case " $cl " in *" $c "*) ;; *) cl="${cl:+$cl }$c" ;; esac
+  done
+  echo "$cl"
+}
+
 report() {
-  local i n=${#AN[@]} per=""
+  local i n=${#AN[@]} per="" drv="the driver's" drvn=driver
+  # the hitch rows name the driver when every session ran on the same one
+  case "$(classes 0 "$n")" in dx9) drv="d9mt's" drvn=d9mt ;; mullion) drv="Mullion's" drvn=Mullion ;; esac
   [ "$SKIP" -gt 0 ] && echo "  (first $SKIP s left out)"
   # what each session ran on and how it was measured: in a block of its own per session when
   # there are more (too long for columns)
@@ -672,12 +791,20 @@ report() {
   row "Render-thread frames > 50 ms" slow50_rt
   row "Hitches (frames over 50 ms)" hitches
   row "  total hitch time (ms)" hitch_ms
-  row "  d9mt's" hitch_d9mt
+  row "  $drv" hitch_d9mt
   row "  the game's" hitch_game
-  row "  top d9mt causes" hitch_top
+  row "  top $drvn causes" hitch_top
   row "Compiles" compiles
   row "Render-thread compile waits" compile_waits
   row "Memory peak (Metal, MiB)" mem_peak
+  row "Process footprint peak (MiB)" footprint_peak
+  row "Swap used, peak (MiB)" swap_peak
+  row "Device removed" device_removed
+  row "GPU errors (command buffers)" gpu_errors
+  row "Stuck command buffers (GPU hung)" gpu_hung
+  row "GPU work lost (d9mt's canary)" gpu_lost
+  row "Failed shaders" shaders_failed
+  row "Late pipelines" pipelines_late
   row "Render passes per frame" rp
   row "  skipped (no-op) per frame" skip
   row "Command buffers per frame" cb
@@ -735,9 +862,11 @@ ident() {
     v=$(get "$key" "$1")
     [ -z "$v" ] || printf "$2" "$label" "$v"
   done <<'ROWS'
+Renderer|renderer
 SWTOR on Mac, Wine engine, d9mt|build
 Game start|started
 d9mt files (SHA-256)|d9mt_files
+Driver files (SHA-256)|driver_files
 Settings at the start|settings
 Power, thermal at the start|conditions
 Measurement|mode
@@ -768,20 +897,27 @@ causes() {
 # every arm the same length, no tolerance); the first and the last ran the same build, d9mt
 # files, A/B switches and settings. Then, per number, the drift between the two A arms and B
 # against their mean. Arms of one sitting share the Mac's state and the scene: their frames
-# are no independent samples, and this is no test.
+# are no independent samples, and this is no test. Arms on different renderers are no A/B/A;
+# DirectX 12 arms are told apart by the wrapper's "driver files:" line in place of d9mt's.
 aba() {
-  local o=$1 j f k ok=1 why miss label key unit x y z
+  local o=$1 j f k ok=1 why miss label key unit x y z fk=d9mt_files fl="d9mt files" fre
   local a=${AN[$1]} b=${AN[$1 + 1]} c=${AN[$1 + 2]}
+  fre='^d3d9\.dll [0-9a-f]{12}, winemetal\.so [0-9a-f]{12}$'
   echo "The last three as A/B/A (${LETTERS:$o:1}, ${LETTERS:$o + 1:1}, ${LETTERS:$o + 2:1}: ${ARMS[$o]}, ${ARMS[$o + 1]}, ${ARMS[$o + 2]}):"
+  case "$(classes "$o" 3)" in
+    dx9) ;;
+    *" "*) echo "  the arms ran on different renderers (their Renderer above): no A/B/A numbers"; return 0 ;;
+    *) fk=driver_files fl="driver files" fre='^d3d12\.dll [0-9a-f]{12}, winemetal\.so [0-9a-f]{12}$' ;;
+  esac
   for ((j = o; j < o + 3; j++)); do
     f=${AN[$j]} why="" miss=""
-    for k in build settings d9mt_files; do [ -n "$(get "$k" "$f")" ] || miss="$miss, $k"; done
+    for k in build settings "$fk"; do [ -n "$(get "$k" "$f")" ] || miss="$miss, $k"; done
     [ -z "$miss" ] || why="; no ${miss#, } line (a log before 0.1.7, or its start is missing)"
-    # known, not just there: both d9mt files hashed (not the wrapper's "unknown" after its
+    # known, not just there: both files hashed (not the wrapper's "unknown" after its
     # deadline, nor "missing"), and the build's version and d9mt named (not the wrapper's "?")
-    k=$(get d9mt_files "$f")
-    [ -z "$k" ] || printf '%s\n' "$k" | grep -qE '^d3d9\.dll [0-9a-f]{12}, winemetal\.so [0-9a-f]{12}$' ||
-      why="$why; the d9mt files not verified ($k)"
+    k=$(get "$fk" "$f")
+    [ -z "$k" ] || printf '%s\n' "$k" | grep -qE "$fre" ||
+      why="$why; the $fl not verified ($k)"
     k=$(get build "$f")
     case "$k" in "" ) ;; *"?"*) why="$why; the build not known ($k)" ;; esac
     case "$(get mode "$f")" in instrumented*) ;; *) why="$why; no frame times (Debug Logging off)" ;; esac
@@ -793,17 +929,17 @@ aba() {
     [ -z "$why" ] || { ok=0; echo "  ${LETTERS:$j:1} (${ARMS[$j]}): ${why#; }"; }
   done
   # the A/B switches: none when the log has the settings line but no d9mt-ab line
-  for k in build d9mt_files switches settings; do
+  for k in build "$fk" switches settings; do
     [ "$(sw "$k" "$a")" = "$(sw "$k" "$c")" ] || { ok=0; echo "  the first and the last differ in $k: not an A/B/A"; }
   done
   if [ "$ok" != 1 ]; then
-    echo "  no A/B/A numbers: each arm needs its build, both d9mt files' hashes and settings, instrumented frame"
+    echo "  no A/B/A numbers: each arm needs its build, both $fl' hashes and settings, instrumented frame"
     echo "  times and the whole interval (all $MARK s), and the first and the last the same build"
     return 0
   fi
-  [ "$(sw build "$a")|$(sw d9mt_files "$a")|$(sw switches "$a")|$(sw settings "$a")" != \
-    "$(sw build "$b")|$(sw d9mt_files "$b")|$(sw switches "$b")|$(sw settings "$b")" ] ||
-    echo "  B ran the same build, d9mt files, switches and settings as A: an A/A"
+  [ "$(sw build "$a")|$(sw "$fk" "$a")|$(sw switches "$a")|$(sw settings "$a")" != \
+    "$(sw build "$b")|$(sw "$fk" "$b")|$(sw switches "$b")|$(sw settings "$b")" ] ||
+    echo "  B ran the same build, $fl, switches and settings as A: an A/A"
   while IFS='|' read -r label key unit; do
     x=$(get "$key" "$a"); y=$(get "$key" "$b"); z=$(get "$key" "$c")
     [ -n "$x" ] && [ -n "$y" ] && [ -n "$z" ] || continue
@@ -849,6 +985,9 @@ if [ -n "$COMPARE" ]; then
   done
   [ $# -eq 2 ] || W=28
   echo "SWTOR on Mac session report: comparison"
+  case "$(classes 0 $#)" in
+    *" "*) echo "  These sessions ran on different renderers (each one's Renderer below): their numbers side by side, no A/B/A" ;;
+  esac
   # the columns' heading, above the numbers (report)
   HEADLINE=$(printf '  %-38s' "")
   for ((i = 0; i < $#; i++)); do
@@ -872,8 +1011,15 @@ AN=("$tmp/a")
 echo "SWTOR on Mac session report: $LOG"
 report
 if [ "$(get stats "${AN[0]}")" = 0 ]; then
-  echo "  (no STATS lines: Debug Logging was off, or the session ran a build before 0.0.6-dev;"
-  echo "   frame numbers from HITCH/COMPILE/DIAG MEM lines only)"
+  case "$(get rclass "${AN[0]}")" in
+    d3dmetal) echo "  (no STATS lines: D3DMetal logs no frame numbers; the Metal HUD shows them)" ;;
+    mullion)
+      echo "  (no STATS lines: Debug Logging was off (Mullion's MULLION_STATS), or a Mullion build without"
+      echo "   them; frame numbers from HITCH/COMPILE/DIAG MEM lines only)" ;;
+    *)
+      echo "  (no STATS lines: Debug Logging was off, or the session ran a build before 0.0.6-dev;"
+      echo "   frame numbers from HITCH/COMPILE/DIAG MEM lines only)" ;;
+  esac
 fi
 if [ -n "$KEEP" ]; then
   version=$(sed -n 's/^# SWTOR on Mac \([^:]*\):.*/\1/p' "$LOGS/../../Application Support/SWTOR on Mac/env" 2>/dev/null | head -1 || true)

@@ -1,0 +1,87 @@
+# jdrly/mullion tests/swtor/fixtures/session.log at 33096c0, copied unchanged below this line
+info:  Mullion: session v0.5-alpha.3-118-g1a2b3c4 (jdrly/mullion swtor-on-mac) d3d12 fl=12_1 metal4=on shaderMetal=400 airconv=103 codegen=3f2a9c01d4e5
+info:  Mullion: mac macOS=26.1 build=25B78 gpu="Apple M5 Max" family=Apple10 masked=no ram=131072 workingSet=110592 arch=x86_64-rosetta supportsPlacementSparse=1
+info:  Mullion: switches MULLION_SAMPLE_LIMIT=4096 MULLION_SAMPLE_SWITCH=on
+info:  Mullion: env DXMT_LOG_LEVEL=info MTL_HUD_ENABLED=1 MULLION_LOG_PATH=(a path) MULLION_SHADER_FLAGS=0x10
+info:  Mullion: cache shaders=mullion/swtor_RC2.exe/shaders_400.db entries=48211 sizeMiB=700
+warn:  MULLION-FEATURE-LEVEL asked=12_2 reaches=12_1 tiledResourcesTier=2 macOS=26.1
+warn:  STATS t=1 fps=25.0 ms=40.0/40.0/40.0 slow33=25 slow50=0 | cb=3.4 rp=12.0 cp=2.0 draws=850 | sh=120 pso=44 wait=5/71.5ms cache=80/120 | allocMiB=1820 | at=20:00:05.001
+warn:  STATS t=2 fps=25.0 ms=40.0/40.0/40.0 slow33=25 slow50=0 | cb=3.4 rp=12.1 cp=2.0 draws=851 | sh=100 pso=38 wait=4/57.2ms cache=70/100 | allocMiB=1840 | at=20:00:06.002
+warn:  STATS t=3 fps=25.0 ms=40.0/40.0/40.0 slow33=25 slow50=0 | cb=3.4 rp=12.0 cp=2.0 draws=851 | sh=80 pso=32 wait=3/42.9ms cache=60/80 | allocMiB=1860 | at=20:00:07.003
+warn:  STATS t=4 fps=25.0 ms=40.0/40.0/40.0 slow33=25 slow50=0 | cb=3.4 rp=12.0 cp=2.0 draws=851 | sh=60 pso=26 wait=2/28.6ms cache=50/60 | allocMiB=1880 | at=20:00:08.004
+warn:  STATS t=5 fps=25.0 ms=40.0/40.0/40.0 slow33=25 slow50=0 | cb=3.4 rp=12.1 cp=2.0 draws=851 | sh=40 pso=20 wait=1/14.3ms cache=40/40 | allocMiB=1900 | at=20:00:09.005
+warn:  DIAG MEM frame=126 allocatedMiB=1900 footprintMiB=3510 footprintPeakMiB=3510 budgetMiB=110592 usageMiB=1900 workingSetMiB=110592 | system: swapMiB=0 compressedMiB=812 freeMiB=91900 pageouts=0 swapouts=0 | heaps=4/256 | at=20:00:09.006
+warn:  STATS t=6 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=851 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=1920 | at=20:00:10.006
+warn:  STATS t=7 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=851 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=1940 | at=20:00:11.000
+warn:  STATS t=8 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=851 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=1960 | at=20:00:12.001
+warn:  STATS t=9 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=851 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=1980 | at=20:00:13.002
+warn:  STATS t=10 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=851 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2000 | at=20:00:14.003
+warn:  DIAG MEM frame=426 allocatedMiB=2000 footprintMiB=3610 footprintPeakMiB=3610 budgetMiB=110592 usageMiB=2000 workingSetMiB=110592 | system: swapMiB=0 compressedMiB=812 freeMiB=91800 pageouts=0 swapouts=0 | heaps=8/512 | at=20:00:14.004
+warn:  STATS t=11 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=851 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2020 | at=20:00:15.004
+warn:  STATS t=12 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=851 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2040 | at=20:00:16.005
+warn:  STATS t=13 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=852 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2060 | at=20:00:17.006
+warn:  STATS t=14 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=852 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2080 | at=20:00:18.000
+warn:  STATS t=15 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=852 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2100 | at=20:00:19.001
+warn:  DIAG MEM frame=726 allocatedMiB=2100 footprintMiB=3710 footprintPeakMiB=3710 budgetMiB=110592 usageMiB=2100 workingSetMiB=110592 | system: swapMiB=0 compressedMiB=812 freeMiB=91700 pageouts=0 swapouts=0 | heaps=12/768 | at=20:00:19.002
+warn:  STATS t=16 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=852 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2120 | at=20:00:20.002
+warn:  STATS t=17 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=852 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2140 | at=20:00:21.003
+warn:  STATS t=18 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=852 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2160 | at=20:00:22.004
+warn:  STATS t=19 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=852 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2180 | at=20:00:23.005
+warn:  HITCH frame=967 dtMs=120.0 inDriverMs=0.4 (0%) | present=1/0.4ms | queue: gpuMs=10.4 encodeMs=2.1 behind=2 | at=20:00:23.125
+warn:  COMPILE frame=967 dtMs=120.0 shaders=2/18.2ms psos=1/31.0ms renderWait=1/38.6ms cache=0/2 queued=0
+warn:  STATS t=20 fps=60.0 ms=16.7/120.0/120.0 slow33=1 slow50=1 | cb=3.0 rp=12.0 cp=2.0 draws=852 | sh=2 pso=1 wait=1/38.6ms cache=0/2 | allocMiB=2200 | at=20:00:24.006
+warn:  DIAG MEM frame=1026 allocatedMiB=2200 footprintMiB=3810 footprintPeakMiB=3810 budgetMiB=110592 usageMiB=2200 workingSetMiB=110592 | system: swapMiB=0 compressedMiB=812 freeMiB=91600 pageouts=0 swapouts=0 | heaps=16/1024 | at=20:00:24.007
+warn:  STATS t=21 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=852 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2220 | at=20:00:25.000
+warn:  STATS t=22 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=853 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2240 | at=20:00:26.001
+warn:  STATS t=23 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=853 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2260 | at=20:00:27.002
+warn:  STATS t=24 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=853 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2280 | at=20:00:28.003
+warn:  STATS t=25 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=853 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2300 | at=20:00:29.004
+warn:  DIAG MEM frame=1326 allocatedMiB=2300 footprintMiB=3910 footprintPeakMiB=3910 budgetMiB=110592 usageMiB=2300 workingSetMiB=110592 | system: swapMiB=0 compressedMiB=812 freeMiB=91500 pageouts=0 swapouts=0 | heaps=20/1280 | at=20:00:29.005
+warn:  STATS t=26 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=853 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2320 | at=20:00:30.005
+warn:  STATS t=27 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=853 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2340 | at=20:00:31.006
+warn:  STATS t=28 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=853 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2360 | at=20:00:32.000
+warn:  STATS t=29 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=853 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2380 | at=20:00:33.001
+warn:  STATS t=30 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=854 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:34.002
+warn:  DIAG MEM frame=1626 allocatedMiB=2400 footprintMiB=4010 footprintPeakMiB=4010 budgetMiB=110592 usageMiB=2400 workingSetMiB=110592 | system: swapMiB=0 compressedMiB=812 freeMiB=91400 pageouts=0 swapouts=0 | heaps=24/1536 | at=20:00:34.003
+warn:  STATS t=31 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=854 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:35.003
+warn:  STATS t=32 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=854 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:36.004
+warn:  STATS t=33 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=854 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:37.005
+warn:  STATS t=34 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=854 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:38.006
+warn:  STATS t=35 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=854 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:39.000
+warn:  DIAG MEM frame=1926 allocatedMiB=2400 footprintMiB=4010 footprintPeakMiB=4010 budgetMiB=110592 usageMiB=2400 workingSetMiB=110592 | system: swapMiB=0 compressedMiB=812 freeMiB=91400 pageouts=0 swapouts=0 | heaps=24/1536 | at=20:00:39.001
+warn:  STATS t=36 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=854 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:40.001
+warn:  STATS t=37 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=854 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:41.002
+warn:  STATS t=38 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=854 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:42.003
+warn:  STATS t=39 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=855 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:43.004
+warn:  STATS t=40 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=855 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:44.005
+warn:  DIAG MEM frame=2226 allocatedMiB=2400 footprintMiB=4010 footprintPeakMiB=4010 budgetMiB=110592 usageMiB=2400 workingSetMiB=110592 | system: swapMiB=0 compressedMiB=812 freeMiB=91400 pageouts=0 swapouts=0 | heaps=24/1536 | at=20:00:44.006
+info:  COMPILE frame=2227 dtMs=45.0 shaders=0/0.0ms psos=0/0.0ms renderWait=0/0.0ms cache=0/0 queued=0
+warn:  HITCH frame=2228 dtMs=70.0 inDriverMs=40.0 (57%) | pipelineWait=1/38.6ms present=1/1.4ms | queue: gpuMs=9.8 encodeMs=2.3 behind=2 | at=20:00:44.142
+warn:  COMPILE frame=2228 dtMs=70.0 shaders=2/18.2ms psos=1/31.0ms renderWait=1/38.6ms cache=0/2 queued=0
+warn:  STATS t=41 fps=60.0 ms=16.7/70.0/70.0 slow33=2 slow50=1 | cb=3.0 rp=12.0 cp=2.0 draws=855 | sh=2 pso=1 wait=1/38.6ms cache=0/2 | allocMiB=2400 | at=20:00:45.006
+warn:  STATS t=42 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=855 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:46.000
+warn:  STATS t=43 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=855 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:47.001
+warn:  STATS t=44 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=855 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:48.002
+warn:  STATS t=45 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=855 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:49.003
+warn:  DIAG MEM frame=2526 allocatedMiB=2400 footprintMiB=4010 footprintPeakMiB=4010 budgetMiB=110592 usageMiB=2400 workingSetMiB=110592 | system: swapMiB=0 compressedMiB=812 freeMiB=91400 pageouts=0 swapouts=0 | heaps=24/1536 | at=20:00:49.004
+warn:  STATS t=46 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=855 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:50.004
+warn:  STATS t=47 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=855 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:51.005
+warn:  STATS t=48 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=856 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:52.006
+warn:  STATS t=49 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=856 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:53.000
+warn:  STATS t=50 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=856 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2400 | at=20:00:54.001
+warn:  DIAG MEM frame=2826 allocatedMiB=2400 footprintMiB=4010 footprintPeakMiB=4010 budgetMiB=110592 usageMiB=2400 workingSetMiB=110592 | system: swapMiB=0 compressedMiB=812 freeMiB=91400 pageouts=0 swapouts=0 | heaps=24/1536 | at=20:00:54.002
+warn:  STATS t=51 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=856 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2385 | at=20:00:55.002
+warn:  STATS t=52 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=856 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2385 | at=20:00:56.003
+warn:  STATS t=53 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=856 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2385 | at=20:00:57.004
+warn:  STATS t=54 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=856 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2385 | at=20:00:58.005
+warn:  STATS t=55 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=856 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2385 | at=20:00:59.006
+warn:  DIAG MEM frame=3126 allocatedMiB=2385 footprintMiB=3995 footprintPeakMiB=4010 budgetMiB=110592 usageMiB=2385 workingSetMiB=110592 | system: swapMiB=0 compressedMiB=812 freeMiB=91400 pageouts=0 swapouts=0 | heaps=24/1536 | at=20:00:59.007
+warn:  STATS t=56 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=857 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2385 | at=20:01:00.000
+warn:  STATS t=57 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=857 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2385 | at=20:01:01.001
+warn:  STATS t=58 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=857 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2385 | at=20:01:02.002
+warn:  STATS t=59 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=857 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2385 | at=20:01:03.003
+warn:  STATS t=60 fps=60.0 ms=16.7/16.7/16.7 slow33=0 slow50=0 | cb=3.0 rp=12.0 cp=2.0 draws=857 | sh=0 pso=0 wait=0/0.0ms cache=0/0 | allocMiB=2385 | at=20:01:04.004
+warn:  DIAG MEM frame=3426 allocatedMiB=2385 footprintMiB=3995 footprintPeakMiB=4010 budgetMiB=110592 usageMiB=2385 workingSetMiB=110592 | system: swapMiB=0 compressedMiB=812 freeMiB=91400 pageouts=0 swapouts=0 | heaps=24/1536 | at=20:01:04.005
+warn:  MULLION-GPU-HUNG at=21:03:55.120 queue=1 cmdbuf=4812 waitedMs=10000 status=scheduled(3) encoders=2/0/0 present=yes flight=swtor_RC2.exe.flight
+err:   MULLION-GPU-ERROR at=21:04:05.123 queue=1 cmdbuf=4812 frame=3601 error=PageFault(3) first=yes gpu=4512345.678-4512361.012ms encoders=2 #1 faulted 'render 5e6f7a8b rt0=1920x1080 RGBA8' | Caused GPU Address Fault Error (0000000b:kIOGPUCommandBufferCallbackErrorPageFault)
+err:   MULLION-DEVICE-REMOVED at=21:04:05.124 reason=DXGI_ERROR_DEVICE_HUNG(0x887a0006) cause=gpu-error frame=3601 flight=swtor_RC2.exe.flight

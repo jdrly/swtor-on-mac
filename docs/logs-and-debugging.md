@@ -81,21 +81,26 @@ performance. A setting you choose is kept through updates and Reinstall.
 gets my fork's `MULLION_SESSION_HEADER=1`, `MULLION_STATS=1` and `MULLION_MEMSTATS=1`: a
 `Mullion: session` header and `STATS`, `HITCH`, `COMPILE` and `DIAG MEM` lines in d9mt's form, in `wine.log` and in Mullion's own
 `swtor_RC2_d3d12.log` (the fork's `docs/swtor/README.md` lists every line). The session report
-below reads their numbers, but still names d9mt in its labels and doesn't yet attribute a
-Mullion hitch to the driver. What these switches cost on DirectX 12 has not been measured.
+below reads them as it reads d9mt's, and says which renderer a session ran on. What these
+switches cost on DirectX 12 has not been measured.
 
 **Session report.** `"/Applications/SWTOR on Mac.app/Contents/Resources/session-report.sh"`
 (`scripts/session-report.sh`) sums up the last game session from
 `~/Library/Logs/SWTOR on Mac/wine.log`:
+- **Renderer**: `DirectX 9 on d9mt <commit>`, or for the DirectX 12 client (development
+  builds; the wrapper's `SWTOR on Mac DirectX 12:` line) `DirectX 12 on Mullion <version>
+  (jdrly/mullion), Apple<N>, Metal 4 on|off, feature level, macOS (build)` from Mullion's
+  `Mullion: session` and `Mullion: mac` header (the wrapper's line when the header is missing),
+  or `DirectX 12 on D3DMetal <version>`, which logs no numbers;
 - the app version, Wine engine and d9mt the session ran on (0.1.0-dev.1 and later: the
   wrapper's first line in `wine.log`; also in `effective-env.txt`, and Collect Logs'
   `system-info.txt` names the engine in place); (0.1.7 and later) when it started, the
   SHA-256 of the d9mt files that ran, the app's settings (Debug Logging, the HUD, Game Mode,
   d9mt's and DXVK's environment, paths left out), and the power source, energy mode and
   macOS's thermal warnings at the start;
-- **Measurement**: every frame time in the log comes from d9mt's profiling, which Debug
-  Logging turns on, so it is *instrumented*, not ordinary play's; with Debug Logging off the
-  log has no frame times (the Metal HUD shows them);
+- **Measurement**: every frame time in the log comes from d9mt's profiling or Mullion's
+  `MULLION_STATS`, which Debug Logging turns on, so it is *instrumented*, not ordinary play's;
+  with Debug Logging off the log has no frame times (the Metal HUD shows them);
 - **Data**: what is left out or lost (a missing start of the log, STATS windows of 2 s or
   more, lines d9mt's limiter suppressed, a second device, a short interval);
 - duration, median fps, the frame rate of the worst 1% of seconds, the seconds below 58 fps.
@@ -104,14 +109,26 @@ Mullion hitch to the driver. What these switches cost on DirectX 12 has not been
   session's 99th percentile frame time and the true 1% low (the slowest 1% of frames) are
   reported as *missing*;
 - frames over 33 ms and 50 ms;
-- hitches, split into d9mt's and the game's, and d9mt's top causes;
+- hitches, split into the driver's and the game's, and the driver's top causes: a hitch is
+  the driver's when at least half of it was spent in the driver (d9mt's `inD9mtMs` plus its
+  render thread's `renderWait`; Mullion's `inDriverMs`, which already holds its `pipelineWait`);
 - the frame rate, frame times and hitches count only the seconds the game window showed the
   game (visible on the active Space and not minimized: d9mt's `MtlPresenter: ... visibility`
   and `window minimized, throttling Present` lines), leaving out
   1 s around each change: d9mt slows Present down while the window is hidden (Cmd-Tab, another
   Space, minimized). The hidden seconds get a line of their own (`window hidden or switching`),
-  and `with the hidden seconds` gives the average over every second, as earlier reports did;
-- compile waits and the memory peak;
+  and `with the hidden seconds` gives the average over every second, as earlier reports did.
+  Mullion logs no visibility: every second counts as shown, `--mark` finds no mark, and
+  **Data** says so;
+- compile waits and the memory peak; with Mullion also the process footprint and the swap in
+  use at their peaks (`DIAG MEM`);
+- when the log has them, the GPU's failures: GPU errors (`D9MT-GPU-ERROR`,
+  `MULLION-GPU-ERROR`: how many, and the first one's error), stuck command buffers
+  (`D9MT-GPU-HUNG`: d9mt ended the game; `MULLION-GPU-HUNG`: Mullion went on waiting), d9mt's
+  canary (`D9MT-GPU-LOST`: command buffers that didn't run to their end), and Mullion's removed
+  device (`MULLION-DEVICE-REMOVED`: the reason and the cause), failed shaders
+  (`MULLION-SHADER-TOTALS`) and pipelines made after the first Present
+  (`MULLION-PIPELINE-TOTALS`);
 - render passes and the attachment traffic d9mt saved, and (0.0.6 and later) the
   render thread's CPU time in that optimization and the clears per frame, to tell its cost
   apart from compile waits (a cold shader cache);
@@ -135,7 +152,11 @@ the drift between the two A arms and B against their mean (in percentage points 
 percentage; no relative change from a mean of 0), which is no significance test. It gives
 numbers only when every arm names its build, both d9mt files' hashes and settings (0.1.7 and later; not "unknown" or "missing"), has
 instrumented frame times and the whole `--mark` interval, and the first and the last ran the
-same build, d9mt files, switches and settings; else it names what is missing.
+same build, d9mt files, switches and settings; else it names what is missing. DirectX 12 arms
+on Mullion need the wrapper's `driver files:` line in place of `d9mt files:`; since Mullion
+logs no visibility they have no mark, so no interval and no A/B/A numbers yet. Sessions on
+different renderers (d9mt, Mullion, D3DMetal) still go side by side, under a first line that
+says so, and never as an A/B/A.
 `--skip <s>` leaves out the first seconds (loading). `--mark <s>` counts `<s>` seconds of
 elapsed time (STATS `t`) from 5 s after the last return to the game window: stand at the
 spot, Cmd-Tab away and back once (the mark), then wait. Lost STATS lines don't move it; they
