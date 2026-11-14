@@ -52,6 +52,15 @@
 // file, from proc_pidpath), for som.sh: Wine 11 rewrites argv[0], so ps shows C:\...\name.exe
 // instead of the program for its processes.
 //
+// Every program it starts (the game, the wineserver, the session's bootstrap) starts without
+// task exception ports for EXC_BAD_ACCESS, EXC_BAD_INSTRUCTION and EXC_BREAKPOINT. They all run
+// under Rosetta, which sends each hardware exception to the port the process inherited for these
+// before its own handling (Wine's signal handlers). The port this process inherits comes from the
+// launcher's side and can belong to a process that is gone by then; the send fails ("rosetta
+// error: failed to send exception: 0x10000003") and the faulting thread stays suspended, so the
+// game freezes at its first hardware exception. Without a port Rosetta delivers the signal
+// directly, and a crash still reaches macOS's crash reporting (EXC_CRASH keeps its port).
+//
 // No AppKit: a process with an NSApplication counts for macOS as an app of the launcher that
 // started it, and the Dock's Quit on the launcher kills those (0.1.1's hold-launcher, cut off
 // mid-cleanup).
@@ -61,6 +70,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <libproc.h>
+#include <mach/mach.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -312,6 +322,13 @@ static int reap(int quiet)
     return ended;
 }
 
+// The exception ports for the kinds Rosetta forwards, cleared before an exec (see the top)
+static void clear_exception_ports(void)
+{
+    task_set_exception_ports(mach_task_self(), EXC_MASK_BAD_ACCESS | EXC_MASK_BAD_INSTRUCTION | EXC_MASK_BREAKPOINT,
+                             MACH_PORT_NULL, EXCEPTION_DEFAULT, THREAD_STATE_NONE);
+}
+
 // Runs PATH (ARGV) in its own session with stdin/stdout on /dev/null, stderr on ERRPATH
 // (appended; NULL: /dev/null) and nothing else open; TIMEOUT s at most (SIGKILL, survives exec).
 // Returns its wait status, or -1.
@@ -330,6 +347,7 @@ static int run_detached(const char *path, char *const argv[], const char *errpat
         if (err > 2) close(err);
         // (a stuck call must not keep the Wine start waiting: SIGALRM ends it)
         if (timeout > 0) alarm(timeout);
+        clear_exception_ports();
         execv(path, argv);
         _exit(127);
     }
@@ -412,12 +430,14 @@ static int run_game(const char *holdlog, const char *note, char **argv)
     pid_t pid = fork();
     if (pid == 0) {
         sigprocmask(SIG_SETMASK, &old, NULL);
+        clear_exception_ports();
         execv(argv[0], argv);
         _exit(127);
     }
     if (pid < 0) {
         // (no child: the game in this process, as the wrapper ran it before, without the line)
         sigprocmask(SIG_SETMASK, &old, NULL);
+        clear_exception_ports();
         execv(argv[0], argv);
         return 127;
     }

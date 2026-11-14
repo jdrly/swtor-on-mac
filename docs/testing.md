@@ -63,8 +63,12 @@ git repository and planted release files; each changed input fails verify before
 `gh`'s upload, a squash merge's equal tree passes), the version table (group `version-table`:
 release and development versions in order through `build.sh`'s `bundle_version`, the packaged
 wrapper's update check and `Installer.isNewer`, compiled with `swiftc`; a mapping without
-1000 + N must fail), and the
-suite's `orphan_as`. That helper starts a stand-in with a rewritten argv[0], as Wine 11 shows its
+1000 + N must fail), the exception ports `hold-launcher` passes on (group `exception-ports`: an
+x86_64 probe started behind dead exception ports faults once, through the packaged
+`hold-launcher`'s x86_64 slice it gets past the fault with no Rosetta error, and an unhandled
+fault still ends it by `SIGSEGV`; the control, the probe itself in `hold-launcher`'s place, must
+fail with Rosetta's `failed to send exception`; needs clang and Rosetta, skipped without them),
+and the suite's `orphan_as`. That helper starts a stand-in with a rewritten argv[0], as Wine 11 shows its
 processes. The argv[0] reaches the rewriting shell in the environment, never on its command line:
 a game path there (section 2c's) makes that shell look like the game to `swtor-running.sh` and
 the job runner, which then stops the suite's job. Both `orphan` and `orphan_as` return only once
