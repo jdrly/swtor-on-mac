@@ -18,12 +18,17 @@
 # normal way (SIGSEGV, and hold-launcher's line says so); and the control: the same chain through
 # the probe's own x86_64 exec in hold-launcher's place keeps the dead ports and fails with Rosetta's line, so
 # the fixture sees the failure it guards against.
+ep_kill_tree() {  # <pid>: it and its descendants (the probe, hold-launcher, the x86_64 child)
+  local c
+  for c in $(pgrep -P "$1" 2>/dev/null || true); do ep_kill_tree "$c"; done
+  kill -KILL "$1" 2>/dev/null || true
+}
 ep_run() {  # <name> <command...>: runs it, 30 s at most; out/err/rc in $EP/<name>.*
   local n=$1 pid t=0; shift
   "$@" >"$EP/$n.out" 2>"$EP/$n.err" &
   pid=$!
   while kill -0 "$pid" 2>/dev/null && [ "$t" -lt 300 ]; do sleep 0.1; t=$((t + 1)); done
-  if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null; echo "(killed after 30 s)" >>"$EP/$n.err"; fi
+  if kill -0 "$pid" 2>/dev/null; then ep_kill_tree "$pid"; echo "(killed after 30 s)" >>"$EP/$n.err"; fi
   local rc=0
   wait "$pid" || rc=$?
   echo "$rc" >"$EP/$n.rc"

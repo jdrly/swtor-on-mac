@@ -1,8 +1,8 @@
 // The exception-ports fixture's probe (scripts/fixtures/exception-ports.sh), built twice:
 //
 //   probe start-dead -- PROGRAM [ARGS...]   (native) starts PROGRAM with task exception ports for
-//       EXC_BAD_ACCESS, EXC_BAD_INSTRUCTION and EXC_BREAKPOINT that are dead from the start (the
-//       receive right is destroyed right after the start), as a launcher's process that is gone
+//       EXC_BAD_ACCESS, EXC_BAD_INSTRUCTION and EXC_BREAKPOINT that are dead from the start (it
+//       starts suspended, the receive right is destroyed, then it runs), as a launcher's process that is gone
 //       leaves them; exits as PROGRAM did (128 + signal for a signal)
 //   probe fault <handler|default>           (x86_64, under Rosetta) one EXC_BAD_ACCESS on a second
 //       thread: handler: a SIGSEGV handler skips the faulting instruction and "past the fault" is
@@ -35,11 +35,13 @@ static int start_dead(char **cmd)
     if (posix_spawnattr_setexceptionports_np(&a, EXC_MASK_BAD_ACCESS | EXC_MASK_BAD_INSTRUCTION | EXC_MASK_BREAKPOINT,
                                              port, EXCEPTION_DEFAULT | MACH_EXCEPTION_CODES, THREAD_STATE_NONE))
         return 2;
+    posix_spawnattr_setflags(&a, POSIX_SPAWN_START_SUSPENDED);
     pid_t pid;
     int r = posix_spawn(&pid, cmd[0], NULL, &a, cmd, environ);
     posix_spawnattr_destroy(&a);
     if (r) { fprintf(stderr, "probe: cannot start %s: %s\n", cmd[0], strerror(r)); return 2; }
     mach_port_mod_refs(mach_task_self(), port, MACH_PORT_RIGHT_RECEIVE, -1);  // the port is dead now
+    kill(pid, SIGCONT);                                                       // and only then it runs
     int st = 0;
     if (waitpid(pid, &st, 0) < 0) return 2;
     return WIFSIGNALED(st) ? 128 + WTERMSIG(st) : WEXITSTATUS(st);

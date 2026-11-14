@@ -89,9 +89,9 @@ Everything `hold-launcher` starts (the wineserver, the bootstrap call, the game)
 the task exception ports it inherited for `EXC_BAD_ACCESS`, `EXC_BAD_INSTRUCTION` and
 `EXC_BREAKPOINT`. These programs run under Rosetta, which sends each hardware exception to the
 port the process inherited for these, before the program's own handling (Wine's). That port
-comes from the launcher's side, whose processes don't outlive the game's start; a send to a port
-whose owner is gone fails (`rosetta error: failed to send exception: 0x10000003` in `wine.log`),
-and the thread that faulted stays suspended: the game freezes at its first hardware exception.
+comes from the launcher's side, and its owner may have exited by the time the exception occurs;
+a send to it then fails (`rosetta error: failed to send exception: 0x10000003` in `wine.log`),
+and the thread that faulted stays suspended: the game freezes.
 Without the port, Rosetta hands the exception to Wine directly. A crash is still a crash, with
 macOS's crash report (crash reporting keeps its own port, `EXC_CRASH`).
 
