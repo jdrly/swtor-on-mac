@@ -1958,11 +1958,12 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: the A/B switches removed, said so" eval '[ ! -e "$SOM/d9mt-ab.env" ] && grep -q "^Removed a development build.s d9mt A/B switches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: the cold test caches removed, said so" eval '[ ! -e "$COLD" ] && grep -q "^Removed a development build.s d9mt test caches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: env as a release writes it (no A/B include, state cache on, update check on)" eval '! grep -q d9mt-ab "$SOM/env" && [ "$(envv D9MT_TEX_PFV)/$(envv SWTOR_D9MT_AB)" = "<unset>/<unset>" ] && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && grep -qx SWTOR_UPDATE_CHECK=1 "$SOM/env"'
-  # (this version writes every setting it knows: the Frame Rate Limit's two, Fewer GPU Batches
-  # and Native fullscreen, which $DEVV does not know, come in with their defaults; everything
-  # else byte for byte)
-  check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high), only fpslimit=off, fpsbattery=off, flushcap=off and nativefs=off added" \
-    eval '! grep -q -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" -e "^nativefs=" "$SANDBOX/dev-settings.conf" && [ "$(grep -c "^fpslimit=" "$SOM/settings.conf")" = 1 ] && grep -qx fpslimit=off "$SOM/settings.conf" && [ "$(grep -c "^fpsbattery=" "$SOM/settings.conf")" = 1 ] && grep -qx fpsbattery=off "$SOM/settings.conf" && [ "$(grep -c "^flushcap=" "$SOM/settings.conf")" = 1 ] && grep -qx flushcap=off "$SOM/settings.conf" && [ "$(grep -c "^nativefs=" "$SOM/settings.conf")" = 1 ] && grep -qx nativefs=off "$SOM/settings.conf" && cmp -s "$SANDBOX/dev-settings.conf" <(perl -ne "print unless /^(fpslimit|fpsbattery|flushcap|nativefs)=/" "$SOM/settings.conf")'
+  # (this version writes every setting it knows: the HUD position (0.1.2), the Frame Rate
+  # Limit's two, Fewer GPU Batches and Native fullscreen, which $DEVV (0.1.1-dev.1, the default:
+  # no public development build lies between 0.1.2 and 0.1.3) does not know, come in with their
+  # defaults; everything else byte for byte)
+  check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high), only hudpos=topcenter, fpslimit=off, fpsbattery=off, flushcap=off and nativefs=off added" \
+    eval '! grep -q -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" -e "^nativefs=" "$SANDBOX/dev-settings.conf" && [ "$(grep -c "^hudpos=" "$SOM/settings.conf")" = 1 ] && grep -qx hudpos=topcenter "$SOM/settings.conf" && [ "$(grep -c "^fpslimit=" "$SOM/settings.conf")" = 1 ] && grep -qx fpslimit=off "$SOM/settings.conf" && [ "$(grep -c "^fpsbattery=" "$SOM/settings.conf")" = 1 ] && grep -qx fpsbattery=off "$SOM/settings.conf" && [ "$(grep -c "^flushcap=" "$SOM/settings.conf")" = 1 ] && grep -qx flushcap=off "$SOM/settings.conf" && [ "$(grep -c "^nativefs=" "$SOM/settings.conf")" = 1 ] && grep -qx nativefs=off "$SOM/settings.conf" && cmp -s "$SANDBOX/dev-settings.conf" <(perl -ne "print unless /^(hudpos|fpslimit|fpsbattery|flushcap|nativefs)=/" "$SOM/settings.conf")'
   prefix_changes "$SANDBOX/dev-prefix.txt" "" "$SANDBOX/dev-prefix-after.txt" >"$SANDBOX/dev-prefix.diff"
   # (the bridge: $DEVV's, or this app's when the d9mt pin moved with a new one)
   dev_bridge=$(bridge_pinned "$APP" "$DEV_APP" "$SOM/engine" "$sys" && echo moved || echo kept)
