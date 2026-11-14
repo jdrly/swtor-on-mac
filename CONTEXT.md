@@ -156,6 +156,14 @@ GameController's `GCMouse` through an input thread of SWTOR on Mac's Mac driver,
 pointer stays frozen. On by default (docs/settings.md).
 _Avoid_: “raw input” (SWTOR has none).
 
+**Native fullscreen**
+The Game setting *Native fullscreen (own Space)*: SWTOR on Mac's Mac driver moves the game's
+borderless, screen-covering window into a fullscreen Space of its own (`NativeFullscreen=y` for
+`swtor.exe`), so Cmd-Tab and Mission Control switch Spaces. Off by default; while another app is
+in front the game isn't drawn (docs/settings.md).
+_Avoid_: “native fullscreen” for the game's own *Fullscreen* display modes; the setting is the
+Space around them.
+
 **Game keys by keyboard position**
 The game sees every key by its position on a US keyboard (`PhysicalKeyboard=y`), for layouts whose
 keys type something else (docs/settings.md).
@@ -229,6 +237,12 @@ _Avoid_: “beta”, “nightly”.
 (`state-off`, `vsync-off`, `cold=<name>`, …), and Mullion's safety switches
 (`mullion-check-ranges`, …), kept in `d9mt-ab.env`, which only a development
 build reads (docs/updates.md, *Development builds*).
+
+**Receipt**
+`release/<version>/RECEIPT`, written by `scripts/release.sh`: the source tree a release
+candidate was built from and the sha256 of its DMG, deltas, feed and notes, with the gates run on
+exactly those files. `scripts/release-receipt.sh verify` checks it before and after publishing
+(docs/building.md, *Releasing*).
 
 **Feed**
 `appcast.xml` of the latest GitHub release, signed with Sparkle's EdDSA key, which the app and

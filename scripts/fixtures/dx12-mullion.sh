@@ -15,15 +15,25 @@ fx_dxm_cached() {
   [ "$(shasum -a 256 "$f" | cut -d' ' -f1)" = "$2" ] && echo "$f"
 }
 fx_dxm_val() { sed -n "/^$1=/{s/^$1=//p;q;}" "$2"; }
-# fx_dxm [som.sh's arguments]: the development build's som.sh in the planted sandbox; FX_RC its
-# exit status, $FX_DXM_D/out.txt what it printed. With FX_DXM_CP_FAIL=<file name>, a cp that
-# copies part of that file and fails, as on a full disk, comes first on the PATH.
+# fx_dxm [som.sh's arguments]: the development build's som.sh in the planted sandbox (or the one
+# in FX_DXM_RES, a Resources folder); FX_RC its exit status, $FX_DXM_D/out.txt what it printed.
+# With FX_DXM_CP_FAIL=<file name>, a cp that copies part of that file and fails, as on a full
+# disk, comes first on the PATH.
 fx_dxm() {
   local path=$PATH
   [ -z "${FX_DXM_CP_FAIL:-}" ] || path="$FX_DXM_D/failcp:$PATH"
   FX_RC=0
   PATH="$path" FX_FAIL="${FX_DXM_CP_FAIL:-}" SWTOR_ON_MAC_ROOT="$FX_DXM_D/root" SWTOR_ON_MAC_MULLION_URL="${FX_DXM_URL:-}" \
-    "$FX_DXM_D/dev/Resources/som.sh" "$@" >"$FX_DXM_D/out.txt" 2>&1 || FX_RC=$?
+    "${FX_DXM_RES:-$FX_DXM_D/dev/Resources}/som.sh" "$@" >"$FX_DXM_D/out.txt" 2>&1 || FX_RC=$?
+}
+# fx_dxm_nf <exe> <y|n>: NativeFullscreen is that under AppDefaults\<exe>\Mac Driver in the
+# planted prefix's user.reg
+fx_dxm_nf() {
+  K="[Software\\\\Wine\\\\AppDefaults\\\\$1\\\\Mac Driver]" V="\"NativeFullscreen\"=\"$2\"" awk '
+    BEGIN { k = ENVIRON["K"]; v = ENVIRON["V"] }
+    index($0, "[") == 1 { inkey = (substr($0, 1, length(k)) == k && substr($0, length(k) + 1, 1) == " ") }
+    inkey && $0 == v { found = 1 }
+    END { exit !found }' "$FX_DXM_SOM/prefix/user.reg"
 }
 # fx_dxm_env <variable>: its value in the planted env, or <unset>
 fx_dxm_env() { ( set -a; . "$FX_DXM_SOM/env"; set +a; eval "printf '%s' \"\${$1-<unset>}\"" ); }
@@ -165,6 +175,8 @@ fx_dx12_mullion() {
   # tree, a prefix registry
   mkdir -p "$d/dev/Resources/d9mt" "$d/rel" "$d/orig" "$d/a"
   cp "$r/som.sh" "$r/dxvk.conf" "$d/dev/Resources/"
+  # (the app's Mac driver build, for Native fullscreen)
+  cp -R "$r/wine" "$d/dev/Resources/"
   cp "$r/d9mt/VERSION" "$d/dev/Resources/d9mt/"
   printf 'version=0.0.0-dev.1\nchannel=dev\n' >"$d/dev/Resources/app.properties"
   FX_DXM_SOM="$d/root/home/Library/Application Support/SWTOR on Mac"
@@ -173,13 +185,17 @@ fx_dx12_mullion() {
   mkdir -p "$e/lib/wine/x86_64-unix" "$FX_DXM_SOM/prefix"
   fx_dxm_val ENGINE_SHA256 "$r/som.sh" >"$e/.som-source"
   tar -xJf "$engine" -C "$d/orig" --strip-components 5 wine/lib/wine/dxgi/dxmt
-  # (and its D3DMetal's Info.plist, which env names on a D3DMetal driver)
+  # (and its D3DMetal's Info.plist, which env names on a D3DMetal driver, and its own Mac
+  # driver, which Native fullscreen swaps for the app's)
   tar -xJf "$engine" -C "$e" --strip-components 1 wine/lib/wine/dxgi/dxmt \
-    wine/lib/external/D3DMetal.framework/Versions/A/Resources/Info.plist
+    wine/lib/external/D3DMetal.framework/Versions/A/Resources/Info.plist \
+    wine/lib/wine/x86_64-unix/winemac.so wine/lib/wine/x86_64-windows/winemac.drv wine/lib/wine/i386-windows/winemac.drv
   FX_DXM_ORIG="$d/orig"
   echo "d9mt's bridge (a stand-in)" >"$e/lib/wine/x86_64-unix/winemetal.so"
   cp "$e/lib/wine/x86_64-unix/winemetal.so" "$d/bridge"
-  echo '{}' >"$FX_DXM_SOM/install-manifest.json"
+  # (with a key, as an install writes it: plutil reads a bare {} as OpenStep, which it can't
+  # write back when Native fullscreen records the Mac driver in it)
+  printf '{\n  "fixture": "dx12-mullion"\n}\n' >"$FX_DXM_SOM/install-manifest.json"
   printf 'WINE REGISTRY Version 2\n' >"$FX_DXM_SOM/prefix/user.reg"
   # my fork's build of c1, pinned; its VERSION's codegen line with characters env can't hold
   # between quotes, which the install leaves out
@@ -207,6 +223,31 @@ fx_dx12_mullion() {
     cmp -s "$d/bridge" "$e/lib/wine/x86_64-unix/winemetal.so"
   check "dx12-mullion: env: DirectX 12 with Mullion, rule dxgi=dxmt for swtor_RC2.exe, the build named by its VERSION ($(fx_dxm_env SWTOR_DX12_DRIVER_VERSION))" \
     eval '[ "$(fx_dxm_env SWTOR_DX12)/$(fx_dxm_env SWTOR_DX12_DRIVER)" = 1/mullion ] && fx_dxm_env WINE_COMPATDB | piped -x "name=swtor-dx12;exe=swtor_RC2.exe;dxgi=dxmt" && [ "$(fx_dxm_env SWTOR_DX12_DRIVER_VERSION)" = "Mullion (jdrly/mullion 1111111), v0.5-alpha.3-1-g1111111, codegen airconv 103xy" ]'
+
+  # Native fullscreen with DirectX 12 on: swtor_RC2.exe gets swtor.exe's NativeFullscreen, at a
+  # change of either setting
+  fx_dxm set nativefs on
+  check "dx12-mullion: nativefs on, DirectX 12 on: NativeFullscreen=y for swtor.exe and swtor_RC2.exe, the app's Mac driver, the manifest says so ($FX_RC: $(tail -n 1 "$d/out.txt"))" \
+    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor.exe y && fx_dxm_nf swtor_RC2.exe y && cmp -s "$d/dev/Resources/wine/winemac.so" "$e/lib/wine/x86_64-unix/winemac.so" && [ "$(plutil -extract winemac raw -o - "$FX_DXM_SOM/install-manifest.json")" = app ]'
+  fx_dxm set dx12 off
+  check "dx12-mullion: dx12 off, nativefs on: swtor_RC2.exe's keys gone, swtor.exe keeps NativeFullscreen=y ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && ! grep -qi swtor_RC2 "$FX_DXM_SOM/prefix/user.reg" && fx_dxm_nf swtor.exe y'
+  fx_dxm set dx12 on
+  check "dx12-mullion: dx12 on again, nativefs on: NativeFullscreen=y for swtor_RC2.exe, Mullion installed ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor_RC2.exe y && fx_dxm_mullion'
+  fx_dxm set nativefs off
+  check "dx12-mullion: nativefs off, DirectX 12 on: NativeFullscreen=n for both, the app's Mac driver kept for raw mouse-look (on by default) ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor.exe n && fx_dxm_nf swtor_RC2.exe n && grep -qx rawmouse=on "$FX_DXM_SOM/settings.conf" && cmp -s "$d/dev/Resources/wine/winemac.so" "$e/lib/wine/x86_64-unix/winemac.so"'
+  # the control: a dx12_reg that doesn't write NativeFullscreen; the same check must fail
+  mkdir -p "$d/control"
+  cp -R "$d/dev/Resources" "$d/control/"
+  awk '!(index($0, "set_reg \"$k") && index($0, "NativeFullscreen"))' "$d/dev/Resources/som.sh" >"$d/control/Resources/som.sh"
+  check "dx12-mullion: the control's som.sh differs only in dx12_reg's NativeFullscreen line" \
+    eval '[ "$(diff "$d/dev/Resources/som.sh" "$d/control/Resources/som.sh" | grep -c "^[<>]")" = 1 ]'
+  FX_DXM_RES="$d/control/Resources" fx_dxm set nativefs on
+  check "dx12-mullion: control: a dx12_reg without NativeFullscreen fails the check (swtor_RC2.exe not y, swtor.exe y)" \
+    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor.exe y && ! fx_dxm_nf swtor_RC2.exe y'
+  fx_dxm set nativefs off
 
   fx_dxm set dx12driver mullion-mtl3
   check "dx12-mullion: mullion-mtl3: the tree as it was, nothing downloaded ($FX_RC)" \

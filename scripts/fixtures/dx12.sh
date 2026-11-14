@@ -121,8 +121,8 @@ STUB
     eval '[ "$(fx_dx12_env WINE_COMPATDB)" = "$(printf "v=5\nname=swtor-on-mac;exe=*;dxgi=wined3d\nname=swtor-dx12;exe=swtor_RC2.exe;dxgi=gptk")" ]'
   check "dx12: on: SWTOR_DX12=1 and SWTOR_DX12_DRIVER=gptk for the wrapper" \
     eval '[ "$(fx_dx12_env SWTOR_DX12)/$(fx_dx12_env SWTOR_DX12_DRIVER)" = 1/gptk ]'
-  check "dx12: on: swtor_RC2.exe gets swtor.exe's Mac driver values and GrabPointer" \
-    eval 'fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"n\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"RawMouseWhenCursorHidden\"=\"y\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"RawMouseGameControllerScale\"=\"1\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"ThreadCpuStats\"=\"y\"" && fx_dx12_reg "swtor_RC2.exe\\\\X11 Driver" "\"GrabPointer\"=\"n\""'
+  check "dx12: on: swtor_RC2.exe gets swtor.exe's Mac driver values (NativeFullscreen n, as nativefs is off) and GrabPointer" \
+    eval 'fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"NativeFullscreen\"=\"n\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"n\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"RawMouseWhenCursorHidden\"=\"y\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"RawMouseGameControllerScale\"=\"1\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"ThreadCpuStats\"=\"y\"" && fx_dx12_reg "swtor_RC2.exe\\\\X11 Driver" "\"GrabPointer\"=\"n\""'
   check "dx12: on: swtor_RC2.exe gets Wine's builtin d3d9, swtor.exe keeps d9mt's native,builtin" \
     eval 'fx_dx12_reg "swtor_RC2.exe\\\\DllOverrides" "\"d3d9\"=\"builtin\"" && fx_dx12_reg "swtor.exe\\\\DllOverrides" "\"d3d9\"=\"native,builtin\""'
 

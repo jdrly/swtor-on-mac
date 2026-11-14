@@ -23,34 +23,38 @@
   release. `scripts/build-d9mt.sh --check-air-codegen <file>` runs only that guard.)
 - `build.sh` assembles `dist/SWTOR on Mac.app` with Sparkle (pinned download; ad-hoc signed;
   `--install` copies it to /Applications). Needs Xcode 27 (macOS 27 SDK); the app runs on
-  macOS 26 and later.
+  macOS 26 and later. The app's `Resources/VERSIONS` (in Collect Logs too) names its components
+  and the source tree it was built from: `source <git tree id of HEAD> clean`, or `changed` when
+  the working tree had changes, or `source unknown` outside a git checkout.
 - `scripts/release.sh` signs a copy with the Developer ID (hardened runtime; the helpers get
   `allow-dyld-environment-variables`, the app and Sparkle no exceptions), builds the DMG,
   notarizes and staples it, and builds the Sparkle feed (`appcast.xml` with delta updates from
   the last 5 versions in `release/updates/`, checked by `scripts/check-appcast.swift`), then
-  drafts the GitHub release (`--sign-only`, `--no-notarize`, `--no-release` for local runs;
-  `--ci`, `--feed <version>` for the two halves of a CI release, as in SWGL on Mac).
+  drafts the GitHub release (`--sign-only`, `--no-notarize`, `--no-release` for local runs
+  and the release build; `--dev` for development builds). Before it builds a release, it checks
+  the notes' title, summary and Discord invite (release-notes/README.md).
 - `scripts/ui-snapshot.sh` builds the app's windows into a small test bundle and runs it on a
   temporary virtual display (swtor-mac-proper's `tools/vd/with-vd.sh`), never on the main one:
   screenshots of the main window in its states, of Settings, of the Logs collected alert and of
   the notice (`shots`), which keys close that alert (`alertkeys`), and what the warp costs (`measure`,
   `sweep`, `findcost`, `idlecheck`, `stillcheck`: CPU, instructions, the GPU time the GPU driver
   counts for the process, frames drawn).
-- `.github/workflows/checks.yml` lints the scripts and builds the app; on a pull request into
-  `dx12` it also compiles a development build's window (`SWTOR_ON_MAC_COMPILE_ONLY=1`, which
-  stops after the compile), whose `#if SWTOR_DEV` code the release build leaves out;
-  `.github/workflows/release.yml` signs and notarizes on a `v*` tag. Both build on GitHub's
-  `xcode-27` image (macOS 27 with Xcode 27, a public preview; there is no `macos-27` label).
+- `.github/workflows/checks.yml` lints the scripts and builds the app on GitHub's `xcode-27`
+  image (macOS 27 with Xcode 27, a public preview; there is no `macos-27` label). On a pull
+  request into `dx12` it also compiles a development build's window
+  (`SWTOR_ON_MAC_COMPILE_ONLY=1`, which stops after the compile), whose `#if SWTOR_DEV` code the
+  release build leaves out. No workflow signs, notarizes or builds a release.
 
 - `scripts/build-winemac.sh` builds Wine's Mac driver (`winemac.so`, x86_64, and its PE sides
   `x86_64-windows/` and `i386-windows/winemac.drv`) from the sources the engine is built from
   (athei/wine at the commit athei/wine-build's release names, pinned sha256; configured like
   athei's build; the engine download pinned in `src/som.sh` for linking) with
   `patches/winemac-physical-keys.patch`, SWGL on Mac's `winemac-swgl-relative-mouse.patch` and
-  `winemac-swgl-input-thread.patch` (unchanged copies) and `winemac-swtor-mouse.patch`, in that
-  order, into `prebuilt/winemac`, together with an unpatched build: `scripts/winemac-compare.py`
-  checks that one against the engine's own `winemac.so` and that the patches change only the
-  keyboard and mouse functions and the options; the PE sides are checked by their imports and
+  `winemac-swgl-input-thread.patch` (unchanged copies), `winemac-swtor-mouse.patch` and
+  `winemac-native-fullscreen.patch`, in that order, into `prebuilt/winemac`, together with an
+  unpatched build: `scripts/winemac-compare.py` checks that one against the engine's own
+  `winemac.so` and that the patches change only the keyboard and mouse functions, the native
+  fullscreen functions (named one by one) and the options; the PE sides are checked by their imports and
   sections. It also refuses if a patch hides the cursor by turning it off (`[NSCursor hide]`),
   which would cost Direct presentation (Xcode, Rosetta, Homebrew bison; llvm-mingw pinned as in
   athei's build). The build is reproducible (the PE sides without their debug info).
@@ -74,29 +78,81 @@
 
 ## Releasing
 
-Sparkle's EdDSA key never leaves Jan's Mac, so a release comes in two halves:
+Agents build, sign, notarize, check and publish every release on my Mac. The Developer ID
+certificate, the notary credentials and Sparkle's EdDSA key exist only there. No workflow builds
+a release or signs with the Developer ID; the Checks workflow's build is ad-hoc signed and goes
+nowhere. Nobody approves a step or clicks anything once I've played the release
+candidate. [ADR 0007](adr/0007-releases-from-the-maintainers-mac.md) has the reasons. Every release has
+been built on my Mac, by agents since 0.1.2: no tag's run of the old Release workflow ever
+finished.
 
-1. Bump `APP_VERSION` in `build.sh`, add `release-notes/<version>.md`, commit, then tag and
-   push: `git tag v<version> && git push origin main v<version>`.
-2. The Release workflow (after approval in the `release` environment) checks the d9mt pin
-   (below), builds, signs and notarizes the app, and creates the draft release `v<version>`
-   with the DMG.
-3. On the Mac: `./build.sh` (it unpacks Sparkle's tools), then
-   `scripts/release.sh --feed <version>`. It downloads the notarized DMG from the draft, checks
-   it, builds and checks `appcast.xml` (and deltas from the older DMGs in `release/updates/`)
-   and uploads them to the draft.
-4. Publish the draft. The update is live once
-   `https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml` names the new
-   version.
+1. **The release candidate.** The app at a commit of `main`, through the checks its changes call
+   for (the fixture groups, `scripts/test-sandbox.sh`, the d9mt pin's checks; CONTRIBUTING.md,
+   *Definition of Done*). I play it.
+2. **The version PR.** `APP_VERSION` in `build.sh`, `release-notes/<version>.md` and the
+   README's current version and *Pinned components* line, squash-merged into `main`. Its Checks
+   run includes the d9mt pin check (below).
+3. **The build**, in a clean checkout of the squash commit: `./build.sh`, then
+   `scripts/release.sh --no-release`. It signs, notarizes and staples the DMG, builds the feed
+   with deltas from the last five releases' DMGs in `release/updates/`, checks the feed with
+   `scripts/check-appcast.swift` and applies every delta. It then writes the **receipt**,
+   `release/<version>/RECEIPT` (`scripts/release-receipt.sh`): the version, build and channel, the
+   source tree the app was built from (the `source` line of its `VERSIONS`: git's tree id and
+   whether the working tree was clean), the notes' sha256 and the sha256 of the DMG, each delta
+   and `appcast.xml`. No keys, user names or paths. Each gate below that passes on these files
+   is added with `scripts/release-receipt.sh gate release/<version> <name> pass`, which first
+   checks that the files are still the receipt's.
+4. **The checks of the DMG's own app**, without Wine: `codesign --verify --deep --strict`,
+   `spctl` for the app and the DMG, `stapler validate`, the `Info.plist` keys and versions, the
+   feed (`check-appcast.swift`, and it names the version), `som.sh status` in an empty sandbox
+   and `scripts/test-btm.sh`.
+5. **The binary-diff gate**, two comparisons of the DMG's app. Both have to pass.
+   - Against the release candidate I played: every Mach-O file is byte-identical or differs only
+     in its signature (compared after `codesign --remove-signature`), and d9mt's and Wine's
+     Windows files (the DLLs and `.drv` files) are byte-identical. Any other file differs only in
+     the version files (`Info.plist`, `app.properties`, `VERSIONS`), `Licenses/README.txt`,
+     `Assets.car` (actool's output isn't reproducible) and what the version PR changed.
+   - Against the last release's published app: a file differs only where the commits between the
+     two releases changed it or what it is built from. The files from `prebuilt/` (d9mt, the Mac
+     driver, `ntdll.so`) are the committed ones byte for byte, Mach-O files up to their
+     signature, and each changed script is its source at the squash commit.
 
-Development builds (`APP_VERSION` `X.Y.Z-dev.N`, on the `dev` branch) don't go through CI:
+   A file added, removed or changed anywhere else stops the release. The first comparison shows
+   that the build being published is the one I played; the second, that nothing changed since
+   the last release that the commits don't explain.
+6. **Publish**, after `scripts/release-receipt.sh verify release/<version> --commit <squash commit>
+   --notes release-notes/<version>.md` passes and the squash commit is on `origin/main`. Verify
+   reads only and runs nothing of the commit: the files against the receipt's hashes, the DMG's
+   name, the channel and the feed's versions against the receipt, an app built from a clean tree,
+   and at the commit to be tagged the same source tree (a squash merge's equal tree passes),
+   build.sh's `APP_VERSION` and the notes, and the notes file to upload. It fails before anything
+   is uploaded. Then:
+   `gh release create v<version> --target <squash commit> --latest --title "SWTOR on Mac <version>" --notes-file release-notes/<version>.md`
+   with exactly the DMG, the deltas and `appcast.xml`. The tag this creates starts no build. The
+   Site workflow runs on the published release and rebuilds swonmac.com.
+7. **Verify.** `scripts/release-receipt.sh verify release/<version> --release v<version>`
+   downloads the release's assets and compares them with the receipt, the same files with the
+   same hashes, naming each one. Then check that `https://github.com/jdrly/swtor-on-mac/releases/latest/download/appcast.xml` names
+   the new version, that the release is the latest, and that the Site run passed.
+
+Changing the notes after the build doesn't rebuild anything. The change is a notes-only commit,
+the feed's `<description>` (the notes as Markdown, in CDATA) is replaced with the new notes, and
+the feed is checked again with `scripts/check-appcast.swift`. Its signatures cover the DMG and
+the deltas, not the description, so they stay valid. `scripts/release-receipt.sh write
+release/<version> release-notes/<version>.md` then writes the receipt again with the new feed and
+notes; with the DMG and the deltas unchanged it keeps the gate runs. The release is published from
+the notes' commit, whose tree may differ from the receipt's only in `release-notes/<version>.md`.
+
+Development builds' `--dev` writes a receipt too (the DMG only) and verifies it against `HEAD`
+before it creates the pre-release; so does the one-go `scripts/release.sh` below before its draft.
+
+Development builds (`APP_VERSION` `X.Y.Z-dev.N`, on the `dev` branch):
 `./build.sh && scripts/release.sh --dev`. It signs, notarizes and staples the DMG, then
-creates the GitHub pre-release `v<version>` with the DMG and
-`release-notes/<version>.md`, and no feed. The tag starts the Release workflow, which stops
-at its version check; cancel the run. The other modes and the workflow refuse dev versions.
+creates the GitHub pre-release `v<version>` with the DMG and `release-notes/<version>.md`, and
+no feed. The other modes refuse dev versions.
 
-Without CI, `./build.sh && scripts/release.sh` does everything on the Mac (sign, notarize, feed,
-draft).
+`./build.sh && scripts/release.sh` also does everything in one go (sign, notarize, feed, a draft
+release with the DMG, the deltas and the feed), without the gates above.
 
 ## d9mt pin
 
@@ -104,7 +160,7 @@ draft).
 `COMMIT` of `scripts/build-d9mt.sh`, that commit is on `jdrly/d9mt`'s `main`, and d9mt's `Checks`
 workflow has a green run of exactly that commit (a push, a nightly run or a run by hand; a pull
 request's run tests another tree and doesn't count). The Checks workflow runs it on every pull
-request and the Release workflow before it builds. A pin older than d9mt's CI (before `45fcedb`)
+request, the version PR's included. A pin older than d9mt's CI (before `45fcedb`)
 passes with a note. Exit status 1 means the pin fails; 2 means GitHub didn't answer or d9mt's run
 hasn't finished, which is no verdict: run it again.
 
@@ -128,8 +184,28 @@ archive whose `VERSION` names another commit than `MULLION_COMMIT`.
 
 `dx12` pins the fork's `efee691`.
 
-`main` pins d9mt `f5439a6`, d9mt main after jdrly/d9mt#190: the driver of 0.1.8, the one
-release that changes the AIR codegen on purpose. Since `1d33ea4` it adds:
+`main` pins d9mt `9b64581`, d9mt main after jdrly/d9mt#206: the driver of 0.1.9. Since `f5439a6`
+it adds:
+
+- Metal's pipeline archive written at the bridge's DLL detach, before Wine's exit kill, instead
+  of only from `atexit` inside it, so a session's archive loads at the next start; and Metal's
+  leftover `*.metallib` temporaries older than 600 s removed from the archive folder, #196;
+- indexed triangle fans drawn as triangle lists, #197;
+- the CS command that only reached a stub no longer sent, #192;
+- PACE's d9mt share measured as per-device outer-entry time, #201, and the STATS window's
+  StretchRect and ColorFill counters read under the device lock, #205;
+- `D9MT_DIAG_BURN_US`, off unless set: a CPU cost of known size per Present, the control for a
+  speed guard, #203;
+- profiler counters and the per-function profiler build, #193, #202, #204 and #206, which run
+  only with `D9MT_PROFILE` or in a profiler build, and the hash suite's profile variant, #195.
+
+None of them changes the AIR codegen: the bridge reports `25fc2491…` with no lineage, as 0.1.8's
+did, so players keep the shaders 0.1.8 compiled. #196 changes the bridge's Metal side
+(`winemetal_unix.c` and the PE side's `DllMain`), which is outside the id. `AIR_LINEAGE` stays
+0.1.8: a later id would have to carry back to 0.1.8's cache, the one players have.
+
+`f5439a6`, d9mt main after jdrly/d9mt#190, was the driver of 0.1.8, the one release that changes
+the AIR codegen on purpose. Since `1d33ea4` it added:
 
 - the AIR target per macOS, #167: AIR 2.8 and Metal 4.0 on macOS 26, AIR 2.9 and Metal 4.1 on
   macOS 27 and later, in the bitcode and in the container. `D9MT_AIR_LEGACY=1` writes 0.1.7's
@@ -148,8 +224,8 @@ release that changes the AIR codegen on purpose. Since `1d33ea4` it adds:
   the bridge's code. #181 lists the codegen's files in byte order in the bridge's build, so the
   AIR codegen id no longer depends on the locale of the shell that starts the build.
 
-#167, #168 and #172 change the AIR codegen, so the bridge reports a new id, `25fc2491…`, with no
-lineage: every player's shaders recompile once after the update to 0.1.8. #175 changes no codegen
+#167, #168 and #172 changed the AIR codegen, so the bridge reports a new id, `25fc2491…`, with no
+lineage: every player's shaders recompiled once after the update to 0.1.8. #175 changes no codegen
 and is off by default. Metal's pipeline archives are rebuilt too, and #174 deletes the folders
 earlier versions left behind on the first start; a folder that a running game still holds stays
 until that game has ended. `scripts/build-d9mt.sh` records the id in `AIR_CODEGEN` and stops a

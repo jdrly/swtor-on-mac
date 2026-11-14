@@ -18,7 +18,7 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
 - `~/Library/Application Support/SWTOR on Mac/`
   - `engine/` – the Wine engine (self-contained: its libraries are inside it), with d9mt's
     winemetal bridge, SWTOR on Mac's build of its `ntdll.so` (`lib/wine/x86_64-unix`: the msync
-    fix, see [Building](building.md); the engine's own kept as `ntdll.so.stock`) (and, while *Game keys by keyboard position* or *Raw mouse-look* is on,
+    fix, see [Building](building.md); the engine's own kept as `ntdll.so.stock`) (and, while *Game keys by keyboard position*, *Raw mouse-look* or *Native fullscreen* is on,
     SWTOR on Mac's build of its Mac driver, `winemac.so` and the PE sides
     `x86_64-windows/winemac.drv`, `i386-windows/winemac.drv`; the engine's own files are kept
     as `<name>.stock`) (and, in a development build with DirectX 12 on a Mullion driver,
@@ -97,6 +97,16 @@ the same check over the last 24 hours when it opens, and Collect Logs over the l
 check ends its query after a time limit in every case (20 s from the wrapper, 60 s from the app,
 90 s in Collect Logs), so nothing of it keeps running.
 
+Everything `hold-launcher` starts (the wineserver, the bootstrap call, the game) starts without
+the task exception ports it inherited for `EXC_BAD_ACCESS`, `EXC_BAD_INSTRUCTION` and
+`EXC_BREAKPOINT`. These programs run under Rosetta, which sends each hardware exception to the
+port the process inherited for these, before the program's own handling (Wine's). That port
+comes from the launcher's side, and its owner may have exited by the time the exception occurs;
+a send to it then fails (`rosetta error: failed to send exception: 0x10000003` in `wine.log`),
+and the thread that faulted stays suspended: the game freezes.
+Without the port, Rosetta hands the exception to Wine directly. A crash is still a crash, with
+macOS's crash report (crash reporting keeps its own port, `EXC_CRASH`).
+
 Nothing holds the launcher: it quits ~30 s after starting the game, as with Broadsword's own
 Wine, and macOS leaves the game (a foreground app) and the Wine session running. For the game
 (`swtor.exe`) the wrapper also:
@@ -123,6 +133,9 @@ Wine, and macOS leaves the game (a foreground app) and the Wine session running.
   winemetal is used next to d9mt's bridge;
 - with Debug Logging on, sets `WINEDEBUG` to `SWTOR_GAME_WINEDEBUG` (the Mac driver's
   `THREADCPU` and `RAWMOUSE` lines, game only);
+- with Native fullscreen on (`SWTOR_NATIVE_FULLSCREEN=1`), adds `warn+nativefs` to the game's
+  `WINEDEBUG` (the Mac driver's `NATIVEFS:` lines, game only, with and without Debug Logging),
+  and names the setting, on or off, in `wine.log`;
 - in a development build with *DirectX 12 (experimental)* on, starts the DirectX 12 client,
   `swtor_RC2.exe`, in place of `swtor.exe`, with Wine's builtin `d3d9` and a compatdb rule that
   gives it its driver: Mullion (by default, in the DXMT tree) or D3DMetal
