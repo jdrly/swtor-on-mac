@@ -596,7 +596,20 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
          /* A window covering a screen keeps its level: raised above the menu
             bar, it breaks Mission Control on macOS 27.  The controller hides
             the Dock and menu bar instead, as native games do. */
-@@ -1405,6 +1773,8 @@
+@@ -1287,7 +1655,11 @@
+ 
+     - (void) sendResizeStartQuery
+     {
+-        macdrv_query* query = macdrv_create_query();
++        macdrv_query* query;
++
++        if ([self nfsNoQueries])
++            return;
++        query = macdrv_create_query();
+         query->type = QUERY_RESIZE_START;
+         query->window = (macdrv_window)[self retain];
+ 
+@@ -1405,6 +1777,8 @@
                  [NSApp addWindowsItem:self title:[self title] filename:NO];
          }
          [self adjustFullScreenBehavior:behavior];
@@ -605,7 +618,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
      }
  
      - (BOOL) addChildWineWindow:(WineWindow*)child assumeVisible:(BOOL)assumeVisible
-@@ -1846,6 +2216,8 @@
+@@ -1846,6 +2220,8 @@
              if (![self isExcludedFromWindowsMenu])
                  [NSApp addWindowsItem:self title:[self title] filename:NO];
          }
@@ -614,7 +627,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
      }
  
      - (void) doOrderOut
-@@ -1872,6 +2244,18 @@
+@@ -1872,6 +2248,18 @@
  
          pendingOrderOut = FALSE;
  
@@ -633,7 +646,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
          if ([self isMiniaturized])
              pendingMinimize = TRUE;
  
-@@ -1905,6 +2289,8 @@
+@@ -1905,6 +2293,8 @@
                                           event_mask_for_type(WINDOW_MINIMIZE_REQUESTED) |
                                           event_mask_for_type(WINDOW_RESTORE_REQUESTED)
                                 forWindow:self];
@@ -642,7 +655,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
      }
  
      - (BOOL) coversMenuBarScreen
-@@ -1960,6 +2346,18 @@
+@@ -1960,6 +2350,18 @@
  
      - (void) setFrameFromWine:(NSRect)contentRect
      {
@@ -661,7 +674,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
          /* Origin is (left, top) in a top-down space.  Need to convert it to
             (left, bottom) in a bottom-up space. */
          [[WineApplicationController sharedController] flipRect:&contentRect];
-@@ -2032,6 +2430,8 @@
+@@ -2032,6 +2434,8 @@
                  }
              }
          }
@@ -670,7 +683,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
      }
  
      - (NSRect) wine_fractionalFrame
-@@ -2052,6 +2452,8 @@
+@@ -2052,6 +2456,8 @@
              if ([parent addChildWineWindow:self])
                  [[WineApplicationController sharedController] adjustWindowLevels];
              [self adjustFullScreenBehavior:[self collectionBehavior]];
@@ -679,7 +692,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
          }
      }
  
-@@ -3012,12 +3414,325 @@
+@@ -3012,12 +3418,341 @@
      {
          if (mac_edit_menu == MAC_EDIT_MENU_DISABLED && [[WineApplicationController sharedController] isEditMenuAction:selector])
               return FALSE;
@@ -702,6 +715,13 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
 +    - (BOOL) nfsQuiet
 +    {
 +        return native_fullscreen && nfsTransition;
++    }
++
++    /* No query to the game's window thread: in a quiet transition, or with the window settled in
++       the driver's Space (AppKit owns its frame there, and asks again after a transition). */
++    - (BOOL) nfsNoQueries
++    {
++        return [self nfsQuiet] || (native_fullscreen && nfsInSpace);
 +    }
 +
 +    - (BOOL) nativeFullscreenTransition
@@ -887,6 +907,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
 +        nfsTransition = TRUE;
 +        nfsExitRequested = FALSE;
 +        nfsTransitionStart = [[NSProcessInfo processInfo] systemUptime];
++        [self nfsWatchTransition];
 +        nativefs_log("windowWillEnterFullScreen", @"enter screen=%u frame=%.0fx%.0fpt scale=%g safeTop=%g request=%@ (by hand)",
 +                     nativefs_screen_id(screen), NSWidth(frame), NSHeight(frame), [screen backingScaleFactor],
 +                     [screen safeAreaInsets].top, nativefs_wine_rect([self nfsRequest]));
@@ -918,6 +939,9 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
 +            nativefs_log("windowWillExitFullScreen", @"exit reason=user");
 +            nativefs_log("windowWillExitFullScreen", @"declined by user");
 +            nfsTransitionStart = [[NSProcessInfo processInfo] systemUptime];
++            nfsTransition = TRUE;
++            nfsExitRequested = TRUE;
++            [self nfsWatchTransition];
 +        }
 +        nfsTransition = TRUE;
 +        nfsExitRequested = TRUE;
@@ -958,6 +982,11 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
 +            [self setFrameAndWineFrame:[self frame]];
 +            [self setFrameFromWine:nfsRequestWine];
 +        }
++        /* Wine hears the final frame even where AppKit had already put the window at the
++           request (it may hold the Space's shorter frame from a correction); a frame Wine has
++           already is ignored there, so the game gets nothing new. */
++        if ([self isOrderedIn])
++            [self postWindowFrameChanged:[self frame] fullscreen:FALSE resizing:FALSE skipSizeMove:TRUE];
 +    }
 +
 +    /* In the Space, Wine's request differs from the window's real content (a notch, a menu bar
@@ -1005,28 +1034,28 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
       * ---------- NSWindowDelegate methods ----------
       */
      - (NSSize) window:(NSWindow*)window willUseFullScreenContentSize:(NSSize)proposedSize
-@@ -3025,6 +3740,11 @@
+@@ -3025,6 +3760,11 @@
          macdrv_query* query;
          NSSize size;
  
 +        /* A quiet transition, or the window in the driver's Space (AppKit asks again after the
 +           transition): no min/max query (the main thread never waits for the game). */
-+        if ([self nfsQuiet] || [self nfsOwnsFrame])
++        if ([self nfsNoQueries])
 +            return proposedSize;
 +
          query = macdrv_create_query();
          query->type = QUERY_MIN_MAX_INFO;
          query->window = (macdrv_window)[self retain];
-@@ -3092,6 +3812,8 @@
+@@ -3092,6 +3832,8 @@
  
      - (void) windowDidEndLiveResize:(NSNotification *)notification
      {
-+        if ([self nfsQuiet])
++        if ([self nfsNoQueries])
 +            return;
          if (!maximized)
          {
              macdrv_event* event = macdrv_create_event(WINDOW_RESIZE_ENDED, self);
-@@ -3104,6 +3826,8 @@
+@@ -3104,6 +3846,8 @@
      {
          enteringFullScreen = FALSE;
          enteredFullScreenTime = [[NSProcessInfo processInfo] systemUptime];
@@ -1035,7 +1064,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
          if (pendingOrderOut)
              [self doOrderOut];
      }
-@@ -3111,6 +3835,13 @@
+@@ -3111,6 +3855,13 @@
      - (void) windowDidExitFullScreen:(NSNotification*)notification
      {
          exitingFullScreen = FALSE;
@@ -1049,7 +1078,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
          [self setFrameAndWineFrame:nonFullscreenFrame];
          [self windowDidResize:nil];
          if (pendingOrderOut)
-@@ -3121,13 +3852,38 @@
+@@ -3121,13 +3872,38 @@
      {
          enteringFullScreen = FALSE;
          enteredFullScreenTime = 0;
@@ -1088,7 +1117,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
          [self windowDidResize:nil];
          if (pendingOrderOut)
              [self doOrderOut];
-@@ -3177,6 +3933,25 @@
+@@ -3177,6 +3953,25 @@
          }
  
          if (ignore_windowResize || exitingFullScreen) return;
@@ -1103,7 +1132,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
 +            return;
 +        }
 +        if (native_fullscreen && [[NSProcessInfo processInfo] systemUptime] < nfsKeepFrameUntil &&
-+            !NSIsEmptyRect(nfsRequestWine) &&
++            ![self inLiveResize] && !NSIsEmptyRect(nfsRequestWine) &&
 +            !nativefs_rects_close([self contentRectForFrameRect:frame], [self nfsRequest]))
 +        {
 +            /* AppKit's own frame after the window left (leaving a Space that isn't the active
@@ -1114,7 +1143,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
  
          if ([self preventResizing])
          {
-@@ -3187,8 +3962,8 @@
+@@ -3187,8 +3982,8 @@
  
          [self postWindowFrameChanged:frame
                            fullscreen:([self styleMask] & NSWindowStyleMaskFullScreen) != 0
@@ -1125,7 +1154,7 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
  
          [[[self contentView] inputContext] invalidateCharacterCoordinates];
          [self updateFullscreen];
-@@ -3250,11 +4025,18 @@
+@@ -3250,11 +4045,18 @@
      {
          enteringFullScreen = TRUE;
          nonFullscreenFrame = self.wine_fractionalFrame;
@@ -1144,43 +1173,43 @@ diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
          [self postWindowFrameChanged:nonFullscreenFrame fullscreen:FALSE resizing:FALSE skipSizeMove:FALSE];
      }
  
-@@ -3266,6 +4048,9 @@
+@@ -3266,6 +4068,9 @@
  
      - (NSSize) windowWillResize:(NSWindow*)sender toSize:(NSSize)frameSize
      {
 +        /* A quiet transition is a live resize to AppKit: no size query to the game. */
-+        if ([self nfsQuiet])
++        if ([self nfsNoQueries])
 +            return frameSize;
          if ([self inLiveResize])
          {
              if (maximized)
-@@ -3307,7 +4092,12 @@
+@@ -3307,7 +4112,12 @@
      {
          [self endWindowDragging];
  
 -        if (maximized)
 +        /* A quiet transition: no resize-start query (the main thread never waits for the
 +           game, and the game gets no WM_ENTERSIZEMOVE). */
-+        if ([self nfsQuiet])
++        if ([self nfsNoQueries])
 +        {
 +        }
 +        else if (maximized)
          {
              macdrv_event* event;
              NSRect frame = [self contentRectForFrameRect:self.frame];
-@@ -3333,6 +4123,11 @@
+@@ -3333,6 +4143,11 @@
          NSRect currentContentRect, proposedContentRect, newContentRect, screenRect;
          NSSize maxSize;
  
 +        /* A quiet transition, or the window in the driver's Space, asks this too (AppKit's zoom
 +           frame): no min/max query. */
-+        if ([self nfsQuiet] || [self nfsOwnsFrame])
++        if ([self nfsNoQueries])
 +            return proposedFrame;
 +
          query = macdrv_create_query();
          query->type = QUERY_MIN_MAX_INFO;
          query->window = (macdrv_window)[self retain];
-@@ -3612,6 +4407,19 @@
+@@ -3612,6 +4427,19 @@
  }
  
  /***********************************************************************
