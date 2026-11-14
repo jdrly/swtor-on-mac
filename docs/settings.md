@@ -112,7 +112,7 @@ With the setting on:
   process keeps wined3d. A rule that names an exe applies after the `exe=*` rules, whatever the
   line order;
 - with a Mullion driver, the setting downloads my fork's build of Mullion (`MULLION_*` in
-  `som.sh`: commit `23f4799`, 9 MB, checked against its pinned sha256, its `VERSION` against the
+  `som.sh`: commit `6027c1e`, 9 MB, checked against its pinned sha256, its `VERSION` against the
   pinned commit) and installs it over the engine's
   `dxgi/dxmt` tree, the engine's own files kept as `<name>.stock` (see [What it
   changes](how-it-works.md#what-it-changes)). A download or tree that isn't the expected one is
@@ -150,8 +150,8 @@ With the setting on:
   session report name them. The shader cache keys on the first two, so the first start with one
   of them on converts the game's shaders again;
 - `wine.log`'s header names it: `SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion
-  (dxgi=dxmt), MULLION_SESSION_HEADER=1, MULLION_STATS=1, MULLION_MEMSTATS=1, Mullion (jdrly/mullion 23f4799),
-  v0.5-alpha.3-178-g23f4799, codegen 45887bbe6d6c airconv 104` (the Mullion switches and
+  (dxgi=dxmt), MULLION_SESSION_HEADER=1, MULLION_STATS=1, MULLION_MEMSTATS=1, Mullion (jdrly/mullion 6027c1e),
+  v0.5-alpha.3-182-g6027c1e, codegen c47044c8bf4a airconv 104` (the Mullion switches and
   `MULLION_CONFIG` the client got, the pin, then the `git describe` line and the codegen line of
   the build's `VERSION`), or `driver gptk (dxgi=gptk), D3DMetal 4.0b2 (the
   engine's)`, with `MULLION_D3D12_METAL4=0` or `D3DM_MTL4=0` for a Metal 3 driver. The D3DMetal
