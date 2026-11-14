@@ -112,7 +112,7 @@ With the setting on:
   process keeps wined3d. A rule that names an exe applies after the `exe=*` rules, whatever the
   line order;
 - with a Mullion driver, the setting downloads my fork's build of Mullion (`MULLION_*` in
-  `som.sh`: commit `0009110`, 9 MB, checked against its pinned sha256, its `VERSION` against the
+  `som.sh`: commit `23f4799`, 9 MB, checked against its pinned sha256, its `VERSION` against the
   pinned commit) and installs it over the engine's
   `dxgi/dxmt` tree, the engine's own files kept as `<name>.stock` (see [What it
   changes](how-it-works.md#what-it-changes)). A download or tree that isn't the expected one is
@@ -137,9 +137,21 @@ With the setting on:
   `MULLION_HITCH_MS`'s default) and `MULLION_MEMSTATS=1` (a `DIAG MEM` line every 5 s: Metal's
   allocation, the process footprint, the budget and the system's swap). With Debug Logging off
   it sets none of them (Mullion's `MULLION-MEMORY-PRESSURE` line is on either way);
+- my fork's safety switches stay off, as its build has them, until each is measured on a Mac:
+  `MULLION_D3D12_GUARD_STATIC_RANGES` (shaders keep the bounds checks of buffer views in static
+  descriptor ranges), `MULLION_D3D12_CHECK_RANGES` (a copy, view, root view, descriptor index or
+  `ExecuteIndirect` that runs past its resource is dropped or clamped), `MULLION_D3D12_RESET_WAITS`
+  (a command allocator's `Reset` waits for the lists still on the GPU) and
+  `MULLION_TEX_MSAA_COMPRESSION=auto` (no lossless compression for multisampled textures on M1
+  to M4). To try one for the next game starts, without editing `env`: `"/Applications/SWTOR on
+  Mac.app/Contents/Resources/d9mt-ab.sh" mullion-check-ranges` (also `mullion-guard-static`,
+  `mullion-reset-waits`, `mullion-msaa-auto`, several at once), and `d9mt-ab.sh reset` to turn
+  them off ([Updates](updates.md), *d9mt A/B switches*). `wine.log`'s `d9mt-ab:` line and the
+  session report name them. The shader cache keys on the first two, so the first start with one
+  of them on converts the game's shaders again;
 - `wine.log`'s header names it: `SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion
-  (dxgi=dxmt), MULLION_SESSION_HEADER=1, MULLION_STATS=1, MULLION_MEMSTATS=1, Mullion (jdrly/mullion 0009110),
-  v0.5-alpha.3-130-g0009110, codegen 3f6f0338eb82 airconv 104` (the Mullion switches and
+  (dxgi=dxmt), MULLION_SESSION_HEADER=1, MULLION_STATS=1, MULLION_MEMSTATS=1, Mullion (jdrly/mullion 23f4799),
+  v0.5-alpha.3-178-g23f4799, codegen 45887bbe6d6c airconv 104` (the Mullion switches and
   `MULLION_CONFIG` the client got, the pin, then the `git describe` line and the codegen line of
   the build's `VERSION`), or `driver gptk (dxgi=gptk), D3DMetal 4.0b2 (the
   engine's)`, with `MULLION_D3D12_METAL4=0` or `D3DM_MTL4=0` for a Metal 3 driver. The D3DMetal

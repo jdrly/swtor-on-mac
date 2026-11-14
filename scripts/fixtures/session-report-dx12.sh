@@ -42,7 +42,7 @@ fx_session_report_dx12() {
   check "dx12 report: the 70 ms pipeline wait Mullion's, the 120 ms frame the game's" eval 'sdx_in "$R/mullion.txt" "^    Mullion.s +1 \(37% of hitch time\)$" && sdx_in "$R/mullion.txt" "^    the game.s +1 \(63% of hitch time\)$" && sdx_in "$R/mullion.txt" "^    top Mullion causes +pipelineWait 39 ms$"'
   check "dx12 report: the process footprint and the swap from DIAG MEM" eval 'sdx_in "$R/mullion.txt" "^  Process footprint peak \(MiB\) +4010$" && sdx_in "$R/mullion.txt" "^  Swap used, peak \(MiB\) +0$"'
   check "dx12 report: the removed device, the GPU error and the stuck command buffer" eval 'sdx_in "$R/mullion.txt" "^  Device removed +DXGI_ERROR_DEVICE_HUNG\(0x887a0006\), cause gpu-error, frame 3601$" && sdx_in "$R/mullion.txt" "^  GPU errors \(command buffers\) +1 \(the first: PageFault\(3\)\)$" && sdx_in "$R/mullion.txt" "^  Stuck command buffers \(GPU hung\) +1 \(the first: status scheduled\(3\) after 10000 ms; Mullion went on waiting\)$"'
-  check "dx12 report: no visibility from Mullion, said under Data" sdx_in "$R/mullion.txt" "^  Data +the driver doesn't report window visibility: every second counts as shown; no mark$"
+  check "dx12 report: a Mullion build before the fork's window lines (its header's -118): no visibility, said under Data" sdx_in "$R/mullion.txt" "^  Data +the driver doesn't report window visibility: every second counts as shown; no mark$"
   check "dx12 report: the driver files" sdx_in "$R/mullion.txt" '^  Driver files \(SHA-256\) +d3d12\.dll 00112233aabb, winemetal\.so ccddeeff0011$'
   check "dx12 report: no d9mt rows for a Mullion session" eval '! grep -E "d9mt.s|Attachment|re-clears|skipped \(no-op\)|GPU work lost" "$R/mullion.txt" >/dev/null'
 
@@ -69,6 +69,30 @@ fx_session_report_dx12() {
   { cat "$R/plain.log"; echo '0124:warn:threadcpu:trace_thread_cpu THREADCPU 1.00 s: process 701 ms (16 threads), wineserver 21 ms; busiest (ms): 0130 610, 0134 66'; } >"$R/threadcpu.log"
   check "dx12 report: Mullion with the Mac driver's THREADCPU only: not credited to MULLION_STATS" eval '"$SR" "$R/threadcpu.log" | grep -E "^  Measurement +instrumented: Debug Logging on \(the Mac driver.s THREADCPU\)" >/dev/null'
   check "dx12 report: Mullion without its header, the wrapper's build" eval 'sdx_in "$R/plain.txt" "^  Renderer +DirectX 12 on Mullion \(jdrly/mullion 0009110\), v0\.5-alpha\.3-118-g1a2b3c4, codegen airconv 103 \(driver mullion; no session header" && sdx_in "$R/plain.txt" "^  Measurement +ordinary play \(Debug Logging off\)" && sdx_in "$R/plain.txt" "^  \(no STATS lines: Debug Logging was off \(Mullion.s MULLION_STATS\)" && ! grep -q "Attachment optimization" "$R/plain.txt"'
+
+  check "dx12 report: Mullion without its header, a build before the window lines by the wrapper's -118: no visibility, said under Data" \
+    sdx_in "$R/plain.txt" "^  Data +the driver doesn't report window visibility: every second counts as shown; no mark$"
+
+  # 4b. A build since the fork's window lines (fork #24, v0.5-alpha.3-174 and later): the
+  # sample session behind its header, with the fork's Cmd-Tab between STATS t=30 and t=34 (the
+  # lines of its session.log since #24): the Data line no longer says Mullion reports no
+  # visibility, and --mark finds the return to the window
+  printf '%s\n' 'mullion: window at=20:00:34.412 active=0 visibility=0x3 why=resign' \
+    'MtlPresenter: 20:00:34.655 visibility 0x3 -> 0x1 visible=1 activeSpace=0 miniaturized=0 active=0 why=space' \
+    'MtlPresenter: 20:00:34.702 visibility 0x1 -> 0x0 visible=0 activeSpace=0 miniaturized=0 active=0 why=occlusion' >"$R/away.txt"
+  printf '%s\n' 'mullion: window at=20:00:37.301 active=1 visibility=0x0 why=activate' \
+    'MtlPresenter: 20:00:37.517 visibility 0x0 -> 0x2 visible=0 activeSpace=1 miniaturized=0 active=1 why=space' \
+    'MtlPresenter: 20:00:37.566 visibility 0x2 -> 0x3 visible=1 activeSpace=1 miniaturized=0 active=1 why=occlusion' >"$R/back.txt"
+  sed -e 's/ Mullion: session v0\.5-alpha\.3-118-g1a2b3c4 / Mullion: session v0.5-alpha.3-178-g23f4799 /' \
+    -e "/ STATS t=30 /r $R/away.txt" -e "/ STATS t=33 /r $R/back.txt" "$R/mullion.log" >"$R/window.log"
+  "$SR" "$R/window.log" >"$R/window.txt" 2>&1 || true
+  "$SR" --mark 10 "$R/window.log" >"$R/window-mark.txt" 2>&1 || true
+  check "dx12 report: a build since the window lines with a Cmd-Tab: the hidden seconds left out, the mark at the return, no line that Mullion reports no visibility" \
+    eval 'sdx_in "$R/window.txt" "^    window hidden or switching +6 s, not counted below" && sdx_in "$R/window-mark.txt" "^  Interval +STATS t 39-48, 10 s from 5 s after the mark at 20:00:37\.566; 10 lines$" && ! grep -q "report window visibility" "$R/window.txt" "$R/window-mark.txt"'
+  sed 's/ Mullion: session v0\.5-alpha\.3-118-g1a2b3c4 / Mullion: session v0.5-alpha.3-174-g5d91494 /' "$R/mullion.log" >"$R/since24.log"
+  sed 's/, v0\.5-alpha\.3-118-g1a2b3c4, /, v0.5-alpha.3-178-g23f4799, /' "$R/plain.log" >"$R/plain24.log"
+  check "dx12 report: a build since the window lines without a window change, by the header's -174 or the wrapper's -178: no line that Mullion reports no visibility" \
+    eval '"$SR" "$R/since24.log" >"$R/since24.txt" 2>&1; "$SR" "$R/plain24.log" >"$R/plain24.txt" 2>&1; sdx_in "$R/since24.txt" "^  Renderer +DirectX 12 on Mullion v0\.5-alpha\.3-174-g5d91494 " && ! grep -q "report window visibility" "$R/since24.txt" "$R/plain24.txt"'
 
   # 5. D3DMetal: named, and no numbers to read
   sdx_head "swtor_RC2.exe, driver gptk (dxgi=gptk), D3DMetal 4.0b3 (imported: Evaluation environment for Windows games 4.0 beta 3)" >"$R/gptk.log"

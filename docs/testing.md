@@ -58,7 +58,7 @@ codegen guard of the d9mt build (group `air-codegen`: `scripts/air-codegen-guard
 that script records, so the group fails while that id is missing or is 0.1.7's), development
 builds' `d9mt-ab.sh air-legacy` on a planted install (group `d9mt-ab`: the game gets
 `D9MT_AIR_LEGACY=1` with a shader cache and pipeline archives of its own, kept from start to
-start), development builds' Mullion for DirectX 12 (group `dx12-mullion`: `som.sh set` on a
+start, and the variables of Mullion's safety switches), development builds' Mullion for DirectX 12 (group `dx12-mullion`: `som.sh set` on a
 planted install with the engine's real `dxmt` tree, downloaded once into `.cache/`, and
 stand-in archives in the layout of my fork's builds, pinned in the test's `som.sh` and served by
 `scripts/fetch-test-server.py`: Mullion installed, `env` naming the build from its `VERSION`, the
