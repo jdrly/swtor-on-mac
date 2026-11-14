@@ -169,7 +169,8 @@ _Avoid_: “flush cap” in the window's text and release notes; it is fine in c
 **Debug Logging**
 The Troubleshooting setting that makes d9mt and the Mac driver log in detail (`STATS`, `PACE`,
 `THREADCPU`, `RAWMOUSE` lines) for the next game start; it costs a little performance (docs/settings.md;
-docs/logs-and-debugging.md).
+docs/logs-and-debugging.md). For DirectX 12 on Mullion (development builds) it also turns on
+Mullion's session header and `STATS` lines.
 
 **Collect Logs**
 *SWTOR on Mac > Collect Logs…*: a zip for bug reports, `SWTOR-on-Mac-logs-<date>.zip`, with

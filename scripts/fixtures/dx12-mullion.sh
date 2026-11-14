@@ -99,16 +99,42 @@ fx_dx12_mullion_start() {
   fx_dx12_game "$win"
   check "dx12 mullion: the game as swtor_RC2.exe, Mullion's logs and flight record into the log folder, Metal 4 left to Mullion ($FX_RC)" \
     eval '[ "$FX_RC" = 0 ] && [ "$(sed -n 1p "$FX_DX12_W/args")" = "C:\\swtor\\retailclient\\swtor_RC2.exe" ] && [ "$(fx_dx12_seen MULLION_LOG_PATH)/$(fx_dx12_seen MULLION_DIAG_PATH)/$(fx_dx12_seen MULLION_D3D12_METAL4)" = "$logs/$logs/<unset>" ]'
-  check "dx12 mullion: wine.log names the driver, its tree and the build (the pin, its VERSION from the mark)" \
-    eval 'grep -qx "SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion (dxgi=dxmt), $(sed -n "s/^MULLION_TITLE=//p" "$d/dev/som.sh" | tr -d \"), v0.5-alpha.3-1-g1111111, codegen airconv 103" "$logs/wine.log"'
+  check "dx12 mullion: Debug Logging on (a development build's default): the session header and STATS for the game, no Mullion options ($FX_RC)" \
+    eval 'grep -qx debug=on "$FX_DX12_SOM/settings.conf" && [ "$(fx_dx12_seen MULLION_SESSION_HEADER)/$(fx_dx12_seen MULLION_STATS)/$(fx_dx12_seen MULLION_CONFIG)" = "1/1/<unset>" ] && ! grep -q MULLION_CONFIG "$FX_DX12_SOM/env"'
+  check "dx12 mullion: wine.log names the driver, its tree, the switches set and the build (the pin, its VERSION from the mark)" \
+    eval 'grep -qx "SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion (dxgi=dxmt), MULLION_SESSION_HEADER=1, MULLION_STATS=1, $(sed -n "s/^MULLION_TITLE=//p" "$d/dev/som.sh" | tr -d \"), v0.5-alpha.3-1-g1111111, codegen airconv 103" "$logs/wine.log"'
+  # the DirectX 12 Frame Rate Limit: Mullion's option in env's one MULLION_CONFIG line
+  fx_dx12_som dev set dx12fps 45
+  fx_dx12_game "$win"
+  check "dx12 mullion: dx12fps 45: one MULLION_CONFIG line in env, the game gets it, wine.log names it ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && [ "$(grep -c "^MULLION_CONFIG=" "$FX_DX12_SOM/env")" = 1 ] && [ "$(fx_dx12_seen MULLION_CONFIG)" = "d3d12.preferredMaxFrameRate=45" ] && grep -q "^SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion (dxgi=dxmt), MULLION_SESSION_HEADER=1, MULLION_STATS=1, MULLION_CONFIG=d3d12.preferredMaxFrameRate=45, Mullion " "$logs/wine.log"'
+  rm -f "$FX_DX12_W/seen"
+  "$FX_DX12_W/bin/wine64-preloader" "$FX_DX12_W/bin/wine64" 'C:\windows\system32\reg.exe' query 'HKCU\Software' >/dev/null 2>&1
+  check "dx12 mullion: another Wine start gets none of the game's Mullion switches" \
+    eval '[ "$(fx_dx12_seen MULLION_SESSION_HEADER)/$(fx_dx12_seen MULLION_STATS)/$(fx_dx12_seen MULLION_LOG_PATH)" = "<unset>/<unset>/<unset>" ]'
+  fx_dx12_som release set dx12fps 60
+  check "dx12 mullion: release build: set dx12fps refused, settings.conf unchanged ($FX_RC)" \
+    eval '[ "$FX_RC" = 1 ] && grep -q "^@error DirectX 12 is in development builds only" "$FX_DX12_D/out.txt" && grep -qx dx12fps=45 "$FX_DX12_SOM/settings.conf"'
+  fx_dx12_som dev set dx12fps off
+  fx_dx12_game "$win"
+  check "dx12 mullion: dx12fps off: no MULLION_CONFIG in env or for the game ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && ! grep -q MULLION_CONFIG "$FX_DX12_SOM/env" && [ "$(fx_dx12_seen MULLION_CONFIG)" = "<unset>" ]'
+  # Debug Logging off: none of the fork's diagnostic switches
+  fx_dx12_som dev set debug off
+  fx_dx12_game "$win"
+  check "dx12 mullion: Debug Logging off: no session header or STATS for the game, none named in wine.log ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_seen MULLION_SESSION_HEADER)/$(fx_dx12_seen MULLION_STATS)" = "<unset>/<unset>" ] && grep -q "^SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion (dxgi=dxmt), Mullion " "$logs/wine.log"'
+  fx_dx12_som dev set debug on
   fx_dx12_som dev set dx12driver mullion-mtl3
   fx_dx12_game "$win"
   check "dx12 mullion-mtl3: MULLION_D3D12_METAL4=0 for the game, named in wine.log, no D3DMetal switch ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_seen MULLION_D3D12_METAL4)/$(fx_dx12_seen D3DM_MTL4)" = "0/<unset>" ] && grep -q "^SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion-mtl3 (dxgi=dxmt), MULLION_D3D12_METAL4=0, Mullion " "$logs/wine.log"'
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_seen MULLION_D3D12_METAL4)/$(fx_dx12_seen D3DM_MTL4)" = "0/<unset>" ] && grep -q "^SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion-mtl3 (dxgi=dxmt), MULLION_D3D12_METAL4=0, MULLION_SESSION_HEADER=1, MULLION_STATS=1, Mullion " "$logs/wine.log"'
+  fx_dx12_som dev set dx12fps 30
   fx_dx12_som dev set dx12driver gptk
   fx_dx12_game "$win"
-  check "dx12 mullion: back on D3DMetal: no Mullion switch, the mark gone ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_seen MULLION_LOG_PATH)/$(fx_dx12_seen MULLION_D3D12_METAL4)" = "<unset>/<unset>" ] && [ ! -e "$t/.mullion" ]'
+  check "dx12 mullion: back on D3DMetal: no Mullion switch or option (a frame rate limit set), the mark gone ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_seen MULLION_LOG_PATH)/$(fx_dx12_seen MULLION_D3D12_METAL4)/$(fx_dx12_seen MULLION_SESSION_HEADER)/$(fx_dx12_seen MULLION_STATS)/$(fx_dx12_seen MULLION_CONFIG)" = "<unset>/<unset>/<unset>/<unset>/<unset>" ] && ! grep -q MULLION_CONFIG "$FX_DX12_SOM/env" && [ ! -e "$t/.mullion" ]'
+  fx_dx12_som dev set dx12fps off
   fx_dx12_som dev set dx12 off
 }
 
