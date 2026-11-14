@@ -72,8 +72,9 @@
 #             "Mullion: mac" header (Debug Logging on), and STATS, HITCH, COMPILE and DIAG MEM in
 #             d9mt's form (HITCH's driver share is inDriverMs, its categories included; DIAG MEM
 #             adds the process footprint and the swap), MULLION-DEVICE-REMOVED, MULLION-GPU-ERROR,
-#             MULLION-GPU-HUNG, MULLION-SHADER-TOTALS and MULLION-PIPELINE-TOTALS. Mullion logs no
-#             window visibility (every second counts as shown, no mark); D3DMetal logs no numbers
+#             MULLION-GPU-HUNG, MULLION-SHADER-TOTALS and MULLION-PIPELINE-TOTALS. My fork's builds
+#             since its window lines (fork #24) write d9mt's MtlPresenter visibility line; older
+#             ones log no visibility (every second counts as shown, no mark); D3DMetal logs no numbers
 #
 # What the numbers are. Every frame time comes from d9mt's profiling (STATS, PACE, HITCH: Debug
 # Logging on, D9MT_PROFILE), so it is instrumented, not ordinary play's: "Measurement" says
@@ -147,6 +148,17 @@ analyze() {
     function suppressed(    l) { l = $0; if (!sub(/.*\[/, "", l) || l !~ /^[0-9]+ earlier lines suppressed/) return 0; sub(/ .*/, "", l); return num(l) }
     # the wall-clock stamp after "<prefix>" ("20:13:05.120"), or ""
     function stamp(prefix,    l) { l = $0; if (!sub(".*" prefix, "", l)) return ""; sub(/ .*/, "", l); return l ~ /^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]/ ? l : "" }
+    # a Mullion build from before my fork'"'"'s window lines (fork #24, git describe
+    # v0.5-alpha.3-174), which logs no visibility: the release v0.5-alpha.3, or a build
+    # v0.5-alpha.3-<n>-g<hash> with n below 174. <s>: the header'"'"'s build, else the wrapper'"'"'s
+    # line after "Mullion ". Another build, or none named: 0
+    function mnovis(s) {
+      if (!match(s " ", /v0\.5-alpha\.3(-[0-9]+-g[0-9a-f]+)?[ ,]/)) return 0
+      s = substr(s " ", RSTART, RLENGTH - 1)
+      if (s == "v0.5-alpha.3") return 1
+      sub(/^v0\.5-alpha\.3-/, "", s); sub(/-.*/, "", s)
+      return num(s) < 174
+    }
     # --mark: window k (by its STATS line) is in the interval; a line with t=: in it by line
     # and second (a second device counts t afresh)
     function ink(k) { return !marked || (k >= ks && k <= ke) }
@@ -545,7 +557,7 @@ analyze() {
       }
       d = ""
       if (!header) d = d "; no SWTOR on Mac line at the start (the log'"'"'s start is missing, or SWTOR on Mac 0.0.x)"
-      if (mull) d = d "; the driver doesn'"'"'t report window visibility: every second counts as shown; no mark"
+      if (mull && mnovis(msess ? mver : mwrap)) d = d "; the driver doesn'"'"'t report window visibility: every second counts as shown; no mark"
       else if (marklen > 0 && nw && !marked) d = d "; no mark"
       if (ivshort || ivempty) d = d "; the interval is short"
       if (ivdev) d = d "; no interval: a second device after the mark"

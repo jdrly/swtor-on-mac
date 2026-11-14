@@ -29,8 +29,8 @@
 # the d9mt build passes only on the recorded AIR codegen id or a lineage of this release; only
 # here); d9mt-ab (development builds' scripts/d9mt-ab.sh on a planted install: the
 # air-legacy switch gives the game D9MT_AIR_LEGACY=1 with a shader cache and pipeline archives of
-# its own, kept from start to start; only here, the suite's section 4d checks the other
-# switches); dx12 (DirectX 12, development builds: what som.sh writes into env and the prefix's
+# its own, kept from start to start, and Mullion's safety switches their variables; only here,
+# the suite's section 4d checks the other switches); dx12 (DirectX 12, development builds: what som.sh writes into env and the prefix's
 # user.reg as a development and as a release build, and the wrapper's swtor_RC2.exe start on a
 # planted install with a stand-in engine; also the suite's section 17); dx12-mullion
 # (development builds' Mullion for DirectX 12, som.sh set on a planted

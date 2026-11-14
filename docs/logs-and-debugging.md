@@ -128,8 +128,9 @@ switches cost on DirectX 12 has not been measured.
   1 s around each change: d9mt slows Present down while the window is hidden (Cmd-Tab, another
   Space, minimized). The hidden seconds get a line of their own (`window hidden or switching`),
   and `with the hidden seconds` gives the average over every second, as earlier reports did.
-  Mullion logs no visibility: every second counts as shown, `--mark` finds no mark, and
-  **Data** says so;
+  Mullion writes d9mt's visibility line since my fork's window lines (fork #24, its build
+  `v0.5-alpha.3-174` and later), so the same holds for it. An older Mullion build logs no
+  visibility: every second counts as shown, `--mark` finds no mark, and **Data** says so;
 - compile waits and the memory peak; with Mullion also the process footprint and the swap in
   use at their peaks (`DIAG MEM`);
 - when the log has them, the GPU's failures: GPU errors (`D9MT-GPU-ERROR`,
@@ -163,8 +164,9 @@ percentage; no relative change from a mean of 0), which is no significance test.
 numbers only when every arm names its build, both d9mt files' hashes and settings (0.1.7 and later; not "unknown" or "missing"), has
 instrumented frame times and the whole `--mark` interval, and the first and the last ran the
 same build, d9mt files, switches and settings; else it names what is missing. DirectX 12 arms
-on Mullion need the wrapper's `driver files:` line in place of `d9mt files:`; since Mullion
-logs no visibility they have no mark, so no interval and no A/B/A numbers yet. Sessions on
+on Mullion need the wrapper's `driver files:` line in place of `d9mt files:`. A Mullion build
+before my fork's window lines (fork #24) logs no visibility, so its arms have no mark, no
+interval and no A/B/A numbers. Sessions on
 different renderers (d9mt, Mullion, D3DMetal) still go side by side, under a first line that
 says so, and never as an A/B/A.
 `--skip <s>` leaves out the first seconds (loading). `--mark <s>` counts `<s>` seconds of

@@ -65,7 +65,11 @@ they differ from releases in four ways:
   (`D9MT_FLUSH_CAP=1` or `0`, #113; they win over Settings' Fewer GPU Batches) and
   `compile-maxconc` (`D9MT_COMPILE_MAXCONC=1`, #117), `cold=<name>` (an empty shader cache and pipeline
   archives of their own in `~/Library/Caches/SWTOR on Mac/d9mt-ab/<name>`, d9mt's own caches
-  untouched), and `air-legacy` (`D9MT_AIR_LEGACY=1`, d9mt #167: the game's shaders in the AIR
+  untouched), Mullion's safety switches for DirectX 12 on a Mullion driver, which my fork's
+  pinned build leaves off: `mullion-guard-static` (`MULLION_D3D12_GUARD_STATIC_RANGES=1`),
+  `mullion-check-ranges` (`MULLION_D3D12_CHECK_RANGES=1`), `mullion-reset-waits`
+  (`MULLION_D3D12_RESET_WAITS=1`) and `mullion-msaa-auto` (`MULLION_TEX_MSAA_COMPRESSION=auto`;
+  see [Settings](settings.md#directx-12-experimental-development-builds)), and `air-legacy` (`D9MT_AIR_LEGACY=1`, d9mt #167: the game's shaders in the AIR
   format d9mt wrote before 0.1.8, for a Mac where the format of its macOS fails. It gets a
   shader cache and pipeline archives of its own in `d9mt-ab/air-legacy`, or `cold=<name>`'s,
   and keeps them from start to start: a cache file holds one format's shaders and drops the

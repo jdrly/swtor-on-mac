@@ -226,7 +226,8 @@ _Avoid_: “beta”, “nightly”.
 
 **A/B switches**
 `d9mt-ab.sh`: d9mt's test switches for the next game starts in a development build
-(`state-off`, `vsync-off`, `cold=<name>`, …), kept in `d9mt-ab.env`, which only a development
+(`state-off`, `vsync-off`, `cold=<name>`, …), and Mullion's safety switches
+(`mullion-check-ranges`, …), kept in `d9mt-ab.env`, which only a development
 build reads (docs/updates.md, *Development builds*).
 
 **Feed**

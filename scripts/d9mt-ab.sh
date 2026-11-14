@@ -52,6 +52,20 @@
 #                 cache file keeps one format's shaders and drops the other's. A d9mt before
 #                 #167 (the pin of 0.1.7 and older) doesn't read the variable.
 #
+# Mullion's safety switches, for DirectX 12 on a Mullion driver (docs/settings.md): my fork's
+# build has each off until it is measured on a Mac, and these turn it on for the next starts.
+#   mullion-guard-static  MULLION_D3D12_GUARD_STATIC_RANGES=1: shaders keep the bounds checks
+#                 of buffer views in static descriptor ranges (fork #16)
+#   mullion-check-ranges  MULLION_D3D12_CHECK_RANGES=1: a copy, view, root view, descriptor
+#                 index or ExecuteIndirect that runs past its resource is dropped or clamped
+#                 (fork #20, #23, #25, #29-#31)
+#   mullion-reset-waits   MULLION_D3D12_RESET_WAITS=1: a command allocator's Reset waits for
+#                 the lists still on the GPU (fork #17)
+#   mullion-msaa-auto     MULLION_TEX_MSAA_COMPRESSION=auto: no lossless compression for
+#                 multisampled textures before Apple10 (M1 to M4; fork #18)
+#   The shader cache keys on the first two: the first start with one of them on converts the
+#   game's shaders again.
+#
 # SWTOR_ON_MAC_ROOT=/abs/dir: a sandbox (as for som.sh).
 set -euo pipefail
 H="${SWTOR_ON_MAC_ROOT:+$SWTOR_ON_MAC_ROOT/home}"
@@ -130,6 +144,10 @@ for a in "$@"; do
       [ -z "$cold" ] || [ "$cold" = "$n" ] || { echo "Only one cold=<name> at a time" >&2; exit 2; }
       cold=$n; add "$a" ;;
     air-legacy) add "$a"; var 'D9MT_AIR_LEGACY=1'; legacy=1 ;;
+    mullion-guard-static) add "$a"; var 'MULLION_D3D12_GUARD_STATIC_RANGES=1' ;;
+    mullion-check-ranges) add "$a"; var 'MULLION_D3D12_CHECK_RANGES=1' ;;
+    mullion-reset-waits) add "$a"; var 'MULLION_D3D12_RESET_WAITS=1' ;;
+    mullion-msaa-auto) add "$a"; var 'MULLION_TEX_MSAA_COMPRESSION=auto' ;;
     *) echo "Unknown switch: $a" >&2; usage ;;
   esac
 done
