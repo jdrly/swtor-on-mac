@@ -78,38 +78,31 @@ Uninstall and every Settings pane.
 
 ## Current version
 
-The current release is [0.1.8](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.8),
-published on 14 November 2026. Every release lists its changes on the
+The current release is [0.1.9](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.9),
+published on TO-FILL-DATE. Every release lists its changes on the
 [releases page](https://github.com/jdrly/swtor-on-mac/releases) and on
 [swonmac.com](https://swonmac.com).
 
-0.1.8 is the one release that changes the code that compiles the game's shaders on purpose (AIR
-codegen `25fc2491`, no lineage). After the update the game compiles its shaders again, once, and
-Metal rebuilds its pipeline archives. Its graphics driver, d9mt
-[`f5439a6`](https://github.com/jdrly/d9mt/tree/f5439a625c3c30697d53ac658f86801ca6083e7f), brings:
+0.1.9 keeps 0.1.8's shader compiler (AIR codegen `25fc2491`, no lineage), so the shaders compiled
+with 0.1.8 stay in the cache and don't compile again after the update. Its graphics driver, d9mt
+[`9b64581`](https://github.com/jdrly/d9mt/tree/9b645818ef07383b1235afe6b06f3deefeafb9e6), brings:
 
-- Shaders in the format Apple's toolchain writes for the macOS the game runs on: AIR 2.8 and
-  Metal 4.0 on macOS 26, AIR 2.9 and Metal 4.1 on macOS 27 and later, see
-  [jdrly/d9mt#167](https://github.com/jdrly/d9mt/pull/167).
-- A newer dxbc-spirv ([#168](https://github.com/jdrly/d9mt/pull/168)), and vertex positions in
-  Apple's position-invariance form, so passes that compute the same position land on the same
-  depth ([#172](https://github.com/jdrly/d9mt/pull/172)).
-- Fixed-function drawing fixes: flat shading is honoured, fog whose start and end are equal no
-  longer covers everything, pre-transformed geometry isn't cut by the 3D scene's clip planes, cube and volume textures
-  work, and a wireframe draw is a wireframe, see
-  [#169](https://github.com/jdrly/d9mt/pull/169), [#173](https://github.com/jdrly/d9mt/pull/173)
-  and [#165](https://github.com/jdrly/d9mt/pull/165).
-- Metal's pipeline archives in a folder per AIR codegen and target. The first start deletes the
-  folders earlier versions left behind ([#174](https://github.com/jdrly/d9mt/pull/174)).
+- Metal's pipeline archive written when the game quits, before Wine ends the process, so the next
+  start loads it. The temporary file of about 9 MB that a quit could leave behind is cleaned up
+  ([jdrly/d9mt#196](https://github.com/jdrly/d9mt/pull/196)).
+- Indexed triangle fans drawn as triangle lists ([#197](https://github.com/jdrly/d9mt/pull/197)).
+  SWTOR doesn't draw any.
+- Counters and switches for the speed work, off unless a tester turns them on
+  ([#193](https://github.com/jdrly/d9mt/pull/193), [#201](https://github.com/jdrly/d9mt/pull/201),
+  [#202](https://github.com/jdrly/d9mt/pull/202), [#203](https://github.com/jdrly/d9mt/pull/203)).
 
-[docs/building.md](docs/building.md#d9mt-pin) lists everything the pin brings, the switches that
-are off by default included.
+The app gives the pointer back when *Raw mouse-look* is on and the game's window isn't on the
+active Space ([#124](https://github.com/jdrly/swtor-on-mac/pull/124)). The session report names
+PACE's rows for what they measure ([#128](https://github.com/jdrly/swtor-on-mac/pull/128)).
+Development builds get a *Native fullscreen (own Space)* setting
+([#127](https://github.com/jdrly/swtor-on-mac/pull/127)); release builds don't show it yet.
 
-`main` is building 0.1.9, with d9mt
-[`9b64581`](https://github.com/jdrly/d9mt/tree/9b645818ef07383b1235afe6b06f3deefeafb9e6). It keeps
-0.1.8's shader compiler (AIR codegen `25fc2491`, no lineage), so the shaders compiled with 0.1.8
-stay in the cache and don't compile again after that update. Metal's pipeline archive now survives quitting the game, and the temporary file each quit
-left behind is gone ([jdrly/d9mt#196](https://github.com/jdrly/d9mt/pull/196)).
+[docs/building.md](docs/building.md#d9mt-pin) lists everything the pin brings.
 
 ## Install
 
@@ -447,7 +440,7 @@ checks the files and the source tree against the build's receipt. No workflow bu
 | Wine sources for the Mac driver and `ntdll.so`, athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), codeload tar.gz; the same archive in [jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-d23b39774528237cafe49f9a073286f854b779c0-source.tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006, only to configure that build | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
-`main` pins d9mt `9b64581` for 0.1.9. Release 0.1.8 was built from `main` with d9mt `f5439a6`. Release 0.1.7.1 was built from `main` with d9mt `1d33ea4`, as was release 0.1.7. Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
+Release 0.1.9 was built from `main` with d9mt `9b64581`. Release 0.1.8 was built from `main` with d9mt `f5439a6`. Release 0.1.7.1 was built from `main` with d9mt `1d33ea4`, as was release 0.1.7. Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
 `release/0.1.5` branch with the d9mt build it shipped.
 
 ## Documentation
