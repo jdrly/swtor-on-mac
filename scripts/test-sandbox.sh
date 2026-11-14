@@ -533,6 +533,7 @@ check "install: PhysicalKeyboard=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.
 check "install: RawMouseWhenCursorHidden=y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"RawMouseWhenCursorHidden"="y"'
 check "install: RawMouseGameControllerScale=1" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"RawMouseGameControllerScale"="1"'
 check "install: ThreadCpuStats=y (THREADCPU lines from swtor.exe only)" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"ThreadCpuStats"="y"'
+check "install: NativeFullscreen=n, Native fullscreen off in settings.conf and env" eval 'reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"NativeFullscreen\"=\"n\"" && grep -qx nativefs=off "$SOM/settings.conf" && grep -qx SWTOR_NATIVE_FULLSCREEN=0 "$SOM/env"'
 check "install: no raw mouse-look for other programs" eval '! reg_has "Software\\\\Wine\\\\Mac Driver" "\"RawMouseWhenCursorHidden\"=\"y\""'
 check "install: manifest winemac app" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = app
 check "install: GrabPointer=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\X11 Driver' '"GrabPointer"="n"'
@@ -641,6 +642,14 @@ check "settings: rawmouse on, mousespeed 1 by default" test "$(som settings | se
 som set rawmouse off >/dev/null && check "set rawmouse off (physkeys off): the engine's own Mac driver, all three files" wm_is stock
 check "set rawmouse off: RawMouseWhenCursorHidden=n" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"RawMouseWhenCursorHidden"="n"'
 check "set rawmouse off: manifest stock" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = stock
+# Native fullscreen with game keys by position and raw mouse-look off: the app's Mac driver all
+# the same (the engine's own doesn't know NativeFullscreen), and back
+som set nativefs on >/dev/null && check "set nativefs on (physkeys, rawmouse off): the app's Mac driver, all three files, manifest app" eval 'wm_is app && [ "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = app ]'
+check "set nativefs on: NativeFullscreen=y for swtor.exe only, SWTOR_NATIVE_FULLSCREEN=1" eval 'reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"NativeFullscreen\"=\"y\"" && ! reg_has "Software\\\\Wine\\\\Mac Driver" "\"NativeFullscreen\"=\"y\"" && grep -qx SWTOR_NATIVE_FULLSCREEN=1 "$SOM/env" && grep -qx nativefs=on "$SOM/settings.conf"'
+out=$(sbx_wine reg query 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v NativeFullscreen 2>/dev/null | tr -d '\r' || true)
+cleanup_wine
+check "set nativefs on: Wine reads y ($(echo "$out" | awk '/NativeFullscreen/ { print $NF }'))" test "$(echo "$out" | awk '/NativeFullscreen/ { print $NF }')" = y
+som set nativefs off >/dev/null && check "set nativefs off: the engine's own Mac driver again, NativeFullscreen=n, SWTOR_NATIVE_FULLSCREEN=0" eval 'wm_is stock && reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"NativeFullscreen\"=\"n\"" && grep -qx SWTOR_NATIVE_FULLSCREEN=0 "$SOM/env"'
 som set physkeys on >/dev/null && check "set physkeys on: the app's Mac driver" wm_is app
 check "set physkeys on: PhysicalKeyboard=y" reg_has 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' '"PhysicalKeyboard"="y"'
 check "set physkeys on: manifest" test "$(plutil -extract winemac raw -o - "$SOM/install-manifest.json")" = app
@@ -662,6 +671,7 @@ check "set physkeys on: Wine reads y ($(echo "$out" | awk '/PhysicalKeyboard/ { 
 check "set physkeys: refused while the launcher runs" eval '! som set physkeys off >/dev/null 2>&1'
 check "set rawmouse: refused while the launcher runs" eval '! som set rawmouse off >/dev/null 2>&1'
 check "set mousespeed: refused while the launcher runs" eval '! som set mousespeed 2 >/dev/null 2>&1'
+check "set nativefs: refused while the launcher runs, the setting kept" eval '! som set nativefs on >/dev/null 2>&1 && grep -qx nativefs=off "$SOM/settings.conf"'
 check "set physkeys, rawmouse: driver unchanged while refused" wm_is app
 kill "$sleeper" 2>/dev/null || true; wait "$sleeper" 2>/dev/null || true
 
@@ -851,6 +861,11 @@ echo "\$@" >>"$U/wine-args"
   *swtor.exe*) echo "D9MT_FLUSH_CAP=\$D9MT_FLUSH_CAP game" >>"$U/flush-env" ;;
   *) echo "D9MT_FLUSH_CAP=\$D9MT_FLUSH_CAP other" >>"$U/flush-env" ;;
 esac
+# (the WINEDEBUG each start gets, the game or another command)
+case " \$* " in
+  *swtor.exe*) echo "WINEDEBUG=\$WINEDEBUG game" >>"$U/winedebug-env" ;;
+  *) echo "WINEDEBUG=\$WINEDEBUG other" >>"$U/winedebug-env" ;;
+esac
 case " \$* " in
   *swtor.exe*)
     echo "\$\$ \$PPID" >"$U/game-pids"
@@ -967,6 +982,20 @@ printf 'D9MT_FLUSH_CAP=0\n' >>"$U/env"; game
 check "wrapper: d9mt-ab's D9MT_FLUSH_CAP=0 wins over Settings, said so ($(fl))" eval '[ "$(fl)" = 0 ] && grep -qx "SWTOR on Mac flush cap: D9MT_FLUSH_CAP=0 from d9mt-ab, over Settings'"'"' on" "$U/logs/wine.log"'
 sed -i '' -e '/^D9MT_FLUSH_CAP=/d' -e 's/^SWTOR_FLUSH_CAP=1$/SWTOR_FLUSH_CAP=0/' "$U/env"; game
 check "wrapper: Fewer GPU Batches off: no D9MT_FLUSH_CAP, no line" eval '[ -z "$(fl)" ] && ! grep -q "flush cap" "$U/logs/wine.log"'
+# Native fullscreen: the Mac driver's nativefs channel for the game, on top of its WINEDEBUG
+# (Debug Logging's channels or -all), never for other Wine starts; wine.log and the settings line
+# name it, on or off
+check "wrapper: Native fullscreen unset: no nativefs channel, wine.log says off" eval '! grep -q nativefs "$U/logs/effective-env.txt" && grep -qx "SWTOR on Mac native fullscreen: off" "$U/logs/wine.log" && grep -q "^SWTOR on Mac settings: .* native-fullscreen=off" "$U/logs/wine.log"'
+printf 'SWTOR_NATIVE_FULLSCREEN=1\nWINEDEBUG=-all\n' >>"$U/env"
+rm -f "$U/winedebug-env"; "$U/bin/wine64-preloader" "$U/bin/wine64" 'C:\windows\system32\reg.exe' query 'HKCU\Software' >/dev/null 2>&1; game
+# (the session's bootstrap Wine call is another start too: other starts are counted, not listed)
+check "wrapper: Native fullscreen on: the game gets -all,warn+nativefs, other Wine starts no nativefs ($(tr '\n' ';' <"$U/winedebug-env" 2>/dev/null))" eval '[ "$(grep " game$" "$U/winedebug-env")" = "WINEDEBUG=-all,warn+nativefs game" ] && grep -qx "WINEDEBUG=-all other" "$U/winedebug-env" && ! grep -q "nativefs.* other$" "$U/winedebug-env"'
+check "wrapper: wine.log names it, the settings line too" eval 'grep -qx "SWTOR on Mac native fullscreen: on" "$U/logs/wine.log" && grep -q "^SWTOR on Mac settings: .* native-fullscreen=on" "$U/logs/wine.log"'
+printf 'SWTOR_GAME_WINEDEBUG=-all,warn+rawmouse,warn+threadcpu\n' >>"$U/env"; rm -f "$U/winedebug-env"; game
+check "wrapper: Native fullscreen on with Debug Logging: its channels and warn+nativefs ($(grep " game$" "$U/winedebug-env" 2>/dev/null))" eval '[ "$(grep " game$" "$U/winedebug-env")" = "WINEDEBUG=-all,warn+rawmouse,warn+threadcpu,warn+nativefs game" ]'
+sed -i '' 's/^SWTOR_NATIVE_FULLSCREEN=1$/SWTOR_NATIVE_FULLSCREEN=0/' "$U/env"; rm -f "$U/winedebug-env"; game
+check "wrapper: Native fullscreen off with Debug Logging: its channels only, wine.log says off" eval '[ "$(grep " game$" "$U/winedebug-env")" = "WINEDEBUG=-all,warn+rawmouse,warn+threadcpu game" ] && grep -qx "SWTOR on Mac native fullscreen: off" "$U/logs/wine.log"'
+sed -i '' -e '/^SWTOR_NATIVE_FULLSCREEN=/d' -e '/^WINEDEBUG=/d' -e '/^SWTOR_GAME_WINEDEBUG=/d' "$U/env"
 # The game's end: one hold.log line (run time, exit code or signal, its language), the
 # launcher sees the game's status, and the last starts' wine.log are kept (a start that failed,
 # then one that works)
@@ -1707,13 +1736,14 @@ fi
 # wineboot -u sets anew (PendingFileRenameOperations for those .tmp files, the input devices'
 # ContainerId), and without the monitors the display driver enumerates (while the Mac's display
 # sleeps, wineboot adds virtual ones: Enum\DISPLAY, the monitor class and interface keys, and
-# the display adapter class, which gains a link to them)
+# the display adapter class, which gains a link to them), and without NativeFullscreen, which
+# 0.1.9 adds for swtor.exe (n unless Native fullscreen is on: sections 15 and 16 check it)
 prefix_snap() {  # [prefix folder, default $SOM/prefix]
   local p="${1:-$SOM/prefix}"
   snap "$p" | grep -v -e '\.reg$' -e '\.reg|' -e '/dll[0-9a-f]*\.tmp$' -e '/dll[0-9a-f]*\.tmp|' \
     -e '^\./dosdevices/[a-y]:' -e '^\./dosdevices/z::'
   for r in system.reg user.reg userdef.reg; do
-    printf '%s ' "$r"; sed -e 's/^\(\[.*\]\) [0-9]*$/\1/' -e '/^#time=/d' -e '/^"PendingFileRenameOperations"=/d' -e '/^"ContainerId"=/d' "$p/$r" |
+    printf '%s ' "$r"; sed -e 's/^\(\[.*\]\) [0-9]*$/\1/' -e '/^#time=/d' -e '/^"PendingFileRenameOperations"=/d' -e '/^"ContainerId"=/d' -e '/^"NativeFullscreen"=/d' "$p/$r" |
       awk 'index($0, "[") == 1 { skip = index($0, "\\\\Enum\\\\DISPLAY\\\\") || index($0, "{E6F07B5F-EE97-4A90-B076-33F57BF4EAA7}") ||
              index($0, "\\\\Class\\\\{4D36E96E-E325-11CE-BFC1-08002BE10318}") || index($0, "\\\\Class\\\\{4D36E968-E325-11CE-BFC1-08002BE10318}") } !skip' |
       shasum -a 256 | cut -d' ' -f1
@@ -1833,7 +1863,7 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
     sed -e "s/$a/V/g; s/$b/V/g" -e 's/^SWTOR_D9MT=.*/SWTOR_D9MT=H/' "$1" |
       { if [ "$CHANNEL" = dev ]; then sed 's/^SWTOR_UPDATE_CHECK=.*/SWTOR_UPDATE_CHECK=X/'; else cat; fi; } |
       grep -v -e '^#' -e '^$' -e '^D9MT_STATE_CACHE=' -e 'd9mt-ab\.env' -e '^SWTOR_FPS_LIMIT=' -e '^SWTOR_FPS_LIMIT_BATTERY=' \
-        -e '^SWTOR_FLUSH_CAP=' -e '^SWTOR_SOM_SH=' -e '^SWTOR_ON_MAC_ROOT='
+        -e '^SWTOR_FLUSH_CAP=' -e '^SWTOR_NATIVE_FULLSCREEN=' -e '^SWTOR_SOM_SH=' -e '^SWTOR_ON_MAC_ROOT='
   }
   echo SWTOR_ON_MAC_VERSION=0.1.5 >"$SANDBOX/envnorm-short"; echo SWTOR_ON_MAC_VERSION=0.1.5.1 >"$SANDBOX/envnorm-long"
   check "env comparison: 0.1.5 and 0.1.5.1 come out alike, either one as this version" eval '( PREVV=0.1.5 APPV=0.1.5.1; diff <(envnorm "$SANDBOX/envnorm-short") <(envnorm "$SANDBOX/envnorm-long") ) >/dev/null && ( PREVV=0.1.5.1 APPV=0.1.5; diff <(envnorm "$SANDBOX/envnorm-short") <(envnorm "$SANDBOX/envnorm-long") ) >/dev/null'
@@ -1870,8 +1900,9 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
     check "over $PREVV: winemetal.dll byte for byte $PREVV's" cmp -s "$PREV_APP/Contents/Resources/d9mt/winemetal.dll" "$SOM/engine/lib/wine/x86_64-windows/winemetal.dll"
   fi
   # (settings.conf: this version writes every setting it knows, so the ones $PREVV does not know,
-  # hudpos, fpslimit, fpsbattery and flushcap, come in with their defaults)
-  check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter, fpslimit=off, fpsbattery=off, flushcap=off), dxvk.conf unchanged" eval 'diff <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" "$SANDBOX/prev-settings.conf") <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && grep -qx fpslimit=off "$SOM/settings.conf" && grep -qx fpsbattery=off "$SOM/settings.conf" && grep -qx flushcap=off "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
+  # hudpos, fpslimit, fpsbattery, flushcap and nativefs, come in with their defaults)
+  check "over $PREVV: settings.conf unchanged but for settings new since $PREVV (hudpos=topcenter, fpslimit=off, fpsbattery=off, flushcap=off, nativefs=off), dxvk.conf unchanged" eval 'diff <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" -e "^nativefs=" "$SANDBOX/prev-settings.conf") <(grep -v -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" -e "^nativefs=" "$SOM/settings.conf") >/dev/null && grep -qx hudpos=topcenter "$SOM/settings.conf" && grep -qx fpslimit=off "$SOM/settings.conf" && grep -qx fpsbattery=off "$SOM/settings.conf" && grep -qx flushcap=off "$SOM/settings.conf" && grep -qx nativefs=off "$SOM/settings.conf" && cmp -s "$SANDBOX/prev-dxvk.conf" "$SOM/dxvk.conf"'
+  check "over $PREVV: Native fullscreen off: NativeFullscreen=n for swtor.exe, SWTOR_NATIVE_FULLSCREEN=0" eval 'reg_has "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"NativeFullscreen\"=\"n\"" && [ "$(envv SWTOR_NATIVE_FULLSCREEN)" = 0 ]'
   check "over $PREVV: env: the state cache line, the Frame Rate Limit lines (off), the Fewer GPU Batches line (off), the btm-check lines$([ "$CHANNEL" = dev ] && echo " and the A/B include") added, the rest as before (versions aside)" eval 'diff <(envnorm "$SANDBOX/prev-env") <(envnorm "$SOM/env") >"$SANDBOX/prev-env.diff" && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && [ "$(envv SWTOR_FPS_LIMIT)/$(envv SWTOR_FPS_LIMIT_BATTERY)/$(envv SWTOR_FLUSH_CAP)" = 0/0/0 ] && [ "$(envv SWTOR_SOM_SH)/$(envv SWTOR_ON_MAC_ROOT)" = "$SOMSH/$SANDBOX" ]'
   check "over $PREVV: no Wine left running" test -z "$(sandbox_wine)"
   [ "$CHANNEL" != dev ] || "$APP/Contents/Resources/d9mt-ab.sh" pfv >/dev/null
@@ -1927,10 +1958,12 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: the A/B switches removed, said so" eval '[ ! -e "$SOM/d9mt-ab.env" ] && grep -q "^Removed a development build.s d9mt A/B switches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: the cold test caches removed, said so" eval '[ ! -e "$COLD" ] && grep -q "^Removed a development build.s d9mt test caches" "$SANDBOX/dev-upgrade.txt"'
   check "over $DEVV: env as a release writes it (no A/B include, state cache on, update check on)" eval '! grep -q d9mt-ab "$SOM/env" && [ "$(envv D9MT_TEX_PFV)/$(envv SWTOR_D9MT_AB)" = "<unset>/<unset>" ] && [ "$(envv D9MT_STATE_CACHE)" = "$SANDBOX/usercache/d9mt/state" ] && grep -qx SWTOR_UPDATE_CHECK=1 "$SOM/env"'
-  # (this version writes every setting it knows: the Frame Rate Limit's two and Fewer GPU
-  # Batches, which $DEVV does not know, come in with their defaults; everything else byte for byte)
-  check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high), only fpslimit=off, fpsbattery=off and flushcap=off added" \
-    eval '! grep -q -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" "$SANDBOX/dev-settings.conf" && [ "$(grep -c "^fpslimit=" "$SOM/settings.conf")" = 1 ] && grep -qx fpslimit=off "$SOM/settings.conf" && [ "$(grep -c "^fpsbattery=" "$SOM/settings.conf")" = 1 ] && grep -qx fpsbattery=off "$SOM/settings.conf" && [ "$(grep -c "^flushcap=" "$SOM/settings.conf")" = 1 ] && grep -qx flushcap=off "$SOM/settings.conf" && cmp -s "$SANDBOX/dev-settings.conf" <(perl -ne "print unless /^(fpslimit|fpsbattery|flushcap)=/" "$SOM/settings.conf")'
+  # (this version writes every setting it knows: the HUD position (0.1.2), the Frame Rate
+  # Limit's two, Fewer GPU Batches and Native fullscreen, which $DEVV (0.1.1-dev.1, the default:
+  # no public development build lies between 0.1.2 and 0.1.3) does not know, come in with their
+  # defaults; everything else byte for byte)
+  check "over $DEVV: settings kept (Debug Logging on as the user left it, memory high), only hudpos=topcenter, fpslimit=off, fpsbattery=off, flushcap=off and nativefs=off added" \
+    eval '! grep -q -e "^hudpos=" -e "^fpslimit=" -e "^fpsbattery=" -e "^flushcap=" -e "^nativefs=" "$SANDBOX/dev-settings.conf" && [ "$(grep -c "^hudpos=" "$SOM/settings.conf")" = 1 ] && grep -qx hudpos=topcenter "$SOM/settings.conf" && [ "$(grep -c "^fpslimit=" "$SOM/settings.conf")" = 1 ] && grep -qx fpslimit=off "$SOM/settings.conf" && [ "$(grep -c "^fpsbattery=" "$SOM/settings.conf")" = 1 ] && grep -qx fpsbattery=off "$SOM/settings.conf" && [ "$(grep -c "^flushcap=" "$SOM/settings.conf")" = 1 ] && grep -qx flushcap=off "$SOM/settings.conf" && [ "$(grep -c "^nativefs=" "$SOM/settings.conf")" = 1 ] && grep -qx nativefs=off "$SOM/settings.conf" && cmp -s "$SANDBOX/dev-settings.conf" <(perl -ne "print unless /^(hudpos|fpslimit|fpsbattery|flushcap|nativefs)=/" "$SOM/settings.conf")'
   prefix_changes "$SANDBOX/dev-prefix.txt" "" "$SANDBOX/dev-prefix-after.txt" >"$SANDBOX/dev-prefix.diff"
   # (the bridge: $DEVV's, or this app's when the d9mt pin moved with a new one)
   dev_bridge=$(bridge_pinned "$APP" "$DEV_APP" "$SOM/engine" "$sys" && echo moved || echo kept)

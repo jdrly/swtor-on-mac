@@ -188,7 +188,7 @@ PM
     D9MT_AIR_CACHE="$HOME/Library/Caches/x" D9MT_DEBUG_FILE='C:\d9mt\flags.txt' DXVK_CONFIG='d3d9.presentInterval=0;d3d9.x=1' \
     SWTOR_PMSET="$pm" SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" /bin/bash -c '. "$1"; session_settings; session_conditions; d9mt_files' - "$fns" 2>&1)
   printf '%s\n' "$line" >"$R/wrapper-lines.txt"
-  check "wrapper: the settings line, paths left out" eval 'fk_in "$R/wrapper-lines.txt" "^debug-logging=on hud=on game-mode=on D9MT_AIR_CACHE=\(a path\) D9MT_DEBUG_FILE=\(a path\) D9MT_PROFILE=1 DXVK_CONFIG=d3d9\.presentInterval=0;d3d9\.x=1 MTL_HUD_ENABLED=1$" && ! grep -qF "$HOME" "$R/wrapper-lines.txt"'
+  check "wrapper: the settings line, paths left out" eval 'fk_in "$R/wrapper-lines.txt" "^debug-logging=on hud=on game-mode=on native-fullscreen=off D9MT_AIR_CACHE=\(a path\) D9MT_DEBUG_FILE=\(a path\) D9MT_PROFILE=1 DXVK_CONFIG=d3d9\.presentInterval=0;d3d9\.x=1 MTL_HUD_ENABLED=1$" && ! grep -qF "$HOME" "$R/wrapper-lines.txt"'
   check "wrapper: the conditions line" fk_in "$R/wrapper-lines.txt" '^power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80$'
   check "wrapper: the d9mt files' hashes, a missing one named" fk_in "$R/wrapper-lines.txt" "^d3d9\.dll $(printf d9mt | /usr/bin/shasum -a 256 | cut -c1-12), winemetal\.so missing$"
   check "wrapper: the lines go into wine.log after the language" eval 'grep -A4 "SWTOR on Mac game language:" "$wrapper" | piped "SWTOR on Mac settings: \$(session_settings)" && grep -A4 "SWTOR on Mac game language:" "$wrapper" | piped "SWTOR on Mac d9mt files: \$diag_files"'

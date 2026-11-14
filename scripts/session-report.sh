@@ -61,6 +61,12 @@
 #             only): the cap d9mt applies
 #   D3D9 SM3 hazard  (d9mt 6fa5df7 and later) a shader with the patterns its converter fix
 #             covers, once per shader
+#   the wrapper's "native fullscreen:" line (0.1.9 and later): the Native fullscreen setting, on
+#             or off; NATIVEFS (the app's Mac driver, channel nativefs, on with the setting): the
+#             driver read the option ("NATIVEFS: on"), its entries into and exits from the
+#             game's own Space (by reason), failures, the longest transition; a warning for an
+#             "enter" without "entered", "stuck", "fight", or the wrapper's "on" without the
+#             driver's
 #   the wrapper's "settings:", "conditions:" and "d9mt files:" lines (0.1.7 and later): the
 #             app's settings the game started with (Debug Logging, HUD, Game Mode, d9mt's and
 #             DXVK's environment, paths left out), the power source, Low Power Mode and
@@ -141,6 +147,11 @@ analyze() {
     # --mark: window k (by its STATS line) is in the interval; a line with t=: in it by line
     # and second (a second device counts t afresh)
     function ink(k) { return !marked || (k >= ks && k <= ke) }
+    # NATIVEFS: the longest transition, from "... in <ms> ms"
+    function nfms(l, what,    v) {
+      v = l; if (!sub(/.* in /, "", v)) return; sub(/ ms.*/, "", v)
+      if (num(v) > nfmax) { nfmax = num(v); nfmaxw = what }
+    }
     function int_t(t) { return !marked || (FNR > ivlo && FNR < ivhi && t >= tof[ks] && t <= tof[ke]) }
     BEGIN { vs = -1; wstart = -1; useg = 1; lastmw = 1 }
 
@@ -242,6 +253,25 @@ analyze() {
     /^SWTOR on Mac frame rate limit: / { fpsl = $0; sub(/^SWTOR on Mac frame rate limit: /, "", fpsl) }
     /^SWTOR on Mac flush cap: / { flc = $0; sub(/^SWTOR on Mac flush cap: /, "", flc) }
     /D9MT: flush cap / { dflc = $0; sub(/.*D9MT: flush cap /, "", dflc) }
+    # Native fullscreen: the wrapper names the setting; the Mac driver of the app logs its
+    # NATIVEFS lines (channel nativefs, which the wrapper turns on with the setting)
+    /^SWTOR on Mac native fullscreen: / { nfw = $0; sub(/^SWTOR on Mac native fullscreen: /, "", nfw) }
+    /NATIVEFS: / {
+      nfany = 1; l = $0; sub(/.*NATIVEFS: /, "", l)
+      if (l ~ /^on( |$)/) nfon = 1
+      else if (l ~ /^enter screen=/) { if (nfpend) nfnoent++; nfpend = 1; nfent++ }
+      else if (l ~ /^entered /) { nfpend = 0; nfentd++; nfms(l, "entering") }
+      else if (l ~ /^enter failed/) { nfpend = 0; nfefail++ }
+      else if (l ~ /^exit reason=/) {
+        nfr = l; sub(/^exit reason=/, "", nfr); sub(/ .*/, "", nfr); nfexit++
+        if (!(nfr in nfreason)) nfrorder[++nfrn] = nfr
+        nfreason[nfr]++
+      }
+      else if (l ~ /^exited /) nfms(l, "leaving")
+      else if (l ~ /^exit failed/) nfxfail++
+      else if (l ~ /^stuck/) nfstuck++
+      else if (l ~ /^fight/) nffight++
+    }
     # d9mt'"'"'s plan, logged again when the refresh rate or vsync changes: the last one counts
     /D9MT: .* frame cap [0-9]+ fps: / { fcap = $0; sub(/.* frame cap /, "", fcap); sub(/ \[[0-9]+ earlier lines suppressed\]$/, "", fcap) }
     # d9mt'"'"'s GPU path (d9mt 6fa5df7 and later; d9mt-ab.sh switches it back to the old one)
@@ -600,6 +630,31 @@ analyze() {
         }
         print "cpu_threads=" top
       }
+      if (nfw != "" || nfany) {
+        if (nfw == "on") print "native_fullscreen=on, " (nfon ? "the driver confirmed it (NATIVEFS: on)" : "not confirmed by the driver (no NATIVEFS: on line)")
+        else if (nfw != "") print "native_fullscreen=" nfw (nfon ? ", but the driver said NATIVEFS: on" : "")
+        else print "native_fullscreen=no wrapper line" (nfon ? ", the driver said NATIVEFS: on" : "")
+        if (nfpend) nfnoent++
+        if (nfon || nfent || nfexit) {
+          printf "nativefs_entries=%d entered, %d started\n", nfentd, nfent
+          nfrs = ""; for (k = 1; k <= nfrn; k++) nfrs = nfrs (k > 1 ? ", " : "") nfrorder[k] " " nfreason[nfrorder[k]]
+          printf "nativefs_exits=%d%s\n", nfexit, (nfrs == "" ? "" : " (" nfrs ")")
+          if (nfreason["fight"] > nffight) nffight = nfreason["fight"]
+          nffs = ""
+          if (nfefail) nffs = nffs ", enter failed " nfefail
+          if (nfxfail) nffs = nffs ", exit failed " nfxfail
+          if (nfstuck) nffs = nffs ", stuck " nfstuck
+          if (nffight) nffs = nffs ", fight " nffight
+          print "nativefs_failures=" (nffs == "" ? "none" : substr(nffs, 3))
+          if (nfmax) printf "nativefs_longest=%s ms (%s)\n", nfmax, nfmaxw
+        }
+        nfws = ""
+        if (nfw == "on" && !nfon) nfws = nfws "; the wrapper turned it on, the driver never said NATIVEFS: on (the engine'"'"'s own Mac driver ran?)"
+        if (nfnoent) nfws = nfws sprintf("; %d enter without entered or enter failed", nfnoent)
+        if (nfstuck) nfws = nfws "; stuck in the Space"
+        if (nffight) nfws = nfws "; a fight over the window size"
+        if (nfws != "") print "nativefs_warning=" substr(nfws, 3)
+      }
       if (nrm) {
         qs(gcs, 1, ngc)
         printf "rawmouse_seconds=%d\n", nrm
@@ -719,6 +774,12 @@ report() {
   row "  moves" rawmouse_events
   row "  GCMouse moves" rawmouse_gc_rate
   row "  speed" rawmouse_calibration
+  row "Native fullscreen" native_fullscreen
+  row "  entries" nativefs_entries
+  row "  exits (by reason)" nativefs_exits
+  row "  failures" nativefs_failures
+  row "  longest transition" nativefs_longest
+  row "  warning" nativefs_warning
   if [ "$n" -eq 1 ]; then causes "${AN[0]}" ""
   else for ((i = 0; i < n; i++)); do causes "${AN[$i]}" "${LETTERS:$i:1}: "; done; fi
   for ((i = 0; i < n; i++)); do per="$per$(get ft_p99_session "${AN[$i]}")"; done

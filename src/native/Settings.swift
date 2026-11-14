@@ -2,10 +2,9 @@
 // a sidebar of panes (SettingsPane), the selected one's settings next to it.
 // Reads and changes the settings through Resources/som.sh (`settings`, `set <key> <value>`),
 // which keeps them in settings.conf and writes the env file, dxvk.conf, the prefix's Mac
-// driver options (RetinaMode, PhysicalKeyboard, raw mouse-look and its speed) and the engine's
-// Mac driver from it. They take effect the
-// next time the game starts. "Quit SWTOR on Mac after launching" is the app's own
-// (UserDefaults).
+// driver options (RetinaMode, PhysicalKeyboard, raw mouse-look and its speed, NativeFullscreen)
+// and the engine's Mac driver from it. They take effect the next time the game starts. "Quit
+// SWTOR on Mac after launching" is the app's own (UserDefaults).
 
 import AppKit
 import Carbon
@@ -305,6 +304,22 @@ struct SettingsView: View {
           Text("Game Mode")
           Text("While the game is in full screen, macOS gives it priority on the CPU and GPU and "
                + "lowers the latency of Bluetooth controllers and headphones.")
+        }
+        // Native fullscreen (som.sh nativefs): shown only in development builds until the
+        // maintainer's play test, and in any build while it is on, so a release can still turn
+        // off what a development build turned on. To show it to everyone, remove this `if` line
+        // and its closing brace; the Toggle stays as it is.
+        if Updates.isDevBuild || settings.values["nativefs"] == "on" {
+          Toggle(isOn: settings.toggle("nativefs")) {
+            Text("Native fullscreen (own Space)")
+            Text(settings.running
+                 ? gameRunningNote
+                 : "The game's fullscreen gets its own Space, as Mac games do: Cmd-Tab and Mission "
+                   + "Control switch Spaces. While another app is in front the game isn't drawn, so "
+                   + "leave this off if you record or stream the game from the same Mac. Takes "
+                   + "effect at the next game start.")
+          }
+          .disabled(settings.running)
         }
         Toggle(isOn: settings.toggle("hud")) {
           Text("Show Metal HUD")

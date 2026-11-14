@@ -136,6 +136,14 @@ GameController's `GCMouse` through an input thread of SWTOR on Mac's Mac driver,
 pointer stays frozen. On by default (docs/settings.md).
 _Avoid_: “raw input” (SWTOR has none).
 
+**Native fullscreen**
+The Game setting *Native fullscreen (own Space)*: SWTOR on Mac's Mac driver moves the game's
+borderless, screen-covering window into a fullscreen Space of its own (`NativeFullscreen=y` for
+`swtor.exe`), so Cmd-Tab and Mission Control switch Spaces. Off by default; while another app is
+in front the game isn't drawn (docs/settings.md).
+_Avoid_: “native fullscreen” for the game's own *Fullscreen* display modes; the setting is the
+Space around them.
+
 **Game keys by keyboard position**
 The game sees every key by its position on a US keyboard (`PhysicalKeyboard=y`), for layouts whose
 keys type something else (docs/settings.md).
