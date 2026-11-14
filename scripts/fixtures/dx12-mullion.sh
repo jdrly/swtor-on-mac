@@ -193,7 +193,9 @@ fx_dx12_mullion() {
   FX_DXM_ORIG="$d/orig"
   echo "d9mt's bridge (a stand-in)" >"$e/lib/wine/x86_64-unix/winemetal.so"
   cp "$e/lib/wine/x86_64-unix/winemetal.so" "$d/bridge"
-  echo '{}' >"$FX_DXM_SOM/install-manifest.json"
+  # (with a key, as an install writes it: plutil reads a bare {} as OpenStep, which it can't
+  # write back when Native fullscreen records the Mac driver in it)
+  printf '{\n  "fixture": "dx12-mullion"\n}\n' >"$FX_DXM_SOM/install-manifest.json"
   printf 'WINE REGISTRY Version 2\n' >"$FX_DXM_SOM/prefix/user.reg"
   # my fork's build of c1, pinned; its VERSION's codegen line with characters env can't hold
   # between quotes, which the install leaves out
@@ -225,8 +227,8 @@ fx_dx12_mullion() {
   # Native fullscreen with DirectX 12 on: swtor_RC2.exe gets swtor.exe's NativeFullscreen, at a
   # change of either setting
   fx_dxm set nativefs on
-  check "dx12-mullion: nativefs on, DirectX 12 on: NativeFullscreen=y for swtor.exe and swtor_RC2.exe, the app's Mac driver ($FX_RC: $(tail -n 1 "$d/out.txt"))" \
-    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor.exe y && fx_dxm_nf swtor_RC2.exe y && cmp -s "$d/dev/Resources/wine/winemac.so" "$e/lib/wine/x86_64-unix/winemac.so"'
+  check "dx12-mullion: nativefs on, DirectX 12 on: NativeFullscreen=y for swtor.exe and swtor_RC2.exe, the app's Mac driver, the manifest says so ($FX_RC: $(tail -n 1 "$d/out.txt"))" \
+    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor.exe y && fx_dxm_nf swtor_RC2.exe y && cmp -s "$d/dev/Resources/wine/winemac.so" "$e/lib/wine/x86_64-unix/winemac.so" && [ "$(plutil -extract winemac raw -o - "$FX_DXM_SOM/install-manifest.json")" = app ]'
   fx_dxm set dx12 off
   check "dx12-mullion: dx12 off, nativefs on: swtor_RC2.exe's keys gone, swtor.exe keeps NativeFullscreen=y ($FX_RC)" \
     eval '[ "$FX_RC" = 0 ] && ! grep -qi swtor_RC2 "$FX_DXM_SOM/prefix/user.reg" && fx_dxm_nf swtor.exe y'
