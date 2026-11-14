@@ -38,11 +38,12 @@ START="$PWD"
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 REPO="${D9MT_SRC:-https://github.com/jdrly/d9mt.git}"
-COMMIT=f5439a625c3c30697d53ac658f86801ca6083e7f
+COMMIT=9b645818ef07383b1235afe6b06f3deefeafb9e6
 MACOS_MIN=26.0
 # The AIR codegen id the bridge must report (d9mt ADR-0006), the identity of the code that
-# compiles the game's shaders. 0.1.8 changes that code on purpose, so this id has no lineage:
-# every player's shaders recompile once after the update. Another Xcode or LLVM that changes the
+# compiles the game's shaders. 0.1.8 changed that code on purpose, so this id has no lineage:
+# every player's shaders recompiled once after that update. 0.1.9 keeps the id, so players keep
+# the caches 0.1.8 built. Another Xcode or LLVM that changes the
 # codegen's code would give winemetal.so yet another id and every player one more full recompile,
 # so the build stops unless the bridge reports exactly this id, or a later id that d9mt's lineage
 # table carries back to AIR_LINEAGE's cache.
