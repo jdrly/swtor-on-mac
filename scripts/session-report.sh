@@ -34,8 +34,11 @@
 #             re-cleared (format, size, aspects), why, and the D3D9 call it came from;
 #             RESTORE-SUMMARY when the game released its device (not every exit does)
 #   PACE      once a second (d9mt 4b7ab26 and later): the interval between the game's
-#             Present calls (min/avg/max, sd), the Present thread's time per frame inside d9mt
-#             and outside it, its CPU time split into d9mt's and the game's own
+#             Present calls (min/avg/max, sd); d9mt's share of each frame, as per-device
+#             outer-entry time (the D3D9 calls on the device, from any thread, that began while
+#             no other was open: not the Present thread's time), and the rest of the frame; cpu
+#             (GetThreadTimes, the whole process's CPU time on Wine for macOS) less d9mt's busy
+#             time as gameCpu, which is therefore not the game thread's CPU either (d9mt #81)
 #   THREADCPU once a second (the app's Mac driver, 0.1.0-dev.2 and later): CPU time of the
 #             game process, its busiest threads and the session's wineserver, in ms
 #   RAWMOUSE  once a second while raw mouse-look moves (0.1.0-dev.2 and later): moves by
@@ -61,6 +64,12 @@
 #             only): the cap d9mt applies
 #   D3D9 SM3 hazard  (d9mt 6fa5df7 and later) a shader with the patterns its converter fix
 #             covers, once per shader
+#   the wrapper's "native fullscreen:" line (0.1.9 and later): the Native fullscreen setting, on
+#             or off; NATIVEFS (the app's Mac driver, channel nativefs, on with the setting): the
+#             driver read the option ("NATIVEFS: on"), its entries into and exits from the
+#             game's own Space (by reason), failures, the longest transition; a warning for an
+#             "enter" without "entered", "stuck", "fight", or the wrapper's "on" without the
+#             driver's
 #   the wrapper's "settings:", "conditions:" and "d9mt files:" lines (0.1.7 and later): the
 #             app's settings the game started with (Debug Logging, HUD, Game Mode, d9mt's and
 #             DXVK's environment, paths left out), the power source, Low Power Mode and
@@ -162,6 +171,11 @@ analyze() {
     # --mark: window k (by its STATS line) is in the interval; a line with t=: in it by line
     # and second (a second device counts t afresh)
     function ink(k) { return !marked || (k >= ks && k <= ke) }
+    # NATIVEFS: the longest transition, from "... in <ms> ms"
+    function nfms(l, what,    v) {
+      v = l; if (!sub(/.* in /, "", v)) return; sub(/ ms.*/, "", v)
+      if (num(v) > nfmax) { nfmax = num(v); nfmaxw = what }
+    }
     function int_t(t) { return !marked || (FNR > ivlo && FNR < ivhi && t >= tof[ks] && t <= tof[ke]) }
     BEGIN { vs = -1; wstart = -1; useg = 1; lastmw = 1 }
 
@@ -325,6 +339,25 @@ analyze() {
     /^SWTOR on Mac frame rate limit: / { fpsl = $0; sub(/^SWTOR on Mac frame rate limit: /, "", fpsl) }
     /^SWTOR on Mac flush cap: / { flc = $0; sub(/^SWTOR on Mac flush cap: /, "", flc) }
     /D9MT: flush cap / { dflc = $0; sub(/.*D9MT: flush cap /, "", dflc) }
+    # Native fullscreen: the wrapper names the setting; the Mac driver of the app logs its
+    # NATIVEFS lines (channel nativefs, which the wrapper turns on with the setting)
+    /^SWTOR on Mac native fullscreen: / { nfw = $0; sub(/^SWTOR on Mac native fullscreen: /, "", nfw) }
+    /NATIVEFS: / {
+      nfany = 1; l = $0; sub(/.*NATIVEFS: /, "", l)
+      if (l ~ /^on( |$)/) nfon = 1
+      else if (l ~ /^enter screen=/) { if (nfpend) nfnoent++; nfpend = 1; nfent++ }
+      else if (l ~ /^entered /) { nfpend = 0; nfentd++; nfms(l, "entering") }
+      else if (l ~ /^enter failed/) { nfpend = 0; nfefail++ }
+      else if (l ~ /^exit reason=/) {
+        nfr = l; sub(/^exit reason=/, "", nfr); sub(/ .*/, "", nfr); nfexit++
+        if (!(nfr in nfreason)) nfrorder[++nfrn] = nfr
+        nfreason[nfr]++
+      }
+      else if (l ~ /^exited /) nfms(l, "leaving")
+      else if (l ~ /^exit failed/) nfxfail++
+      else if (l ~ /^stuck/) nfstuck++
+      else if (l ~ /^fight/) nffight++
+    }
     # d9mt'"'"'s plan, logged again when the refresh rate or vsync changes: the last one counts
     /D9MT: .* frame cap [0-9]+ fps: / { fcap = $0; sub(/.* frame cap /, "", fcap); sub(/ \[[0-9]+ earlier lines suppressed\]$/, "", fcap) }
     # d9mt'"'"'s GPU path (d9mt 6fa5df7 and later; d9mt-ab.sh switches it back to the old one)
@@ -695,7 +728,7 @@ analyze() {
         qs(psd, 1, np); qs(pmax, 1, np); qs(pd9, 1, np); qs(pgame, 1, np); qs(pgmax, 1, np); qs(pwait, 1, np)
         printf "pace_seconds=%d\n", np
         printf "pace_present_sd=%.2f ms median, %.2f p90 (max interval: %.1f median, %.1f p90)\n", pct(psd, np, 0.5), pct(psd, np, 0.9), pct(pmax, np, 0.5), pct(pmax, np, 0.9)
-        printf "pace_frame=d9mt %.1f ms (of it waiting %.1f), game %.1f ms (worst frame of a second: %.1f median, %.1f p90)\n", pct(pd9, np, 0.5), pct(pwait, np, 0.5), pct(pgame, np, 0.5), pct(pgmax, np, 0.5), pct(pgmax, np, 0.9)
+        printf "pace_frame=d9mt %.1f ms, device blocked %.1f ms (any thread), game %.1f ms (worst frame of a second: %.1f median, %.1f p90)\n", pct(pd9, np, 0.5), pct(pwait, np, 0.5), pct(pgame, np, 0.5), pct(pgmax, np, 0.5), pct(pgmax, np, 0.9)
         if (npc) {
           qs(pcpu, 1, npc); qs(pbusy, 1, npc); qs(pgc, 1, npc)
           printf "pace_cpu=%d ms/s median (d9mt %d, game %d), %d p90\n", pct(pcpu, npc, 0.5), pct(pbusy, npc, 0.5), pct(pgc, npc, 0.5), pct(pcpu, npc, 0.9)
@@ -718,6 +751,31 @@ analyze() {
           top = top (top == "" ? "" : ", ") sprintf("%s %.0f", best, bv / ntc)
         }
         print "cpu_threads=" top
+      }
+      if (nfw != "" || nfany) {
+        if (nfw == "on") print "native_fullscreen=on, " (nfon ? "the driver confirmed it (NATIVEFS: on)" : "not confirmed by the driver (no NATIVEFS: on line)")
+        else if (nfw != "") print "native_fullscreen=" nfw (nfon ? ", but the driver said NATIVEFS: on" : "")
+        else print "native_fullscreen=no wrapper line" (nfon ? ", the driver said NATIVEFS: on" : "")
+        if (nfpend) nfnoent++
+        if (nfon || nfent || nfexit) {
+          printf "nativefs_entries=%d entered, %d started\n", nfentd, nfent
+          nfrs = ""; for (k = 1; k <= nfrn; k++) nfrs = nfrs (k > 1 ? ", " : "") nfrorder[k] " " nfreason[nfrorder[k]]
+          printf "nativefs_exits=%d%s\n", nfexit, (nfrs == "" ? "" : " (" nfrs ")")
+          if (nfreason["fight"] > nffight) nffight = nfreason["fight"]
+          nffs = ""
+          if (nfefail) nffs = nffs ", enter failed " nfefail
+          if (nfxfail) nffs = nffs ", exit failed " nfxfail
+          if (nfstuck) nffs = nffs ", stuck " nfstuck
+          if (nffight) nffs = nffs ", fight " nffight
+          print "nativefs_failures=" (nffs == "" ? "none" : substr(nffs, 3))
+          if (nfmax) printf "nativefs_longest=%s ms (%s)\n", nfmax, nfmaxw
+        }
+        nfws = ""
+        if (nfw == "on" && !nfon) nfws = nfws "; the wrapper turned it on, the driver never said NATIVEFS: on (the engine'"'"'s own Mac driver ran?)"
+        if (nfnoent) nfws = nfws sprintf("; %d enter without entered or enter failed", nfnoent)
+        if (nfstuck) nfws = nfws "; stuck in the Space"
+        if (nffight) nfws = nfws "; a fight over the window size"
+        if (nfws != "") print "nativefs_warning=" substr(nfws, 3)
       }
       if (nrm) {
         qs(gcs, 1, ngc)
@@ -848,7 +906,7 @@ report() {
   row "PACE seconds" pace_seconds
   row "  Present interval sd" pace_present_sd
   row "  per frame (medians)" pace_frame
-  row "  game thread CPU" pace_cpu
+  row "  process CPU (PACE)" pace_cpu
   row "THREADCPU seconds" threadcpu_seconds
   row "  game process CPU" cpu_process
   row "  its busiest thread" cpu_busiest
@@ -858,6 +916,12 @@ report() {
   row "  moves" rawmouse_events
   row "  GCMouse moves" rawmouse_gc_rate
   row "  speed" rawmouse_calibration
+  row "Native fullscreen" native_fullscreen
+  row "  entries" nativefs_entries
+  row "  exits (by reason)" nativefs_exits
+  row "  failures" nativefs_failures
+  row "  longest transition" nativefs_longest
+  row "  warning" nativefs_warning
   if [ "$n" -eq 1 ]; then causes "${AN[0]}" ""
   else for ((i = 0; i < n; i++)); do causes "${AN[$i]}" "${LETTERS:$i:1}: "; done; fi
   for ((i = 0; i < n; i++)); do per="$per$(get ft_p99_session "${AN[$i]}")"; done
@@ -964,7 +1028,7 @@ FPS: average|fps_avg|
 Frame time: average (ms)|ft_avg|
 Seconds below 58 fps (%)|below58| pp
 Game process CPU (ms/s, median)|cpu_process_med|
-Game thread CPU (ms/s, median)|pace_cpu_med|
+Process CPU (PACE, ms/s, median)|pace_cpu_med|
 ROWS
   echo "  (one sitting: no significance test. A difference no larger than the drift shows nothing;"
   echo "   a speed claim needs the same A/B/A again on another day)"

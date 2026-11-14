@@ -58,7 +58,17 @@ codegen guard of the d9mt build (group `air-codegen`: `scripts/air-codegen-guard
 that script records, so the group fails while that id is missing or is 0.1.7's), development
 builds' `d9mt-ab.sh air-legacy` on a planted install (group `d9mt-ab`: the game gets
 `D9MT_AIR_LEGACY=1` with a shader cache and pipeline archives of its own, kept from start to
-start, and the variables of Mullion's safety switches), development builds' Mullion for DirectX 12 (group `dx12-mullion`: `som.sh set` on a
+start, and the variables of Mullion's safety switches), the release receipt (group `release-receipt`: `scripts/release-receipt.sh` on a planted
+git repository and planted release files; each changed input fails verify before a stand-in
+`gh`'s upload, a squash merge's equal tree passes), the version table (group `version-table`:
+release and development versions in order through `build.sh`'s `bundle_version`, the packaged
+wrapper's update check and `Installer.isNewer`, compiled with `swiftc`; a mapping without
+1000 + N must fail), the exception ports `hold-launcher` passes on (group `exception-ports`: an
+x86_64 probe started behind dead exception ports faults once, through the packaged
+`hold-launcher`'s x86_64 slice it gets past the fault with no Rosetta error, and an unhandled
+fault still ends it by `SIGSEGV`; the control, the probe itself in `hold-launcher`'s place, must
+fail with Rosetta's `failed to send exception`; needs clang and Rosetta, skipped without them),
+development builds' Mullion for DirectX 12 (group `dx12-mullion`: `som.sh set` on a
 planted install with the engine's real `dxmt` tree, downloaded once into `.cache/`, and
 stand-in archives in the layout of my fork's builds, pinned in the test's `som.sh` and served by
 `scripts/fetch-test-server.py`: Mullion installed, `env` naming the build from its `VERSION`, the
@@ -73,8 +83,8 @@ push run failing), development builds' D3DMetal import (group
 with `hdiutil`, into a planted engine, with a stand-in `codesign`: beta 3's layout imported, the
 `.stock` copies and `lib/external` kept, `env` naming the import; another layout, shim, hash or
 signature refused with nothing changed; an import that fails halfway puts the engine's own files
-and `env` back, and a `gptk_restore` that can't finish keeps the import for the next try), and the
-suite's `orphan_as`. That helper starts a stand-in with a rewritten argv[0], as Wine 11 shows its
+and `env` back, and a `gptk_restore` that can't finish keeps the import for the next try),
+and the suite's `orphan_as`. That helper starts a stand-in with a rewritten argv[0], as Wine 11 shows its
 processes. The argv[0] reaches the rewriting shell in the environment, never on its command line:
 a game path there (section 2c's) makes that shell look like the game to `swtor-running.sh` and
 the job runner, which then stops the suite's job. Both `orphan` and `orphan_as` return only once
@@ -99,3 +109,34 @@ keeps a reproducer set in `repro/`: the run's inputs (`inputs.txt`: the apps' ve
 CDHashes, the official app's version, the scripts' commit, macOS), SWTOR on Mac's files with the
 prefix's registry, and its logs. If that copy fails (a full disk), `home/` itself is kept, moved
 to `repro/home`.
+
+`scripts/nfprobe.sh` runs the AppKit probe for native fullscreen (`scripts/nfprobe.m`, #96): a
+native program, no Wine, no game files and no network, that asks whether macOS takes a borderless
+window that covers the screen into a fullscreen Space. It builds the probe with `clang` and runs
+each mode with a time limit: a titled, resizable window as the control, then the borderless window
+with `FullScreenPrimary` (A), the same made titled and resizable only while in the Space (B, as
+SDL2 does), and A and B again with the presentation options `FullScreen|HideDock|HideMenuBar`. Each
+run enters the Space, hands activation to a helper app and gets it back, leaves the Space and exits
+by itself, and prints the notifications with their times, the window's frame and style before, in
+and after, the screen's frame and safe area, the first `nextDrawable` after the return, and a
+verdict line: `entered`, `refused`, `failed` or `no verdict`. If the control can't enter and leave,
+the session can't judge (a hosted runner, an SSH session): the script prints `no verdict` and
+exits 1. `--control-without-toggle` is its failing control, and `--display` adds a run on a second
+display that reports what happens to the window when that display goes away. Run it in a logged-in
+GUI session that nobody is using: each run takes the screen for a few seconds. The probe isn't part
+of the app.
+
+`scripts/test-nativefs-decide.sh` tests the Mac driver's native fullscreen decision without
+AppKit, Wine or a GUI: it cuts the plain C between the "nativefs decision" markers out of
+`patches/winemac-native-fullscreen.patch`, builds `scripts/nativefs-decide-test.c` against it with
+`clang` and runs it (which windows qualify, the 300 ms and 150 ms waits, d9mt's style-then-frame
+order, another screen, the fight guard, failed entries and exits, the player's exit, the settle
+after a display change), then builds it against two broken stubs, one that never enters and one
+that ignores the player's exit, which must fail. `scripts/test-fixtures.sh` runs it in its
+`nativefs` group. `scripts/nfwinprobe.c` is the window probe for the same patch, built like the
+keyboard probe and run as `swtor.exe` under the engine with the app's Mac driver: a popup covering
+the primary monitor goes windowed (the style, then the rect, as d9mt does), fullscreen again, is
+hidden, shown and closed, and every window message it gets is logged without times, so a run with
+`NativeFullscreen=y` compares line by line with one with `n` or with the engine's own driver. It
+needs a logged-in GUI session and the app active (a click on its window, or a helper that hands
+activation over).

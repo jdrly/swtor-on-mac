@@ -1,0 +1,1290 @@
+SWTOR on Mac: native fullscreen (NativeFullscreen, off unless the registry turns it on; SWTOR on
+Mac turns it on for swtor.exe with "Native fullscreen (own Space)" in Settings).
+
+When the game's borderless window covers one screen, the driver moves it into a fullscreen
+Space of its own (toggleFullScreen: on the borderless window with FullScreenPrimary, which
+AppKit takes on macOS 27, #118) and takes it out when it stops qualifying. With the option off
+no new code path runs.
+
+- One decision (plain C at the top of cocoa_window.m, tested by scripts/test-nativefs-decide.sh): every event
+  records the window's facts and asks it; only it starts a transition. A window qualifies when
+  it is top-level, shown, not minimized, disabled or maximized, borderless as Wine last asked,
+  its requested content covers exactly one screen (within a point) or equals the content of the
+  Space it is in, the displays aren't captured, the player hasn't left this Space by hand, and
+  "Displays have separate Spaces" is on or one screen is attached. It enters after 300 ms of
+  qualifying, with the app active and the window on the active Space; it leaves after 150 ms of
+  not qualifying, or for a request on another screen (then enters there). A failed entry backs
+  off 2 s, 3 tries at most; a failed exit is retried once after 1 s. A real display change
+  holds everything for 1 s.
+- In the Space AppKit owns the frame: Wine's frame and style requests are recorded, not
+  applied. Where the Space's content differs from the request (a notch), Wine is told the real
+  frame once per request; more than 3 such corrections in 2 s leave the Space ("fight") and keep
+  it left. On the way out the pending style applies first, then the frame of Wine's latest
+  request; the frame saved at entry is never posted to Wine.
+- Quiet transitions: for a transition the driver started (or took over from the player's own
+  entry of the game's window), no resize-start query, no min/max query, no resize-ended event,
+  no frames while AppKit animates, and frame posts without the size-move pair. The main thread
+  never waits for the game's window thread during them.
+- The player's exit (the Window menu, the shortcut) wins: the window stays out until it stops
+  qualifying or the player enters again by hand.
+- In the Space: FullScreen|HideDock|HideMenuBar, the normal window level, FullScreenPrimary kept
+  while the window qualifies or is in the Space. After each transition the next mouse move is
+  absolute, relative mouse mode is decided again and a cursor clip is set again. Raw mouse-look
+  doesn't end for a window in a transition the driver started (it is briefly off the active
+  Space then).
+- Debug output: warn+nativefs, the NATIVEFS lines (on, enter, entered, exit reason=, exited,
+  resize told wine=, enter failed, exit failed, stuck, declined by user, fight, skipped).
+
+diff -ru a/dlls/winemac.drv/cocoa_app.h b/dlls/winemac.drv/cocoa_app.h
+--- a/dlls/winemac.drv/cocoa_app.h
++++ b/dlls/winemac.drv/cocoa_app.h
+@@ -168,6 +168,7 @@
+ 
+     - (void) window:(WineWindow*)window isBeingDragged:(BOOL)dragged;
+     - (void) windowWillOrderOut:(WineWindow*)window;
++    - (void) windowDidChangeNativeFullscreen:(WineWindow*)window;
+ 
+     - (void) flipRect:(NSRect*)rect;
+     - (NSPoint) flippedMouseLocation:(NSPoint)point;
+diff -ru a/dlls/winemac.drv/cocoa_app.m b/dlls/winemac.drv/cocoa_app.m
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -989,12 +989,15 @@
+     {
+         [self updateFullscreenWindows];
+         [self adjustWindowLevels];
++        if (native_fullscreen)
++            [self nativeFullscreenReconcile];
+ 
+         /* Raw mouse-look (SWTOR on Mac): a Space change can take the target
+            window off screen while the app stays active (an empty desktop). */
+         if (raw_mouse_when_cursor_hidden)
+         {
+-            if (relativeMouseMode && lastTargetWindow && ![lastTargetWindow isOnActiveSpace])
++            if (relativeMouseMode && lastTargetWindow && ![lastTargetWindow isOnActiveSpace] &&
++                !lastTargetWindow.nativeFullscreenTransition)
+                 [self relativeTargetLeftActiveSpace];
+             [self updateRelativeMouseMode];
+         }
+@@ -1004,6 +1007,30 @@
+        window is on another Space, by a Space change or by a move that came
+        first.  The pointer must not stay frozen there, and the button's release
+        goes elsewhere, so give up the capture as deactivation does. */
++    /* Native fullscreen (SWTOR on Mac): activation, a Space change. */
++    - (void) nativeFullscreenReconcile
++    {
++        for (WineWindow* window in [NSApp windows])
++            if ([window isKindOfClass:[WineWindow class]])
++                [window nfsReconcile];
++    }
++
++    /* Native fullscreen: a window went into its Space or came out.  Its frame changed under
++       the mouse: the next move is absolute, relative mode is decided again, and a cursor clip
++       (tied to the window's frame) is set again. */
++    - (void) windowDidChangeNativeFullscreen:(WineWindow*)window
++    {
++        forceNextMouseMoveAbsolute = TRUE;
++        [self updateRelativeMouseMode];
++        if (self.clippingCursor)
++        {
++            CGRect rect = clipCursorHandler.cursorClipRect;
++            [self stopClippingCursor];
++            [self startClippingCursor:rect];
++        }
++        [self adjustWindowLevels];
++    }
++
+     - (void) relativeTargetLeftActiveSpace
+     {
+         if (macdrv_rawmouse_warn_on)
+@@ -1298,7 +1325,7 @@
+         return raw_mouse_when_cursor_hidden && clientWantsCursorHidden &&
+                lastTargetWindow && [NSApp isActive] && ![windowsBeingDragged count] &&
+                !(self.clippingCursor && [clipCursorHandler isKindOfClass:[WineEventTapClipCursorHandler class]]) &&
+-               [lastTargetWindow isOnActiveSpace];
++               ([lastTargetWindow isOnActiveSpace] || lastTargetWindow.nativeFullscreenTransition);
+     }
+ 
+     /* CGWarpMouseCursorPosition moves the cursor without an event, but the next
+@@ -2053,7 +2080,8 @@
+ 
+         /* Raw mouse-look (SWTOR on Mac): a window on another Space gets no moves,
+            so the pointer over this one isn't the game's hidden one. */
+-        if (raw_mouse_when_cursor_hidden && targetWindow && ![targetWindow isOnActiveSpace])
++        if (raw_mouse_when_cursor_hidden && targetWindow && ![targetWindow isOnActiveSpace] &&
++            !targetWindow.nativeFullscreenTransition)
+         {
+             if (relativeMouseMode)
+                 [self relativeTargetLeftActiveSpace];
+@@ -3118,6 +3146,9 @@
+         // movement deltas are invalidated.  Make sure the next mouse move event
+         // starts over from an absolute baseline.
+         forceNextMouseMoveAbsolute = TRUE;
++
++        if (native_fullscreen)
++            [self nativeFullscreenReconcile];
+     }
+ 
+     /* The parts of the screen configuration that Wine's view of the displays
+@@ -3171,6 +3202,13 @@
+         [self sendDisplaysChanged:FALSE];
+         [self adjustWindowLevels];
+ 
++        if (native_fullscreen)
++        {
++            for (WineWindow* window in [NSApp windows])
++                if ([window isKindOfClass:[WineWindow class]])
++                    [window nfsDisplaysChanged];
++        }
++
+         // When the display configuration changes, the cursor position may jump.
+         // Accumulated mouse movement deltas are invalidated.  Make sure the next
+         // mouse move event starts over from an absolute baseline.
+@@ -3201,6 +3239,9 @@
+ 
+         [self releaseMouseCapture];
+         [self updateRelativeMouseMode];
++
++        if (native_fullscreen)
++            [self nativeFullscreenReconcile];
+     }
+ 
+     - (void) applicationDidUnhide:(NSNotification*)aNotification
+diff -ru a/dlls/winemac.drv/cocoa_window.h b/dlls/winemac.drv/cocoa_window.h
+--- a/dlls/winemac.drv/cocoa_window.h
++++ b/dlls/winemac.drv/cocoa_window.h
+@@ -97,6 +97,8 @@
+    the references that events and queries hold may be the last ones. */
+ @property (readonly, nonatomic) BOOL closing;
+ @property (readonly, nonatomic) NSRect wine_fractionalFrame;
++/* Native fullscreen (SWTOR on Mac): a transition the driver started (or took over) is under way. */
++@property (readonly, nonatomic) BOOL nativeFullscreenTransition;
+ 
+ /* Whether this window, when ordered in and not miniaturized, would appear to
+    the user on-screen. That means it has a non-zero size and is not empty-
+@@ -116,4 +118,7 @@
+ 
+     - (void) setRetinaMode:(BOOL)mode;
+ 
++    - (void) nfsReconcile;
++    - (void) nfsDisplaysChanged;
++
+ @end
+diff -ru a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -393,6 +393,347 @@
+ @end
+ 
+ 
++/* ---------- nativefs decision: begin ----------
++   Native fullscreen (SWTOR on Mac): when the game's borderless window covers one screen, the
++   driver moves it into a fullscreen Space of its own and takes it out again.  This is the
++   decision, as plain C over a struct of facts the window recorded, so it can be tested
++   without AppKit: SWTOR on Mac's scripts/test-nativefs-decide.sh cuts it out of the patch,
++   from this line to the end marker, and builds its test against it with clang.
++
++   Every event (a frame or style request from Wine, show and hide, activation, a Space
++   change, a display change, the end of a transition, a timer) only records the window's
++   facts and calls nfs_step(); the window carries out what it returns.  nfs_step() is the
++   only place that decides to start a transition. */
++#include <string.h>
++
++#define NFS_ENTER_STABLE    0.300   /* qualifying this long before entering */
++#define NFS_EXIT_STABLE     0.150   /* not qualifying (or another screen) this long before leaving */
++#define NFS_ENTER_BACKOFF   2.0     /* after a failed entry */
++#define NFS_ENTER_TRIES     3
++#define NFS_EXIT_RETRY      1.0     /* after a failed exit, once */
++#define NFS_SETTLE          1.0     /* after a real display change */
++#define NFS_FIGHT_COUNT     3       /* more than this many corrections ... */
++#define NFS_FIGHT_WINDOW    2.0     /* ... in this many seconds is a fight */
++
++/* What the window knows when it asks (no times in here: a change of any of these restarts the
++   stability clock). */
++struct nfs_facts
++{
++    int option;             /* NativeFullscreen */
++    int top_level;          /* no parent window, latent or not */
++    int ordered_in;         /* shown (minimized windows are ordered in too) */
++    int minimized;
++    int disabled;
++    int no_foreground;
++    int maximized;
++    int borderless;         /* Wine's last style request has no title bar */
++    unsigned int screen;    /* the screen whose frame Wine's last request covers (within 1 pt), 0: none */
++    int request_is_content; /* in a Space: the request equals the window's content there (within 1 pt) */
++    int request_off_screens; /* the request lies on no screen (its display went away) */
++    int displays_captured;
++    int separate_spaces;    /* "Displays have separate Spaces" */
++    int screens;
++    int app_active;
++    int on_active_space;
++    int in_transition;      /* a transition the driver started (or took over) is under way */
++    int in_space;           /* in the driver's Space */
++    int in_other_space;     /* in a Space the player entered by hand, not the driver's */
++    unsigned int space_screen; /* in the driver's Space: its screen */
++};
++
++/* What the decision keeps between calls. */
++struct nfs_state
++{
++    struct nfs_facts last;
++    int have_last;
++    double changed_at;      /* the facts last changed then */
++    double settle_until;    /* a real display change: nothing starts before this */
++    double retry_at;        /* a failed entry: no entry before this */
++    int failed_enters;
++    int declined;           /* the player left the Space by hand, or a fight: stay out */
++    int fight_pending;      /* leave for a fight */
++    double corrections[NFS_FIGHT_COUNT + 1];
++    int exit_failures;      /* 1: retry once at exit_retry_at; 2: stuck */
++    double exit_retry_at;
++};
++
++enum nfs_action { NFS_NOTHING, NFS_WAIT, NFS_ENTER, NFS_EXIT };
++
++enum nfs_reason
++{
++    NFS_REASON_NONE,
++    NFS_REASON_WINDOWED,
++    NFS_REASON_HIDDEN,
++    NFS_REASON_OTHER_SCREEN,
++    NFS_REASON_DISPLAY_CHANGE,
++    NFS_REASON_FIGHT,
++    NFS_REASON_OTHER,
++};
++
++struct nfs_decision
++{
++    enum nfs_action action;
++    enum nfs_reason reason; /* NFS_EXIT */
++    int retry;              /* NFS_EXIT: the retry of a failed exit (its reason is logged already) */
++    double at;              /* NFS_WAIT: ask again then */
++    const char *skipped;    /* qualifies but for this (logged once by the window), or NULL */
++};
++
++static inline const char *nfs_reason_name(enum nfs_reason reason)
++{
++    switch (reason)
++    {
++    case NFS_REASON_WINDOWED: return "windowed";
++    case NFS_REASON_HIDDEN: return "hidden";
++    case NFS_REASON_OTHER_SCREEN: return "other-screen";
++    case NFS_REASON_DISPLAY_CHANGE: return "display-change";
++    case NFS_REASON_FIGHT: return "fight";
++    case NFS_REASON_OTHER: return "other";
++    default: return "none";
++    }
++}
++
++/* The window is a fullscreen game window that could have a Space of its own: everything but
++   the player's choice and the displays. */
++static inline int nfs_is_game_fullscreen(const struct nfs_facts *f)
++{
++    return f->option && f->top_level && f->ordered_in && !f->minimized && !f->disabled &&
++           !f->no_foreground && !f->maximized && f->borderless &&
++           (f->screen || (f->in_space && f->request_is_content));
++}
++
++static inline int nfs_displays_allow(const struct nfs_facts *f)
++{
++    return !f->displays_captured && (f->separate_spaces || f->screens == 1);
++}
++
++/* Q1-Q8 */
++static inline int nfs_qualifies(const struct nfs_facts *f, const struct nfs_state *s)
++{
++    return nfs_is_game_fullscreen(f) && nfs_displays_allow(f) && !s->declined;
++}
++
++static inline enum nfs_reason nfs_exit_reason(const struct nfs_facts *f, const struct nfs_state *s)
++{
++    if (s->fight_pending) return NFS_REASON_FIGHT;
++    if (!f->ordered_in || f->minimized) return NFS_REASON_HIDDEN;
++    if (f->borderless && !f->screen && !f->request_is_content && f->request_off_screens)
++        return NFS_REASON_DISPLAY_CHANGE;
++    if (!f->borderless || !(f->screen || f->request_is_content)) return NFS_REASON_WINDOWED;
++    if (!nfs_displays_allow(f)) return NFS_REASON_DISPLAY_CHANGE;
++    return NFS_REASON_OTHER;
++}
++
++static inline int nfs_facts_equal(const struct nfs_facts *a, const struct nfs_facts *b)
++{
++    return a->option == b->option && a->top_level == b->top_level && a->ordered_in == b->ordered_in &&
++           a->minimized == b->minimized && a->disabled == b->disabled && a->no_foreground == b->no_foreground &&
++           a->maximized == b->maximized && a->borderless == b->borderless && a->screen == b->screen &&
++           a->request_is_content == b->request_is_content && a->request_off_screens == b->request_off_screens &&
++           a->displays_captured == b->displays_captured &&
++           a->separate_spaces == b->separate_spaces && a->screens == b->screens &&
++           a->app_active == b->app_active && a->on_active_space == b->on_active_space &&
++           a->in_transition == b->in_transition && a->in_space == b->in_space &&
++           a->in_other_space == b->in_other_space && a->space_screen == b->space_screen;
++}
++
++static inline struct nfs_decision nfs_wait_until(double at)
++{
++    struct nfs_decision d = { NFS_WAIT, NFS_REASON_NONE, 0, at, NULL };
++    return d;
++}
++
++/* Record the facts at `now` and decide. */
++static inline struct nfs_decision nfs_step(struct nfs_state *s, const struct nfs_facts *f, double now)
++{
++    struct nfs_decision none = { NFS_NOTHING, NFS_REASON_NONE, 0, 0, NULL };
++    struct nfs_decision d = none;
++
++    if (!f->option) return none;
++
++    if (!s->have_last || !nfs_facts_equal(&s->last, f))
++    {
++        s->last = *f;
++        s->have_last = 1;
++        s->changed_at = now;
++    }
++    /* The player's exit and the failed tries hold until the game leaves its fullscreen mode
++       (the next mode switch) or the window goes away. */
++    if (!nfs_is_game_fullscreen(f))
++    {
++        s->declined = 0;
++        s->fight_pending = 0;
++        s->failed_enters = 0;
++        s->retry_at = 0;
++    }
++    if (!f->in_space)
++    {
++        s->exit_failures = 0;
++        s->exit_retry_at = 0;
++    }
++
++    if (f->in_transition) return none;  /* its end asks again */
++    if (f->in_other_space) return none; /* the stock path's, never ours */
++    if (now < s->settle_until) return nfs_wait_until(s->settle_until);
++
++    if (f->in_space)
++    {
++        int qualifies = nfs_qualifies(f, s);
++        int other_screen = qualifies && f->screen && f->screen != f->space_screen;
++
++        if (!s->fight_pending && qualifies && !other_screen)
++        {
++            s->exit_failures = 0; /* nothing to leave for (any more) */
++            return none;          /* stay */
++        }
++        d.action = NFS_EXIT;
++        d.reason = other_screen ? NFS_REASON_OTHER_SCREEN : nfs_exit_reason(f, s);
++        if (s->exit_failures >= 2) return none; /* stuck: logged, nothing more to try */
++        if (s->exit_failures == 1)
++        {
++            if (now < s->exit_retry_at) return nfs_wait_until(s->exit_retry_at);
++            d.retry = 1;
++            return d;
++        }
++        if (s->fight_pending) return d;
++        if (now < s->changed_at + NFS_EXIT_STABLE) return nfs_wait_until(s->changed_at + NFS_EXIT_STABLE);
++        return d;
++    }
++
++    if (!nfs_is_game_fullscreen(f) || s->declined) return none;
++    if (f->displays_captured) { d.skipped = "displays captured"; return d; }
++    if (!nfs_displays_allow(f)) { d.skipped = "displays share one Space"; return d; }
++    if (s->failed_enters >= NFS_ENTER_TRIES) return none;
++    if (now < s->retry_at) return nfs_wait_until(s->retry_at);
++    /* Entering from the background would pull the player to another Space. */
++    if (!f->app_active || !f->on_active_space) return none;
++    if (now < s->changed_at + NFS_ENTER_STABLE) return nfs_wait_until(s->changed_at + NFS_ENTER_STABLE);
++    d.action = NFS_ENTER;
++    return d;
++}
++
++/* An entry failed; returns the try it was (1-3). */
++static inline int nfs_enter_failed(struct nfs_state *s, double now)
++{
++    s->failed_enters++;
++    s->retry_at = now + NFS_ENTER_BACKOFF;
++    return s->failed_enters;
++}
++
++/* An exit failed; returns 1 for "retry once", 2 for "stuck". */
++static inline int nfs_exit_failed(struct nfs_state *s, double now)
++{
++    if (s->exit_failures < 2) s->exit_failures++;
++    s->exit_retry_at = now + NFS_EXIT_RETRY;
++    return s->exit_failures;
++}
++
++/* The player left the driver's Space by hand: stay out until the game leaves its fullscreen
++   mode (or the player enters again by hand). */
++static inline void nfs_declined(struct nfs_state *s)
++{
++    s->declined = 1;
++}
++
++/* The player entered a Space by hand with a window that is the game's fullscreen: it is the
++   driver's from now on. */
++static inline void nfs_taken_over(struct nfs_state *s)
++{
++    s->declined = 0;
++    s->fight_pending = 0;
++    s->failed_enters = 0;
++    s->retry_at = 0;
++}
++
++/* Wine was told the Space's real frame because its request differs; returns 1 when that makes
++   more than NFS_FIGHT_COUNT corrections within NFS_FIGHT_WINDOW: the game insists on its size,
++   so the window leaves (reason fight) and stays out. */
++static inline int nfs_correction(struct nfs_state *s, double now)
++{
++    int i, n = 0;
++
++    memmove(s->corrections + 1, s->corrections, NFS_FIGHT_COUNT * sizeof(s->corrections[0]));
++    s->corrections[0] = now;
++    for (i = 0; i <= NFS_FIGHT_COUNT; i++)
++        if (s->corrections[i] > 0 && now - s->corrections[i] < NFS_FIGHT_WINDOW) n++;
++    if (n <= NFS_FIGHT_COUNT) return 0;
++    s->declined = 1;
++    s->fight_pending = 1;
++    memset(s->corrections, 0, sizeof(s->corrections));
++    return 1;
++}
++
++/* A real display change (not EDR noise): start nothing for NFS_SETTLE. */
++static inline void nfs_displays_changed(struct nfs_state *s, double now)
++{
++    s->settle_until = now + NFS_SETTLE;
++}
++/* ---------- nativefs decision: end ---------- */
++
++/* Native fullscreen (SWTOR on Mac, NativeFullscreen; the decision is above).  While a
++   window is entering, in or leaving the driver's Space, AppKit owns its frame: Wine's frame and
++   style requests are recorded, not applied, and read by the decision as "stay" or "leave". */
++bool macdrv_nativefs_warn_on;
++
++static void nativefs_log(const char* func, NSString* format, ...)
++{
++    va_list args;
++    NSString* message;
++
++    if (!macdrv_nativefs_warn_on) return;
++    va_start(args, format);
++    message = [[NSString alloc] initWithFormat:format arguments:args];
++    va_end(args);
++    fprintf(stderr, "warn:nativefs:%s NATIVEFS: %s\n", func, [message UTF8String]);
++    [message release];
++}
++
++/* Within a point on every edge (Wine's rects are whole pixels, AppKit's points may not be). */
++static BOOL nativefs_rects_close(NSRect a, NSRect b)
++{
++    return fabs(NSMinX(a) - NSMinX(b)) <= 1 && fabs(NSMinY(a) - NSMinY(b)) <= 1 &&
++           fabs(NSMaxX(a) - NSMaxX(b)) <= 1 && fabs(NSMaxY(a) - NSMaxY(b)) <= 1;
++}
++
++static unsigned int nativefs_screen_id(NSScreen* screen)
++{
++    return [[[screen deviceDescription] objectForKey:@"NSScreenNumber"] unsignedIntValue];
++}
++
++/* The screen whose frame the content rect (Cocoa coordinates) covers exactly, or 0. */
++static unsigned int nativefs_screen_for_rect(NSRect rect)
++{
++    for (NSScreen* screen in [NSScreen screens])
++        if (nativefs_rects_close(rect, [screen frame])) return nativefs_screen_id(screen);
++    return 0;
++}
++
++/* A Cocoa content rect as Wine's rect, "(left,top)-(right,bottom)". */
++static NSString* nativefs_wine_rect(NSRect rect)
++{
++    [[WineApplicationController sharedController] flipRect:&rect];
++    return [NSString stringWithFormat:@"(%.0f,%.0f)-(%.0f,%.0f)", NSMinX(rect), NSMinY(rect), NSMaxX(rect), NSMaxY(rect)];
++}
++
++@interface WineWindow ()
++{
++    struct nfs_state nfs;
++    BOOL nfsInSpace;               /* in the driver's Space */
++    BOOL nfsTransition;            /* a transition the driver started, or took over from the player */
++    BOOL nfsExitRequested;         /* the current transition is the driver's exit */
++    unsigned int nfsTransitionSerial;
++    NSTimeInterval nfsTransitionStart;
++    BOOL nfsRequestBorderless;     /* Wine's last style request has no title bar */
++    NSRect nfsRequestWine;         /* Wine's last frame request (content, Wine's top-down space) */
++    BOOL nfsPendingFeaturesValid;  /* a style request recorded while AppKit owned the window */
++    struct macdrv_window_features nfsPendingFeatures;
++    NSRect nfsToldFor;             /* the request Wine was last told the Space's real frame for */
++    NSTimeInterval nfsTimerAt;
++    NSTimeInterval nfsKeepFrameUntil; /* just out of the Space: AppKit's own late frames don't count */
++    const char* nfsSkipped;
++}
++@end
++
+ @interface WineWindow ()
+ 
+ @property (readwrite, nonatomic) BOOL disabled;
+@@ -1026,6 +1367,7 @@
+         WineContentView* contentView;
+         NSTrackingArea* trackingArea;
+         NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
++        NSRect wine_content_rect = window_frame;
+ 
+         [[WineApplicationController sharedController] flipRect:&window_frame];
+ 
+@@ -1055,6 +1397,11 @@
+         window->savedContentMaxSize = NSMakeSize(FLT_MAX, FLT_MAX);
+         window->resizable = wf->resizable;
+         window->_lastDisplayTime = [[NSDate distantPast] timeIntervalSinceReferenceDate];
++        if (native_fullscreen)
++        {
++            window->nfsRequestBorderless = !wf->title_bar;
++            window->nfsRequestWine = wine_content_rect;
++        }
+ 
+         [window registerForDraggedTypes:@[(NSString*)kUTTypeData, (NSString*)kUTTypeContent]];
+ 
+@@ -1162,9 +1509,10 @@
+     {
+         NSUInteger style = [self styleMask];
+ 
+-        if (behavior & NSWindowCollectionBehaviorParticipatesInCycle &&
+-            style & NSWindowStyleMaskResizable && !(style & NSWindowStyleMaskUtilityWindow) && !maximized &&
+-            !(self.parentWindow || self.latentParentWindow))
++        if ((behavior & NSWindowCollectionBehaviorParticipatesInCycle &&
++             style & NSWindowStyleMaskResizable && !(style & NSWindowStyleMaskUtilityWindow) && !maximized &&
++             !(self.parentWindow || self.latentParentWindow)) ||
++            [self nfsWantsPrimary])
+         {
+             behavior |= NSWindowCollectionBehaviorFullScreenPrimary;
+             behavior &= ~NSWindowCollectionBehaviorFullScreenAuxiliary;
+@@ -1192,6 +1540,21 @@
+         NSUInteger currentStyle = [self styleMask];
+         NSUInteger newStyle = style_mask_for_features(wf) | (currentStyle & ~usedStyles);
+ 
++        if (native_fullscreen)
++        {
++            nfsRequestBorderless = !wf->title_bar;
++            nfsPendingFeaturesValid = FALSE;
++            if ([self nfsOwnsFrame])
++            {
++                /* Never change the style of a window AppKit holds in a Space: applied on the
++                   way out. */
++                nfsPendingFeatures = *wf;
++                nfsPendingFeaturesValid = TRUE;
++                [self nfsReconcile];
++                return;
++            }
++        }
++
+         self.preventsAppActivation = wf->prevents_app_activation;
+ 
+         if (newStyle != currentStyle)
+@@ -1235,6 +1598,8 @@
+         resizable = wf->resizable;
+         [self adjustFeaturesForState];
+         [self setHasShadow:wf->shadow];
++        if (native_fullscreen)
++            [self nfsReconcile];
+     }
+ 
+     // Indicates if the window would be visible if the app were not hidden.
+@@ -1258,6 +1623,9 @@
+         else
+             level = NSNormalWindowLevel;
+ 
++        if (native_fullscreen && (nfsInSpace || nfsTransition))
++            return NSNormalWindowLevel;
++
+         /* A window covering a screen keeps its level: raised above the menu
+            bar, it breaks Mission Control on macOS 27.  The controller hides
+            the Dock and menu bar instead, as native games do. */
+@@ -1287,7 +1655,11 @@
+ 
+     - (void) sendResizeStartQuery
+     {
+-        macdrv_query* query = macdrv_create_query();
++        macdrv_query* query;
++
++        if ([self nfsNoQueries])
++            return;
++        query = macdrv_create_query();
+         query->type = QUERY_RESIZE_START;
+         query->window = (macdrv_window)[self retain];
+ 
+@@ -1405,6 +1777,8 @@
+                 [NSApp addWindowsItem:self title:[self title] filename:NO];
+         }
+         [self adjustFullScreenBehavior:behavior];
++        if (native_fullscreen)
++            [self nfsReconcile];
+     }
+ 
+     - (BOOL) addChildWineWindow:(WineWindow*)child assumeVisible:(BOOL)assumeVisible
+@@ -1846,6 +2220,8 @@
+             if (![self isExcludedFromWindowsMenu])
+                 [NSApp addWindowsItem:self title:[self title] filename:NO];
+         }
++        if (native_fullscreen)
++            [self nfsReconcile];
+     }
+ 
+     - (void) doOrderOut
+@@ -1872,6 +2248,18 @@
+ 
+         pendingOrderOut = FALSE;
+ 
++        /* Hidden in the driver's Space: the window is closed below (an order-out would leave
++           its Space empty), which takes it out of the Space as the driver's own exit; the end
++           of that transition applies Wine's latest requests. */
++        if (native_fullscreen && nfsInSpace && !nfsTransition)
++        {
++            nativefs_log("doOrderOut", @"exit reason=hidden");
++            nfsTransition = TRUE;
++            nfsExitRequested = TRUE;
++            nfsTransitionStart = [[NSProcessInfo processInfo] systemUptime];
++            [self nfsWatchTransition];
++        }
++
+         if ([self isMiniaturized])
+             pendingMinimize = TRUE;
+ 
+@@ -1905,6 +2293,8 @@
+                                          event_mask_for_type(WINDOW_MINIMIZE_REQUESTED) |
+                                          event_mask_for_type(WINDOW_RESTORE_REQUESTED)
+                                forWindow:self];
++        if (native_fullscreen)
++            [self nfsReconcile];
+     }
+ 
+     - (BOOL) coversMenuBarScreen
+@@ -1960,6 +2350,18 @@
+ 
+     - (void) setFrameFromWine:(NSRect)contentRect
+     {
++        if (native_fullscreen)
++        {
++            nfsRequestWine = contentRect;
++            if ([self nfsOwnsFrame])
++            {
++                /* Never set the frame of a window AppKit holds in a Space: recorded, and
++                   applied on the way out. */
++                [self nfsReconcile];
++                return;
++            }
++        }
++
+         /* Origin is (left, top) in a top-down space.  Need to convert it to
+            (left, bottom) in a bottom-up space. */
+         [[WineApplicationController sharedController] flipRect:&contentRect];
+@@ -2032,6 +2434,8 @@
+                 }
+             }
+         }
++        if (native_fullscreen)
++            [self nfsReconcile];
+     }
+ 
+     - (NSRect) wine_fractionalFrame
+@@ -2052,6 +2456,8 @@
+             if ([parent addChildWineWindow:self])
+                 [[WineApplicationController sharedController] adjustWindowLevels];
+             [self adjustFullScreenBehavior:[self collectionBehavior]];
++            if (native_fullscreen)
++                [self nfsReconcile];
+         }
+     }
+ 
+@@ -3012,12 +3418,341 @@
+     {
+         if (mac_edit_menu == MAC_EDIT_MENU_DISABLED && [[WineApplicationController sharedController] isEditMenuAction:selector])
+              return FALSE;
++        if (selector == @selector(window:willUseFullScreenPresentationOptions:) && !native_fullscreen)
++            return FALSE;
+ 
+         return [super respondsToSelector:selector];
+     }
+ 
+ 
+     /*
++     * ---------- Native fullscreen (SWTOR on Mac) ----------
++     */
++    - (BOOL) nfsOwnsFrame
++    {
++        return native_fullscreen && (nfsInSpace || nfsTransition);
++    }
++
++    /* A transition the driver started or took over: tell the game nothing on the way. */
++    - (BOOL) nfsQuiet
++    {
++        return native_fullscreen && nfsTransition;
++    }
++
++    /* No query to the game's window thread: in a quiet transition, or with the window settled in
++       the driver's Space (AppKit owns its frame there, and asks again after a transition). */
++    - (BOOL) nfsNoQueries
++    {
++        return [self nfsQuiet] || (native_fullscreen && nfsInSpace);
++    }
++
++    - (BOOL) nativeFullscreenTransition
++    {
++        return native_fullscreen && nfsTransition;
++    }
++
++    - (NSRect) nfsRequest
++    {
++        NSRect rect = nfsRequestWine;
++        [[WineApplicationController sharedController] flipRect:&rect];
++        return rect;
++    }
++
++    /* Leaving the Space: Wine's latest request, unless its display went away; then the request's
++       size where AppKit put the window (its screen), and Wine is told that. */
++    - (void) nfsKeepRequestOnScreen
++    {
++        NSRect request = [self nfsRequest];
++        NSRect screen = [[self screen] frame];
++
++        if (NSIsEmptyRect(request) || NSIsEmptyRect(screen) || frame_intersects_screens(request, [NSScreen screens]))
++            return;
++        request.origin.x = NSMinX(screen);
++        request.origin.y = NSMaxY(screen) - NSHeight(request);
++        [[WineApplicationController sharedController] flipRect:&request];
++        nfsRequestWine = request;
++    }
++
++    - (struct nfs_facts) nfsFacts
++    {
++        struct nfs_facts f;
++        NSRect request = [self nfsRequest];
++
++        memset(&f, 0, sizeof(f));
++        f.option = native_fullscreen;
++        f.top_level = !self.parentWindow && !self.latentParentWindow;
++        f.ordered_in = [self isOrderedIn];
++        f.minimized = [self isMiniaturized];
++        f.disabled = self.disabled;
++        f.no_foreground = self.noForeground;
++        f.maximized = maximized;
++        f.borderless = nfsRequestBorderless;
++        f.screen = NSIsEmptyRect(request) ? 0 : nativefs_screen_for_rect(request);
++        f.in_space = nfsInSpace;
++        f.request_is_content = nfsInSpace && nativefs_rects_close(request, [self contentRectForFrameRect:[self frame]]);
++        f.request_off_screens = !NSIsEmptyRect(request) && !frame_intersects_screens(request, [NSScreen screens]);
++        f.displays_captured = [[WineApplicationController sharedController] areDisplaysCaptured];
++        f.separate_spaces = [NSScreen screensHaveSeparateSpaces];
++        f.screens = (int)[[NSScreen screens] count];
++        f.app_active = [NSApp isActive];
++        f.on_active_space = [self isOnActiveSpace];
++        f.in_transition = nfsTransition;
++        f.in_other_space = !nfsInSpace && !nfsTransition && ([self styleMask] & NSWindowStyleMaskFullScreen);
++        if (nfsInSpace)
++            f.space_screen = nativefs_screen_id([self screen]);
++        return f;
++    }
++
++    /* FullScreenPrimary while the window is in the driver's Space or could be. */
++    - (BOOL) nfsWantsPrimary
++    {
++        struct nfs_facts f;
++
++        if (!native_fullscreen) return FALSE;
++        if (nfsInSpace || nfsTransition) return TRUE;
++        f = [self nfsFacts];
++        return nfs_is_game_fullscreen(&f);
++    }
++
++    - (void) nfsReconcileAt:(NSTimeInterval)at
++    {
++        NSTimeInterval now = [[NSProcessInfo processInfo] systemUptime];
++
++        if (nfsTimerAt && nfsTimerAt <= at) return; /* an earlier one asks again anyway */
++        nfsTimerAt = at;
++        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((at - now) * NSEC_PER_SEC) + 1000000),
++                       dispatch_get_main_queue(), ^{
++            if (nfsTimerAt != at) return;
++            nfsTimerAt = 0;
++            [self nfsReconcile];
++        });
++    }
++
++    /* The only caller of the transition. */
++    - (void) nfsReconcile
++    {
++        struct nfs_facts f;
++        struct nfs_decision d;
++
++        if (!native_fullscreen || closing) return;
++        f = [self nfsFacts];
++        d = nfs_step(&nfs, &f, [[NSProcessInfo processInfo] systemUptime]);
++
++        if (d.skipped != nfsSkipped)
++        {
++            if (d.skipped)
++                nativefs_log("reconcile", @"skipped (%s)", d.skipped);
++            nfsSkipped = d.skipped;
++        }
++
++        switch (d.action)
++        {
++        case NFS_WAIT:
++            [self nfsReconcileAt:d.at];
++            break;
++        case NFS_ENTER:
++            [self nfsEnter];
++            break;
++        case NFS_EXIT:
++            [self nfsExit:d.reason retry:d.retry];
++            break;
++        case NFS_NOTHING:
++            if (nfsInSpace && !nfsTransition)
++                [self nfsTellWineRealFrame];
++            break;
++        }
++    }
++
++    /* Ends a transition AppKit never reported on (refused without a word). */
++    - (void) nfsWatchTransition
++    {
++        unsigned int serial = ++nfsTransitionSerial;
++
++        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
++            if (!nfsTransition || nfsTransitionSerial != serial) return;
++            if (nfsExitRequested)
++            {
++                if ([self styleMask] & NSWindowStyleMaskFullScreen)
++                    [self windowDidFailToExitFullScreen:self];
++                else
++                    [self windowDidExitFullScreen:[NSNotification notificationWithName:NSWindowDidExitFullScreenNotification object:self]];
++            }
++            else
++            {
++                if ([self styleMask] & NSWindowStyleMaskFullScreen)
++                    [self windowDidEnterFullScreen:[NSNotification notificationWithName:NSWindowDidEnterFullScreenNotification object:self]];
++                else
++                    [self windowDidFailToEnterFullScreen:self];
++            }
++        });
++    }
++
++    - (void) nfsEnter
++    {
++        NSScreen* screen = [self screen];
++        NSRect frame = [screen frame];
++
++        nfsTransition = TRUE;
++        nfsExitRequested = FALSE;
++        nfsTransitionStart = [[NSProcessInfo processInfo] systemUptime];
++        [self adjustFullScreenBehavior:[self collectionBehavior]];
++        nativefs_log("reconcile", @"enter screen=%u frame=%.0fx%.0fpt scale=%g safeTop=%g request=%@",
++                     nativefs_screen_id(screen), NSWidth(frame), NSHeight(frame), [screen backingScaleFactor],
++                     [screen safeAreaInsets].top, nativefs_wine_rect([self nfsRequest]));
++        [self nfsWatchTransition];
++        [super toggleFullScreen:nil];
++    }
++
++    - (void) nfsExit:(enum nfs_reason)reason retry:(int)retry
++    {
++        if (!retry)
++            nativefs_log("reconcile", @"exit reason=%s", nfs_reason_name(reason));
++        else
++            nativefs_log("reconcile", @"exit failed, retry");
++        nfsTransition = TRUE;
++        nfsExitRequested = TRUE;
++        nfsTransitionStart = [[NSProcessInfo processInfo] systemUptime];
++        [self nfsWatchTransition];
++        [super toggleFullScreen:nil];
++    }
++
++    /* The player enters a Space by hand (the Window menu, the shortcut): with the game's
++       fullscreen window that is the driver's Space from now on, else the stock path's. */
++    - (void) nfsPlayerEntering
++    {
++        struct nfs_facts f = [self nfsFacts];
++        NSScreen* screen = [self screen];
++        NSRect frame = [screen frame];
++
++        if (!nfs_is_game_fullscreen(&f)) return;
++        nfs_taken_over(&nfs);
++        nfsTransition = TRUE;
++        nfsExitRequested = FALSE;
++        nfsTransitionStart = [[NSProcessInfo processInfo] systemUptime];
++        [self nfsWatchTransition];
++        nativefs_log("windowWillEnterFullScreen", @"enter screen=%u frame=%.0fx%.0fpt scale=%g safeTop=%g request=%@ (by hand)",
++                     nativefs_screen_id(screen), NSWidth(frame), NSHeight(frame), [screen backingScaleFactor],
++                     [screen safeAreaInsets].top, nativefs_wine_rect([self nfsRequest]));
++    }
++
++    - (void) nfsDidEnter
++    {
++        NSRect content = [self contentRectForFrameRect:[self frame]];
++        CGFloat scale = [self backingScaleFactor];
++
++        nfsTransition = FALSE;
++        nfsInSpace = TRUE;
++        nativefs_log("windowDidEnterFullScreen", @"entered content=%.0fx%.0fpt (%.0fx%.0fpx) in %.0f ms",
++                     NSWidth(content), NSHeight(content), NSWidth(content) * scale, NSHeight(content) * scale,
++                     ([[NSProcessInfo processInfo] systemUptime] - nfsTransitionStart) * 1000);
++        [[WineApplicationController sharedController] windowDidChangeNativeFullscreen:self];
++        [self nfsReconcile];
++    }
++
++    /* The window leaves: for the driver's reasons, or the player's. Its frame afterwards is
++       Wine's latest request, never the one saved at entry, and Wine isn't told any other. */
++    - (void) nfsWillExit
++    {
++        NSUInteger style;
++
++        if (!nfsTransition || !nfsExitRequested)
++        {
++            nfs_declined(&nfs);
++            nativefs_log("windowWillExitFullScreen", @"exit reason=user");
++            nativefs_log("windowWillExitFullScreen", @"declined by user");
++            nfsTransitionStart = [[NSProcessInfo processInfo] systemUptime];
++            nfsTransition = TRUE;
++            nfsExitRequested = TRUE;
++            [self nfsWatchTransition];
++        }
++        nfsTransition = TRUE;
++        nfsExitRequested = TRUE;
++        [self nfsKeepRequestOnScreen];
++        style = nfsPendingFeaturesValid ? style_mask_for_features(&nfsPendingFeatures)
++                                        : ([self styleMask] & ~NSWindowStyleMaskFullScreen);
++        if (!NSIsEmptyRect(nfsRequestWine))
++            nonFullscreenFrame = [NSWindow frameRectForContentRect:[self nfsRequest] styleMask:style];
++    }
++
++    - (void) nfsDidExit
++    {
++        nfsTransition = FALSE;
++        nfsInSpace = FALSE;
++        nfsKeepFrameUntil = [[NSProcessInfo processInfo] systemUptime] + 1.0;
++        [self nfsApplyRequests];
++        nativefs_log("windowDidExitFullScreen", @"exited frame=%@ in %.0f ms",
++                     nativefs_wine_rect([self contentRectForFrameRect:[self frame]]),
++                     ([[NSProcessInfo processInfo] systemUptime] - nfsTransitionStart) * 1000);
++        [[WineApplicationController sharedController] windowDidChangeNativeFullscreen:self];
++        [self nfsReconcile];
++    }
++
++    /* Out of the Space: the pending style first, then the frame of Wine's latest request. */
++    - (void) nfsApplyRequests
++    {
++        if (nfsPendingFeaturesValid)
++        {
++            struct macdrv_window_features wf = nfsPendingFeatures;
++            nfsPendingFeaturesValid = FALSE;
++            [self setWindowFeatures:&wf];
++        }
++        nfsToldFor = NSZeroRect;
++        if (!NSIsEmptyRect(nfsRequestWine))
++        {
++            /* (from the frame AppKit left, so the request applies even where it equals the
++               frame saved before the transition) */
++            [self setFrameAndWineFrame:[self frame]];
++            [self setFrameFromWine:nfsRequestWine];
++        }
++        /* Wine hears the final frame even where AppKit had already put the window at the
++           request (it may hold the Space's shorter frame from a correction); a frame Wine has
++           already is ignored there, so the game gets nothing new. */
++        if ([self isOrderedIn])
++            [self postWindowFrameChanged:[self frame] fullscreen:FALSE resizing:FALSE skipSizeMove:TRUE];
++    }
++
++    /* In the Space, Wine's request differs from the window's real content (a notch, a menu bar
++       that stays): Wine is told the real frame, once per distinct request. */
++    - (void) nfsTellWineRealFrame
++    {
++        NSRect request = [self nfsRequest];
++        NSRect content = [self contentRectForFrameRect:[self frame]];
++
++        if (NSIsEmptyRect(request) || nativefs_rects_close(request, content))
++        {
++            nfsToldFor = NSZeroRect; /* Wine has it */
++            return;
++        }
++        if (NSEqualRects(request, nfsToldFor)) return;
++        nfsToldFor = request;
++        [self postWindowFrameChanged:[self frame] fullscreen:TRUE resizing:FALSE skipSizeMove:TRUE];
++        nativefs_log("reconcile", @"resize told wine=%@ (request=%@)", nativefs_wine_rect(content), nativefs_wine_rect(request));
++        if (nfs_correction(&nfs, [[NSProcessInfo processInfo] systemUptime]))
++        {
++            nativefs_log("reconcile", @"fight");
++            [self nfsReconcile];
++        }
++    }
++
++    /* A real display change (the controller filters out EDR noise). */
++    - (void) nfsDisplaysChanged
++    {
++        if (!native_fullscreen) return;
++        nfs_displays_changed(&nfs, [[NSProcessInfo processInfo] systemUptime]);
++        [self nfsReconcile];
++    }
++
++    - (NSApplicationPresentationOptions) window:(NSWindow*)window
++           willUseFullScreenPresentationOptions:(NSApplicationPresentationOptions)proposedOptions
++    {
++        if ([self nfsOwnsFrame])
++            return NSApplicationPresentationFullScreen | NSApplicationPresentationHideDock |
++                   NSApplicationPresentationHideMenuBar;
++        return proposedOptions;
++    }
++
++
++    /*
+      * ---------- NSWindowDelegate methods ----------
+      */
+     - (NSSize) window:(NSWindow*)window willUseFullScreenContentSize:(NSSize)proposedSize
+@@ -3025,6 +3760,11 @@
+         macdrv_query* query;
+         NSSize size;
+ 
++        /* A quiet transition, or the window in the driver's Space (AppKit asks again after the
++           transition): no min/max query (the main thread never waits for the game). */
++        if ([self nfsNoQueries])
++            return proposedSize;
++
+         query = macdrv_create_query();
+         query->type = QUERY_MIN_MAX_INFO;
+         query->window = (macdrv_window)[self retain];
+@@ -3092,6 +3832,8 @@
+ 
+     - (void) windowDidEndLiveResize:(NSNotification *)notification
+     {
++        if ([self nfsNoQueries])
++            return;
+         if (!maximized)
+         {
+             macdrv_event* event = macdrv_create_event(WINDOW_RESIZE_ENDED, self);
+@@ -3104,6 +3846,8 @@
+     {
+         enteringFullScreen = FALSE;
+         enteredFullScreenTime = [[NSProcessInfo processInfo] systemUptime];
++        if (native_fullscreen && nfsTransition && !nfsExitRequested)
++            [self nfsDidEnter];
+         if (pendingOrderOut)
+             [self doOrderOut];
+     }
+@@ -3111,6 +3855,13 @@
+     - (void) windowDidExitFullScreen:(NSNotification*)notification
+     {
+         exitingFullScreen = FALSE;
++        if (native_fullscreen && (nfsTransition || nfsInSpace))
++        {
++            [self nfsDidExit];
++            if (pendingOrderOut)
++                [self doOrderOut];
++            return;
++        }
+         [self setFrameAndWineFrame:nonFullscreenFrame];
+         [self windowDidResize:nil];
+         if (pendingOrderOut)
+@@ -3121,13 +3872,38 @@
+     {
+         enteringFullScreen = FALSE;
+         enteredFullScreenTime = 0;
++        if (native_fullscreen && nfsTransition && !nfsExitRequested)
++        {
++            nfsTransition = FALSE;
++            nativefs_log("windowDidFailToEnterFullScreen", @"enter failed (try %d/%d)",
++                         nfs_enter_failed(&nfs, [[NSProcessInfo processInfo] systemUptime]), NFS_ENTER_TRIES);
++            [self nfsApplyRequests];
++            [[WineApplicationController sharedController] windowDidChangeNativeFullscreen:self];
++        }
+         if (pendingOrderOut)
+             [self doOrderOut];
++        if (native_fullscreen)
++            [self nfsReconcile];
+     }
+ 
+     - (void) windowDidFailToExitFullScreen:(NSWindow*)window
+     {
+         exitingFullScreen = FALSE;
++        if (native_fullscreen && (nfsTransition || nfsInSpace))
++        {
++            /* (Leaving a Space that isn't the active one reports this, and the window comes
++               out a moment later anyway: windowDidExitFullScreen: then ends it.) */
++            nfsTransition = FALSE;
++            nfsInSpace = TRUE;
++            /* "exit failed, retry" is said when the retry starts (below, in nfsExit), so an exit
++               that ends a moment later anyway leaves no failure in the log */
++            if (nfs_exit_failed(&nfs, [[NSProcessInfo processInfo] systemUptime]) == 2)
++                nativefs_log("windowDidFailToExitFullScreen", @"stuck");
++            if (pendingOrderOut)
++                [self doOrderOut];
++            [self nfsReconcile];
++            return;
++        }
+         [self windowDidResize:nil];
+         if (pendingOrderOut)
+             [self doOrderOut];
+@@ -3177,6 +3953,25 @@
+         }
+ 
+         if (ignore_windowResize || exitingFullScreen) return;
++        /* A quiet transition: AppKit's frames on the way are not the game's business; Wine
++           hears the result once, at the end. */
++        if ([self nfsQuiet]) return;
++        if (native_fullscreen && nfsInSpace)
++        {
++            /* AppKit moved the window in its Space (a display change): the decision says
++               whether it stays (and Wine is told the real frame) or leaves. */
++            [self nfsReconcile];
++            return;
++        }
++        if (native_fullscreen && [[NSProcessInfo processInfo] systemUptime] < nfsKeepFrameUntil &&
++            ![self inLiveResize] && !NSIsEmptyRect(nfsRequestWine) &&
++            !nativefs_rects_close([self contentRectForFrameRect:frame], [self nfsRequest]))
++        {
++            /* AppKit's own frame after the window left (leaving a Space that isn't the active
++               one ends that way): the window keeps Wine's request. */
++            [self setFrameAndWineFrame:[self frameRectForContentRect:[self nfsRequest]]];
++            return;
++        }
+ 
+         if ([self preventResizing])
+         {
+@@ -3187,8 +3982,8 @@
+ 
+         [self postWindowFrameChanged:frame
+                           fullscreen:([self styleMask] & NSWindowStyleMaskFullScreen) != 0
+-                            resizing:[self inLiveResize]
+-                        skipSizeMove:skipSizeMove];
++                            resizing:[self inLiveResize] && ![self nfsOwnsFrame]
++                        skipSizeMove:skipSizeMove || [self nfsOwnsFrame]];
+ 
+         [[[self contentView] inputContext] invalidateCharacterCoordinates];
+         [self updateFullscreen];
+@@ -3250,11 +4045,18 @@
+     {
+         enteringFullScreen = TRUE;
+         nonFullscreenFrame = self.wine_fractionalFrame;
++        if (native_fullscreen && !nfsTransition)
++            [self nfsPlayerEntering];
+     }
+ 
+     - (void) windowWillExitFullScreen:(NSNotification*)notification
+     {
+         exitingFullScreen = TRUE;
++        if (native_fullscreen && (nfsTransition || nfsInSpace))
++        {
++            [self nfsWillExit];
++            return;
++        }
+         [self postWindowFrameChanged:nonFullscreenFrame fullscreen:FALSE resizing:FALSE skipSizeMove:FALSE];
+     }
+ 
+@@ -3266,6 +4068,9 @@
+ 
+     - (NSSize) windowWillResize:(NSWindow*)sender toSize:(NSSize)frameSize
+     {
++        /* A quiet transition is a live resize to AppKit: no size query to the game. */
++        if ([self nfsNoQueries])
++            return frameSize;
+         if ([self inLiveResize])
+         {
+             if (maximized)
+@@ -3307,7 +4112,12 @@
+     {
+         [self endWindowDragging];
+ 
+-        if (maximized)
++        /* A quiet transition: no resize-start query (the main thread never waits for the
++           game, and the game gets no WM_ENTERSIZEMOVE). */
++        if ([self nfsNoQueries])
++        {
++        }
++        else if (maximized)
+         {
+             macdrv_event* event;
+             NSRect frame = [self contentRectForFrameRect:self.frame];
+@@ -3333,6 +4143,11 @@
+         NSRect currentContentRect, proposedContentRect, newContentRect, screenRect;
+         NSSize maxSize;
+ 
++        /* A quiet transition, or the window in the driver's Space, asks this too (AppKit's zoom
++           frame): no min/max query. */
++        if ([self nfsNoQueries])
++            return proposedFrame;
++
+         query = macdrv_create_query();
+         query->type = QUERY_MIN_MAX_INFO;
+         query->window = (macdrv_window)[self retain];
+@@ -3612,6 +4427,19 @@
+ }
+ 
+ /***********************************************************************
++ *              macdrv_nativefs_start
++ *
++ * NativeFullscreen is on: say so on the nativefs channel (the proof that this driver read it).
++ */
++void macdrv_nativefs_start(void)
++{
++    dispatch_async(dispatch_get_main_queue(), ^{
++        nativefs_log("macdrv_nativefs_start", @"on (variant=A separateSpaces=%d screens=%lu)",
++                     [NSScreen screensHaveSeparateSpaces], (unsigned long)[[NSScreen screens] count]);
++    });
++}
++
++/***********************************************************************
+  *              macdrv_hide_cocoa_window
+  *
+  * Hides a Cocoa window.
+diff -ru a/dlls/winemac.drv/macdrv_cocoa.h b/dlls/winemac.drv/macdrv_cocoa.h
+--- a/dlls/winemac.drv/macdrv_cocoa.h
++++ b/dlls/winemac.drv/macdrv_cocoa.h
+@@ -145,6 +145,9 @@
+ extern double raw_mouse_game_controller_scale;
+ extern bool raw_mouse_match_pointer_speed;
+ extern bool macdrv_rawmouse_warn_on;  /* warn+rawmouse, for the Cocoa side */
++extern bool native_fullscreen;  /* NativeFullscreen: the game's fullscreen in a Space of its own */
++extern bool macdrv_nativefs_warn_on;  /* warn+nativefs, for the Cocoa side */
++extern void macdrv_nativefs_start(void);
+ extern bool cursor_clipping_locks_windows;
+ extern bool use_precise_scrolling;
+ extern bool physical_keyboard;  /* PhysicalKeyboard: vkeys by US key position */
+diff -ru a/dlls/winemac.drv/macdrv_main.c b/dlls/winemac.drv/macdrv_main.c
+--- a/dlls/winemac.drv/macdrv_main.c
++++ b/dlls/winemac.drv/macdrv_main.c
+@@ -37,6 +37,7 @@
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(macdrv);
+ WINE_DECLARE_DEBUG_CHANNEL(rawmouse);
++WINE_DECLARE_DEBUG_CHANNEL(nativefs);
+ 
+ #define IS_OPTION_TRUE(ch) \
+     ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
+@@ -64,6 +65,8 @@
+ bool raw_mouse_game_controller = true;
+ double raw_mouse_game_controller_scale = 1.0;
+ bool raw_mouse_match_pointer_speed = true;
++/* SWTOR on Mac: off unless the registry turns it on (for swtor.exe only). */
++bool native_fullscreen = false;
+ BOOL thread_cpu_stats = FALSE;
+ bool cursor_clipping_locks_windows = true;
+ bool physical_keyboard = false;
+@@ -394,6 +397,10 @@
+     if (!get_config_key(hkey, appkey, "RawMouseMatchPointerSpeed", buffer, sizeof(buffer)))
+         raw_mouse_match_pointer_speed = IS_OPTION_TRUE(buffer[0]);
+ 
++    /* The game's borderless window covering a screen goes into a fullscreen Space of its own. */
++    if (!get_config_key(hkey, appkey, "NativeFullscreen", buffer, sizeof(buffer)))
++        native_fullscreen = IS_OPTION_TRUE(buffer[0]);
++
+     /* THREADCPU lines (with warn+threadcpu): only in the process this is set for, as the
+        others of a session (explorer.exe) inherit its WINEDEBUG and stderr. */
+     if (!get_config_key(hkey, appkey, "ThreadCpuStats", buffer, sizeof(buffer)))
+@@ -512,11 +519,14 @@
+ 
+     macdrv_err_on = ERR_ON(macdrv);
+     macdrv_rawmouse_warn_on = WARN_ON(rawmouse);
++    macdrv_nativefs_warn_on = WARN_ON(nativefs);
+     if (macdrv_start_cocoa_app(NtGetTickCount()))
+     {
+         ERR("Failed to start Cocoa app main loop\n");
+         return STATUS_UNSUCCESSFUL;
+     }
++    if (native_fullscreen)
++        macdrv_nativefs_start();
+ 
+     init_user_driver();
+     params->app_icon_callback = MACDRV_HAS_RAW_INPUT_THREAD;  /* see unixlib.h */

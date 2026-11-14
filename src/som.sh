@@ -6,7 +6,7 @@
 #   som.sh uninstall   revert everything (the official install goes back to stock)
 #   som.sh settings    KEY=VALUE lines: the settings (Settings window) and whether they can change
 #   som.sh set K V     change one setting (retina, hud, gamemode, vsync, debug, physkeys,
-#                      rawmouse, fpsbattery, flushcap, dx12: on/off; memory: auto/low/medium/high/ultra/unlimited;
+#                      rawmouse, fpsbattery, flushcap, nativefs, dx12: on/off; memory: auto/low/medium/high/ultra/unlimited;
 #                      updates: on/off; mousespeed: one of MOUSE_SPEEDS; hudpos: one of
 #                      HUD_POSITIONS; fpslimit: one of FPS_LIMITS; dx12driver: one of DX12_DRIVERS)
 #   som.sh rehook      the app's check when it opens (and before Play SWTOR): hook the wrapper
@@ -16,7 +16,8 @@
 #                      it from there)
 #   som.sh end-leftovers  end leftover Wine processes of the engine (only if no launcher,
 #                      game or Wine session runs); install, uninstall and the settings in the
-#                      prefix's registry (retina, physkeys, rawmouse, mousespeed) do it too
+#                      prefix's registry (retina, physkeys, rawmouse, mousespeed, nativefs) do
+#                      it too
 #   som.sh btm-check [window]  the times macOS ended what the launcher left running because it
 #                      is off in Login Items > App Background Activity, in the
 #                      last <window> (24h): exit 0 found, 1 none, 2 the log could not be read
@@ -403,8 +404,8 @@ status() {
 
 # --- Settings (the app's Settings window): $SETTINGS holds them as key=value; the env file,
 # dxvk.conf, the prefix's Mac driver options (RetinaMode; for swtor.exe PhysicalKeyboard,
-# RawMouseWhenCursorHidden, RawMouseGameControllerScale) and the engine's Mac driver are made
-# from it. They survive a reinstall.
+# RawMouseWhenCursorHidden, RawMouseGameControllerScale, NativeFullscreen) and the engine's Mac
+# driver are made from it. They survive a reinstall.
 #   physkeys    "Game keys by keyboard position": swtor.exe gets PhysicalKeyboard=y
 #   rawmouse    "Raw mouse-look": swtor.exe gets RawMouseWhenCursorHidden=y (while the game
 #               hides the cursor: the mouse's own moves, from GCMouse, sent by the driver's
@@ -422,15 +423,20 @@ status() {
 #               starts (SWTOR_FPS_LIMIT_BATTERY=1; the wrapper asks pmset once)
 #   flushcap    "Fewer GPU Batches" (experimental): the wrapper sets d9mt's D9MT_FLUSH_CAP=1 for
 #               the game from SWTOR_FLUSH_CAP=1 in the env file (d9mt #113)
+#   nativefs    "Native fullscreen (own Space)": swtor.exe gets NativeFullscreen=y (the app's Mac
+#               driver moves the game's borderless screen-covering window into a fullscreen Space
+#               of its own); the wrapper turns on the driver's nativefs debug channel for the game
+#               from SWTOR_NATIVE_FULLSCREEN=1 in the env file (its NATIVEFS: lines). Settings
+#               shows it only in development builds, or while it is on (Settings.swift)
 #   dx12        "DirectX 12 (experimental)", development builds only (dx12_on): the wrapper starts
 #               Broadsword's DirectX 12 client, swtor_RC2.exe, instead of swtor.exe
 #   dx12driver  its driver, one of DX12_DRIVERS: gptk (Apple's D3DMetal from the engine, Metal 4
 #               where macOS has it) or gptk-mtl3 (D3DMetal on Metal 3, D3DM_MTL4=0)
 #   dx12fps     "DirectX 12 Frame Rate Limit", development builds only: off or one of FPS_LIMITS;
 #               with a Mullion driver, Mullion's d3d12.preferredMaxFrameRate in env's MULLION_CONFIG
-# With physkeys or rawmouse on, the engine's Mac driver is the app's patched build
+# With physkeys, rawmouse or nativefs on, the engine's Mac driver is the app's patched build
 # (Resources/wine/), else the engine's own (install_winemac).
-SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery flushcap dx12 dx12driver dx12fps"
+SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery flushcap nativefs dx12 dx12driver dx12fps"
 MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
 HUD_POSITIONS="topleft topcenter topright centerleft centered centerright bottomleft bottomcenter bottomright"
 FPS_LIMITS="off 30 40 45 60"
@@ -439,7 +445,7 @@ setting_default() {
   case "$1" in
     retina|gamemode|vsync|updates|rawmouse) echo on ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
-    hud|physkeys|fpslimit|fpsbattery|flushcap|dx12|dx12fps) echo off ;;
+    hud|physkeys|fpslimit|fpsbattery|flushcap|nativefs|dx12|dx12fps) echo off ;;
     dx12driver) echo mullion ;;
     memory) echo auto ;;
     mousespeed) echo 1 ;;
@@ -454,6 +460,7 @@ setting_valid() { # <key> <value>
     retina:on|retina:off|hud:on|hud:off|gamemode:on|gamemode:off|vsync:on|vsync:off) return 0 ;;
     debug:on|debug:off|updates:on|updates:off|physkeys:on|physkeys:off) return 0 ;;
     rawmouse:on|rawmouse:off|fpsbattery:on|fpsbattery:off|flushcap:on|flushcap:off|dx12:on|dx12:off) return 0 ;;
+    nativefs:on|nativefs:off) return 0 ;;
     memory:auto|memory:low|memory:medium|memory:high|memory:ultra|memory:unlimited) return 0 ;;
     mousespeed:*) in_list "$2" "$MOUSE_SPEEDS" && return 0 ;;
     hudpos:*) in_list "$2" "$HUD_POSITIONS" && return 0 ;;
@@ -585,7 +592,7 @@ cmd_set() {
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
   log "---- set $key=$value"
   case "$key" in
-    retina|physkeys|rawmouse|mousespeed|dx12|dx12driver)
+    retina|physkeys|rawmouse|mousespeed|nativefs|dx12|dx12driver)
       # Wine keeps the registry in its wineserver and writes it back on exit
       end_leftovers
       ! running_now || die "Quit the SWTOR launcher and the game to change $([ "$key" = retina ] && echo "Retina mode" || echo "this setting")." ;;
@@ -601,6 +608,9 @@ cmd_set() {
       install_winemac "$(winemac_wanted rawmouse "$value")"
       set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' RawMouseWhenCursorHidden "$([ "$value" = on ] && echo y || echo n)" ;;
     mousespeed) set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' RawMouseGameControllerScale "$value" ;;
+    nativefs)
+      install_winemac "$(winemac_wanted nativefs "$value")"
+      set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' NativeFullscreen "$([ "$value" = on ] && echo y || echo n)" ;;
     dx12|dx12driver) install_mullion "$(mullion_wanted "$key" "$value")" ;;
   esac
   write_settings "$key" "$value"
@@ -891,12 +901,13 @@ install_ntdll() {
 }
 
 # winemac_wanted [<key> <value>]: on if the engine needs the app's Mac driver (game keys by
-# keyboard position or raw mouse-look on; <key> about to be set to <value>), else off
+# keyboard position, raw mouse-look or native fullscreen on: the engine's own driver knows none
+# of their options; <key> about to be set to <value>), else off
 winemac_wanted() {
-  local pk rm
-  pk=$(setting physkeys) rm=$(setting rawmouse)
-  case "${1:-}" in physkeys) pk=$2 ;; rawmouse) rm=$2 ;; esac
-  if [ "$pk" = on ] || [ "$rm" = on ]; then echo on; else echo off; fi
+  local pk rm nf
+  pk=$(setting physkeys) rm=$(setting rawmouse) nf=$(setting nativefs)
+  case "${1:-}" in physkeys) pk=$2 ;; rawmouse) rm=$2 ;; nativefs) nf=$2 ;; esac
+  if [ "$pk" = on ] || [ "$rm" = on ] || [ "$nf" = on ]; then echo on; else echo off; fi
 }
 
 # The engine's Mac driver, three files that go together (the PE sides start the raw mouse
@@ -907,8 +918,8 @@ i386-windows/winemac.drv:$ENGINE_WINEMAC_PE32_SHA256:644"
 
 # install_winemac <on|off>: the engine's Mac driver. On: the app's build of it
 # (Resources/wine/: winemac.so, x86_64-windows/ and i386-windows/winemac.drv; scripts/
-# build-winemac.sh with patches/ in the repository: the PhysicalKeyboard and raw mouse-look
-# options, both off unless the prefix turns them on); off: the engine's own files, kept next
+# build-winemac.sh with patches/ in the repository: the PhysicalKeyboard, raw mouse-look and
+# NativeFullscreen options, all off unless the prefix turns them on); off: the engine's own files, kept next
 # to them as <name>.stock. Only over the engine build the patched one was made from
 # (ENGINE_WINEMAC_*SHA256), so another engine never gets a mismatched driver. The PE sides go
 # first when switching to the app's build and last when switching back (a PE side of the
@@ -931,7 +942,7 @@ install_winemac() {
       f=${e%%:*}
       [ -f "$RES/wine/${f#x86_64-unix/}" ] || die "This app has no Mac driver build ($RES/wine/${f#x86_64-unix/})."
     done
-    say "Installing the app's Mac driver (game keys by keyboard position, raw mouse-look) into the engine"
+    say "Installing the app's Mac driver (game keys by keyboard position, raw mouse-look, native fullscreen) into the engine"
     order="x86_64-windows/winemac.drv i386-windows/winemac.drv x86_64-unix/winemac.so"
   else
     say "Using the engine's own Mac driver"
@@ -1294,12 +1305,13 @@ install_prefix() {
   fi
   say "Updating the prefix for the new engine (wineboot, about a minute)"
   wine_do wineboot -u || { stop_wine; die "Wine could not set up the prefix (details in $LOGS/install.log)."; }
-  say "Setting Wine options: Retina mode, mouse-look fix, game keys by position, raw mouse-look and its speed, d9mt for swtor.exe"
+  say "Setting Wine options: Retina mode, mouse-look fix, game keys by position, raw mouse-look and its speed, native fullscreen, d9mt for swtor.exe"
   wine_do reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d "$([ "$(setting retina)" = on ] && echo y || echo n)" /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\X11 Driver' /v GrabPointer /t REG_SZ /d n /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v PhysicalKeyboard /t REG_SZ /d "$([ "$(setting physkeys)" = on ] && echo y || echo n)" /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v RawMouseWhenCursorHidden /t REG_SZ /d "$([ "$(setting rawmouse)" = on ] && echo y || echo n)" /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v RawMouseGameControllerScale /t REG_SZ /d "$(setting mousespeed)" /f &&
+    wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v NativeFullscreen /t REG_SZ /d "$([ "$(setting nativefs)" = on ] && echo y || echo n)" /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\Mac Driver' /v ThreadCpuStats /t REG_SZ /d y /f &&
     wine_do reg add 'HKCU\Software\Wine\AppDefaults\swtor.exe\DllOverrides' /v d3d9 /t REG_SZ /d native,builtin /f ||
     { stop_wine; die "Wine could not write the settings (details in $LOGS/install.log)."; }
@@ -1508,6 +1520,11 @@ SWTOR_FPS_LIMIT_BATTERY=$([ "$(setting fpsbattery)" = on ] && echo 1 || echo 0)
 # Fewer GPU Batches (1: on, experimental): the wrapper gives the game d9mt's flush cap,
 # D9MT_FLUSH_CAP=1 (weak flush hints don't submit a command buffer mid-frame)
 SWTOR_FLUSH_CAP=$([ "$(setting flushcap)" = on ] && echo 1 || echo 0)
+
+# Native fullscreen (1: on): NativeFullscreen=y for swtor.exe in the prefix, the app's Mac
+# driver; the wrapper turns on the driver's nativefs debug channel for the game (NATIVEFS: lines
+# in wine.log) and names the setting there
+SWTOR_NATIVE_FULLSCREEN=$([ "$(setting nativefs)" = on ] && echo 1 || echo 0)
 
 # At most once a day, when the game starts: look for a newer SWTOR on Mac (a notification
 # if there is one; the app updates itself)

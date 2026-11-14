@@ -78,44 +78,38 @@ Uninstall and every Settings pane.
 
 ## Current version
 
-The current release is [0.1.7.1](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.7.1),
-published on 11 November 2026. Every release lists its changes on the
+The current release is [0.1.8](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.8),
+published on 14 November 2026. Every release lists its changes on the
 [releases page](https://github.com/jdrly/swtor-on-mac/releases) and on
 [swonmac.com](https://swonmac.com).
 
-0.1.7.1 makes new installs work again. athei's release of the Wine engine went offline, so Install
-stopped at the engine's download. The same file, byte for byte, now comes from
-[jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/tag/cx-26.3.0-8), see
-[ADR 0006](docs/adr/0006-engine-downloaded-from-jdrly-wine-engine.md). Collect Logs now also reads
-macOS 27's kernel panic reports, which have a plain-text System Profile after their JSON.
+0.1.8 is the one release that changes the code that compiles the game's shaders on purpose (AIR
+codegen `25fc2491`, no lineage). After the update the game compiles its shaders again, once, and
+Metal rebuilds its pipeline archives. Its graphics driver, d9mt
+[`f5439a6`](https://github.com/jdrly/d9mt/tree/f5439a625c3c30697d53ac658f86801ca6083e7f), brings:
 
-Everything else is 0.1.7. Its graphics driver, d9mt
-[`1d33ea4`](https://github.com/jdrly/d9mt/tree/1d33ea43785a56de329c5ff6583cca65ed3e9cf0), brings:
+- Shaders in the format Apple's toolchain writes for the macOS the game runs on: AIR 2.8 and
+  Metal 4.0 on macOS 26, AIR 2.9 and Metal 4.1 on macOS 27 and later, see
+  [jdrly/d9mt#167](https://github.com/jdrly/d9mt/pull/167).
+- A newer dxbc-spirv ([#168](https://github.com/jdrly/d9mt/pull/168)), and vertex positions in
+  Apple's position-invariance form, so passes that compute the same position land on the same
+  depth ([#172](https://github.com/jdrly/d9mt/pull/172)).
+- Fixed-function drawing fixes: flat shading is honoured, fog whose start and end are equal no
+  longer covers everything, pre-transformed geometry isn't cut by the 3D scene's clip planes, cube and volume textures
+  work, and a wireframe draw is a wireframe, see
+  [#169](https://github.com/jdrly/d9mt/pull/169), [#173](https://github.com/jdrly/d9mt/pull/173)
+  and [#165](https://github.com/jdrly/d9mt/pull/165).
+- Metal's pipeline archives in a folder per AIR codegen and target. The first start deletes the
+  folders earlier versions left behind ([#174](https://github.com/jdrly/d9mt/pull/174)).
 
-- Fewer ways for the GPU to fault: empty texture slots get an empty texture of the kind the shader
-  expects, vertex reads and draw counts stay inside the game's buffers, every pipeline is resident,
-  and a copy after a render pass waits for its vertex work. None of these is proven to be the cause
-  of the GPU faults a few players saw.
-- No flickering anti-aliasing lines on M1–M4 Macs: lossless texture compression is off for
-  anti-aliased textures there, see [jdrly/d9mt#140](https://github.com/jdrly/d9mt/pull/140).
-- A suspected fix for a startup crash on an M1 Mac with macOS 26.1: pipelines are described to
-  Metal without unused vertex buffer slots and colour outputs, see
-  [jdrly/d9mt#156](https://github.com/jdrly/d9mt/pull/156) and
-  [#157](https://github.com/jdrly/d9mt/pull/157).
-- Clearer logs: a `D9MT-GPU-ERROR` line when the GPU fails a frame and a `D9MT-FATAL` line that names
-  where a crash happened, see [jdrly/d9mt#134](https://github.com/jdrly/d9mt/pull/134) and
-  [#155](https://github.com/jdrly/d9mt/pull/155).
+[docs/building.md](docs/building.md#d9mt-pin) lists everything the pin brings, the switches that
+are off by default included.
 
-Updating from 0.1.6 keeps your compiled shaders: the code that compiles them is unchanged (AIR
-codegen `38243f7b`, lineage 0.1.5.1). Metal rebuilds some of its own pipelines once after the
-update. The app adds the *Fewer GPU Batches (Experimental)* setting, and Collect Logs adds
-extracts of macOS's system reports and a side-by-side view of the last few game starts.
-
-`main` is building 0.1.8, the one release that changes the code that compiles the game's shaders
-on purpose (AIR codegen `25fc2491`, no lineage). After that update the game compiles its shaders
-again, once, and Metal rebuilds its pipeline archives. d9mt deletes the archives earlier versions
-left behind on the first start. [docs/building.md](docs/building.md#d9mt-pin) lists what the
-pinned d9mt brings.
+`main` is building 0.1.9, with d9mt
+[`9b64581`](https://github.com/jdrly/d9mt/tree/9b645818ef07383b1235afe6b06f3deefeafb9e6). It keeps
+0.1.8's shader compiler (AIR codegen `25fc2491`, no lineage), so the shaders compiled with 0.1.8
+stay in the cache and don't compile again after that update. Metal's pipeline archive now survives quitting the game, and the temporary file each quit
+left behind is gone ([jdrly/d9mt#196](https://github.com/jdrly/d9mt/pull/196)).
 
 ## Install
 
@@ -231,6 +225,8 @@ it. If the problem stays after Uninstall, it isn't caused by SWTOR on Mac.
   second into the first mouse-look.
 - With *Game keys by keyboard position* on, keys follow US positions, so on Czech and German
   layouts the game swaps the names of Z and Y.
+- With *Native fullscreen (own Space)* on (development builds), the game isn't drawn while another
+  app is in front, so a recording or stream of it from the same Mac freezes at every Cmd-Tab.
 - Retina Mode and the keyboard and mouse settings can only change while the launcher and the game
   are closed, because they live in Wine's registry.
 - If you open the Cartel Market right after closing it, the game sometimes ignores the press. It
@@ -388,9 +384,12 @@ with these patches:
 - [`patches/winemac-swtor-mouse.patch`](patches/winemac-swtor-mouse.patch), SWTOR's changes to
   those two. It matches the camera speed to the pointer speed set in System Settings and turns
   off the parts SWG needs and SWTOR doesn't.
+- [`patches/winemac-native-fullscreen.patch`](patches/winemac-native-fullscreen.patch), *Native
+  fullscreen (own Space)*: the game's borderless fullscreen window goes into a fullscreen Space of
+  its own and out again, without the size-move messages and waits of a stock transition.
 
-SWTOR on Mac installs the patched Mac driver only while *Game keys by keyboard position* or *Raw
-mouse-look* is on. The build scripts, [`scripts/build-ntdll.sh`](scripts/build-ntdll.sh) and
+SWTOR on Mac installs the patched Mac driver only while *Game keys by keyboard position*, *Raw
+mouse-look* or *Native fullscreen (own Space)* is on. The build scripts, [`scripts/build-ntdll.sh`](scripts/build-ntdll.sh) and
 [`scripts/build-winemac.sh`](scripts/build-winemac.sh), also build an unpatched copy. They check
 that it matches the engine's own file and that the patches change only the functions they target. Upstream Wine has no fix for the `SetCursorPos` mouse-look problem yet, so the mouse
 patches stay.
@@ -430,10 +429,13 @@ against the real install:
 
 `scripts/build-d9mt.sh`, `scripts/build-winemac.sh` and `scripts/build-ntdll.sh` build the
 binaries in `prebuilt/` reproducibly from pinned sources. `build.sh` assembles `dist/SWTOR on
-Mac.app` from a fresh clone and needs Xcode 27. A `v*` tag starts the Release workflow,
-which builds, signs and notarizes the app. The maintainer finishes the Sparkle feed on the Mac
-that holds its EdDSA key, which never leaves that Mac. [docs/building.md](docs/building.md) has the steps, and
-[ADR 0004](docs/adr/0004-releases-in-two-halves.md) the reasons.
+Mac.app` from a fresh clone and needs Xcode 27. Agents build, sign, notarize, check and
+publish every release on my Mac, which holds the signing certificate and Sparkle's EdDSA key,
+with no approval step. Before publishing, a binary-diff gate compares the release's app with the
+release candidate I played and with the last release, and `scripts/release-receipt.sh verify`
+checks the files and the source tree against the build's receipt. No workflow builds or signs a release.
+[docs/building.md](docs/building.md) has the steps, and
+[ADR 0007](docs/adr/0007-releases-from-the-maintainers-mac.md) the reasons.
 
 ## Pinned components
 
@@ -442,11 +444,11 @@ that holds its EdDSA key, which never leaves that Mac. [docs/building.md](docs/b
 | Wine engine `cx-26.3.0-8`, CrossOver 26.3 with Wine 11.0, x86_64 WoW64 | [jdrly/wine-engine cx-26.3.0-8](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-cx-26.3.0-8-macos-x86_64.tar.xz) | `1976c3310a1f8be2f8e9a46fcb524f77b4316df3d281d94af2c8542bef60456d` |
 | Mullion `efee691`, my fork's build, downloaded only by development builds with DirectX 12 on a Mullion driver | [jdrly/mullion swtor-builds](https://github.com/jdrly/mullion/releases/download/swtor-builds/mullion-swtor-efee691fcd12dfa372fa189af362d1e85a3309e5.tar.xz) | `3e2d4405018fc7f3e91180270aef06dab058ce4fa4d2fc9e9d42abf721779ed5` |
 | Sparkle 2.10.0, bundled | [sparkle-project/Sparkle](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0) | `c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c` |
-| d9mt `f5439a6`, bundled in `prebuilt/d9mt` | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/f5439a625c3c30697d53ac658f86801ca6083e7f) | see `prebuilt/d9mt` |
+| d9mt `9b64581`, bundled in `prebuilt/d9mt` | [jdrly/d9mt](https://github.com/jdrly/d9mt/tree/9b645818ef07383b1235afe6b06f3deefeafb9e6) | see `prebuilt/d9mt` |
 | Wine sources for the Mac driver and `ntdll.so`, athei/wine `d23b397` | [athei/wine](https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0), codeload tar.gz; the same archive in [jdrly/wine-engine](https://github.com/jdrly/wine-engine/releases/download/cx-26.3.0-8/wine-d23b39774528237cafe49f9a073286f854b779c0-source.tar.gz) | `7002111d61bbf28e88cc2504080747d27d074907a7e278f6c78cf6cefe09746e` |
 | llvm-mingw 20261006, only to configure that build | [mstorsjo/llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases/tag/20261006) | `a7a19b11048e89372637d26279cdb7c430ed3cf8c1e224310421312bf986ebf6` |
 
-`main` pins d9mt `f5439a6` for 0.1.8. Release 0.1.7.1 was built from `main` with d9mt `1d33ea4`, as was release 0.1.7. Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
+`main` pins d9mt `9b64581` for 0.1.9. Release 0.1.8 was built from `main` with d9mt `f5439a6`. Release 0.1.7.1 was built from `main` with d9mt `1d33ea4`, as was release 0.1.7. Release 0.1.6 was built from `main` with d9mt `b532e9c`. Release 0.1.5.1 was built from the
 `release/0.1.5` branch with the d9mt build it shipped.
 
 ## Documentation

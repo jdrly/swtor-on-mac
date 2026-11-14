@@ -11,7 +11,8 @@ Stock vs patched (does the patch change only what it should?): every function by
 its code size, from the local symbols both rebuilds still have.
 Exits non-zero if the stock rebuild does not match the engine's file in exports, libraries,
 ObjC methods or options, or if the patches change anything outside the keyboard code, the
-mouse and cursor code (the mouse patches) and option parsing.
+mouse and cursor code (the mouse patches), the native fullscreen functions (by name) and
+option parsing.
 """
 import bisect
 import re
@@ -19,19 +20,25 @@ import subprocess
 import sys
 
 OPTIONS = ("CursorClippingLocksWindows", "RetinaMode", "PhysicalKeyboard", "RawMouseWhenCursorHidden",
-           "RawMouseMatchPointerSpeed")
+           "RawMouseMatchPointerSpeed", "NativeFullscreen")
 # what the patches may change: keyboard.c, the option parsing (setup_options, inlined into
 # macdrv_init), the test hook in cocoa_app.m (a block); the mouse patches: mouse.c, the
 # cursor functions of cocoa_app.m, mouse event bookkeeping in cocoa_event.m, the unix call
 # table's new entry and the init handshake (wow64_init), the blocks of those files, and the
-# static inline CoreGraphics helpers (one more copy where the patches use them)
+# static inline CoreGraphics helpers (one more copy where the patches use them); the native
+# fullscreen patch: its decision and helpers in cocoa_window.m (by name) and the block that
+# logs its start
 ALLOWED = re.compile(r"^(_macdrv_compute_keyboard_layout|_macdrv_GetKeyNameText|_macdrv_MapVirtualKeyEx|_us_key_char"
                      r"|_setup_options|_macdrv_init|_macdrv_get_input_source_info"
                      r"|___macdrv_get_input_source_info_block_invoke"
                      r"|_send_mouse_input|_macdrv_(Get|Set)CursorPos|_macdrv_mouse_\w+|_macdrv_(create|release)_event"
                      r"|_macdrv_\w*(raw|cursor|mouse|game_controller)\w*|_\w*(raw_mouse|raw_moves|thread_cpu|gc_calib|gc_mouse)\w*"
                      r"|_find_wineserver|_is_mouse_event_type|_wow64_init|_CG(Rect|Point|Size)\w+"
-                     r"|___macdrv_(set_cursor_position|get_cursor_position|clip_cursor)_block_invoke(_\d+)?)$")
+                     r"|___macdrv_(set_cursor_position|get_cursor_position|clip_cursor)_block_invoke(_\d+)?"
+                     r"|_nfs_(step|qualifies|is_game_fullscreen|displays_allow|exit_reason|facts_equal|wait_until"
+                     r"|reason_name|enter_failed|exit_failed|declined|taken_over|correction|displays_changed)"
+                     r"|_nativefs_(log|rects_close|screen_id|screen_for_rect|wine_rect)"
+                     r"|_macdrv_nativefs_start|___macdrv_nativefs_start_block_invoke)$")
 
 
 def run(*args):
@@ -106,7 +113,7 @@ if set(r) != set(s):
     problems.append(f"ObjC methods differ: {sorted(set(r) ^ set(s))}")
 if ref["options"] != stock["options"]:
     problems.append("registry options differ between the engine and the stock rebuild")
-for o in ("PhysicalKeyboard", "RawMouseWhenCursorHidden", "RawMouseMatchPointerSpeed"):
+for o in ("PhysicalKeyboard", "RawMouseWhenCursorHidden", "RawMouseMatchPointerSpeed", "NativeFullscreen"):
     if not patched["options"][o]:
         problems.append(f"the patched build has no {o} option")
 print("exports:", ref["exports"])
@@ -131,4 +138,5 @@ if not sf:
 if problems:
     print("PROBLEMS:", *problems, sep="\n  ")
     sys.exit(1)
-print("OK: the stock rebuild matches the engine's file; the patches change only the keyboard and mouse code and options")
+print("OK: the stock rebuild matches the engine's file; the patches change only the keyboard, mouse and native "
+      "fullscreen code and options")
