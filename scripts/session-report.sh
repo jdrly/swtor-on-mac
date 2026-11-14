@@ -767,7 +767,7 @@ report() {
   row "PACE seconds" pace_seconds
   row "  Present interval sd" pace_present_sd
   row "  per frame (medians)" pace_frame
-  row "  game thread CPU" pace_cpu
+  row "  process CPU (PACE)" pace_cpu
   row "THREADCPU seconds" threadcpu_seconds
   row "  game process CPU" cpu_process
   row "  its busiest thread" cpu_busiest
@@ -880,7 +880,7 @@ FPS: average|fps_avg|
 Frame time: average (ms)|ft_avg|
 Seconds below 58 fps (%)|below58| pp
 Game process CPU (ms/s, median)|cpu_process_med|
-Game thread CPU (ms/s, median)|pace_cpu_med|
+Process CPU (PACE, ms/s, median)|pace_cpu_med|
 ROWS
   echo "  (one sitting: no significance test. A difference no larger than the drift shows nothing;"
   echo "   a speed claim needs the same A/B/A again on another day)"
