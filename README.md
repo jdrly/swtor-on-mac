@@ -101,7 +101,7 @@ active Space ([#124](https://github.com/jdrly/swtor-on-mac/pull/124)). The launc
 the game without the exception ports it inherited, so Rosetta hands a hardware exception to Wine
 instead of a port whose owner is gone, and the game no longer freezes there
 ([#134](https://github.com/jdrly/swtor-on-mac/pull/134)). The update window sets its own size
-outside AppKit's layout pass, so it no longer makes the app abort on macOS 26
+outside AppKit's layout pass, which removes the likely cause of an abort on macOS 26
 ([#142](https://github.com/jdrly/swtor-on-mac/pull/142)); the update *to* 0.1.9 still runs in the
 older version's window. Collect Logs carries the game's graphics settings, the `[Renderer]` section
 of its `client_settings.ini` ([#143](https://github.com/jdrly/swtor-on-mac/pull/143)). The session report names
