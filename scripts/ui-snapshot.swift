@@ -15,6 +15,8 @@
 //   ui-snapshot bench <frames>                        the warp's drawing alone, off-screen
 //   ui-snapshot alertkeys                             which button Esc and Return press in the Logs collected alert,
 //                                                     and its Discord link
+//   ui-snapshot updateflow [dir]                      the update window through a whole update, on the main
+//                                                     display: CI only (see updateFlow)
 
 import AppKit
 import SwiftUI
@@ -33,8 +35,9 @@ struct UISnapshot {
         case "measure" where args.count == 3: await measure(args[1], seconds: Double(args[2]) ?? 30)
         case "bench" where args.count == 2: bench(frames: Int(args[1]) ?? 300)
         case "alertkeys": await alertKeys()
+        case "updateflow" where args.count <= 2: await updateFlow(args.count == 2 ? URL(fileURLWithPath: args[1]) : nil)
         default:
-          print("usage: ui-snapshot shots <dir> | measure <animating|paused|game|closed> <seconds> | bench <frames> | alertkeys")
+          print("usage: ui-snapshot shots <dir> | measure <animating|paused|game|closed> <seconds> | bench <frames> | alertkeys | updateflow [dir]")
           exit(2)
         }
         exit(0)
@@ -275,6 +278,68 @@ func alertKeys() async {
   }
   let hidden = views.compactMap { $0 as? NSTextField }.filter { $0.isHidden && $0.stringValue == alert.informativeText }.count
   print("Link: \(links.map(\.absoluteString)) over \(hidden) hidden text field")
+}
+
+// The update window (Updates.swift's UpdateWindow, as Sparkle's user driver calls it) through a
+// whole update: checking, found with notes, a download in small chunks, extracting, ready,
+// installing, then held, up to date and an error. It opens on the main display, where the
+// window centres itself, so it runs only on CI (scripts/ui-snapshot.sh updateflow). On macOS 26
+// the window used to resize itself in AppKit's layout pass and abort the app ("needing another
+// Update Constraints in Window pass"); a crash ends this program the same way. Prints the
+// window's size in each state; with a directory, also a PNG of each.
+@MainActor
+func updateFlow(_ dir: URL?) async {
+  NSApp.setActivationPolicy(.regular)
+  if let dir { try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
+  let notes = """
+    ## SWTOR on Mac 0.1.8
+
+    - Fixes a crash when the game starts on some Macs, and the shadows that flickered in some areas.
+    - The Settings window explains each option.
+
+    ## Under the hood
+
+    - d9mt 9b64581.
+    """
+  let start = Date()
+  let update = UpdateWindow(currentVersion: "0.1.7.1", icon: NSApp.applicationIconImage)
+  func step(_ name: String, _ seconds: Double = 1.0) async {
+    await settle(seconds)
+    let win = NSApp.windows.first { $0.title == "Software Update" && $0.isVisible }
+    print(String(format: "%5.1f s  %@  %@", Date().timeIntervalSince(start), name,
+                 win.map { "\(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "no window"))
+    if let dir, let win { capture(win, to: dir.appendingPathComponent("update-\(name).png")) }
+  }
+  update.showChecking(cancel: {})
+  await step("checking")
+  update.showFound(version: "0.1.8", notes: notes, notesFormat: "markdown", readyToInstall: false) { _ in }
+  await step("found")
+  // Sparkle: download started, the length, then the data as it comes
+  update.showDownloading(cancel: {})
+  await step("downloading", 0.3)
+  update.setExpectedLength(180_000_000)
+  for _ in 0..<600 {
+    update.addReceived(300_000)
+    await settle(0.005)
+  }
+  await step("downloaded", 0.3)
+  for i in 0...20 {
+    update.showExtracting(Double(i) / 20)
+    await settle(0.03)
+  }
+  await step("extracting", 0.3)
+  update.showReadyToInstall { _ in }
+  await step("ready")
+  update.showInstalling()
+  await step("installing")
+  update.showHeld()
+  await step("held")
+  update.showUpToDate("SWTOR on Mac 0.1.8 is the latest version.", acknowledge: {})
+  await step("uptodate")
+  update.showError("The update could not be downloaded.", acknowledge: {})
+  await step("failed")
+  update.close()
+  print("update window: the whole flow ran without a crash")
 }
 
 // The installed main window in dark, for comparing the warp's variants.

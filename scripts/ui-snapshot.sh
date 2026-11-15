@@ -19,6 +19,10 @@
 #   scripts/ui-snapshot.sh stillcheck           the window as 0.1.4 ships it (the warp still), in
 #                                                front, no input: one draw at most, then nothing
 #   scripts/ui-snapshot.sh alertkeys            which button Return and Esc press in Collect Logs…'s alert
+#   scripts/ui-snapshot.sh updateflow [dir]     the update window through a whole update (a crash
+#                                                fails it), with a PNG of each state in dir. Its
+#                                                window opens on the main display, so only on CI
+#                                                (the Checks workflow runs it on macOS 26 and 27)
 #   scripts/ui-snapshot.sh build                 only builds .cache/ui-snapshot/UISnapshot.app, for
 #                                                several runs in one with-vd.sh call
 #
@@ -92,5 +96,8 @@ case "${1:-}" in
   idlecheck) WARP="idle=5" exec "$VD" 120 "$B/MacOS/ui-snapshot" measure idle 20 ;;
   stillcheck) exec "$VD" 120 "$B/MacOS/ui-snapshot" measure still 20 ;;
   bench) exec "$B/MacOS/ui-snapshot" "$@" ;;
+  updateflow)
+    [ "${CI:-}" = true ] || { echo "updateflow opens a window on the main display: CI only" >&2; exit 2; }
+    exec "$B/MacOS/ui-snapshot" "$@" ;;
   *) exec "$VD" 600 "$B/MacOS/ui-snapshot" "$@" ;;
 esac
