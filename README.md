@@ -338,6 +338,7 @@ flowchart LR
   diag["~/Library/Logs/DiagnosticReports<br/>crash, hang and spin reports, 7 days"] --> cl
   ulog["macOS unified log<br/>GPU errors, 2 hours; btm-check, 7 days"] --> cl
   llogs["The official launcher's logs"] --> cl
+  gset["The game's client_settings.ini in the app's prefix<br/>its [Renderer] section only"] --> cl
   cl["collect-logs.sh<br/>redaction, then a leak check"] --> zip["SWTOR-on-Mac-logs-date.zip"]
 ```
 

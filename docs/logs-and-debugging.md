@@ -29,7 +29,15 @@ how long each ran and how it ended (exit code or signal), with the game's langua
 come the official launcher's own logs (`launcher-logs/`, from `~/Library/Logs/Star Wars - The
 Old Republic Launcher`) and, in `system-info.txt`, a check of the launcher app: its version,
 bundle id, owner, signature (`codesign --verify --deep --strict`) and any `*.solidpartial`
-files, which a launcher self-update that did not finish leaves behind. Your home folder, user name, account
+files, which a launcher self-update that did not finish leaves behind. `game-graphics-settings.txt`
+has the game's own graphics settings: the `[Renderer]` section of `client_settings.ini` in the
+app's Wine prefix, as `Key = Value` lines with plain values (numbers, words; any other line is
+left out and counted). Nothing else of the game's settings folder goes in: not the `[Game]`
+section (folder paths), the per-account and per-character files, or their names.
+`system-info.txt` names the main ones as the file has them (`GraphicsQuality`, `ShaderSet`,
+`doShadows`, `EnableBloom`, `EnableSSAO`, `AntiAliasingLevel`, `Width`, `Height`, `FullScreen`,
+`D3DFullScreen`; *missing* when the file doesn't have one), or says *none* and why when there is
+no `client_settings.ini` or no `[Renderer]` section. Your home folder, user name, account
 names and e-mail addresses are replaced, serial numbers and device identifiers are left out,
 and the game's command line (the launcher passes the account on it) is never included. Your
 Mac's name is replaced too, and in the launcher's logs its IP and MAC addresses, the launcher's

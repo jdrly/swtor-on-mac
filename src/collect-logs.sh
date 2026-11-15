@@ -17,9 +17,11 @@
 # restarts, kernel panics, the game's resource reports; no other process names, see
 # system_reports; their counts in system-info.txt and session-report.txt) and
 # crash-reports/: macOS's crash, hang and spin reports of the last 7 days for the game, Wine, the
-# official launcher and SWTOR on Mac (see crash_reports), so nobody has to look for them. Never
-# the game's command line (the launcher passes the account name and session on it), nor
-# anything from the Wine prefixes. launcher-logs/: the official launcher's own logs (the end of
+# official launcher and SWTOR on Mac (see crash_reports), so nobody has to look for them.
+# game-graphics-settings.txt: the [Renderer] section of the game's client_settings.ini in the
+# app's prefix (see renderer_settings; its main settings also in system-info.txt). Never the
+# game's command line (the launcher passes the account name and session on it), nor anything
+# else from the Wine prefixes. launcher-logs/: the official launcher's own logs (the end of
 # large ones), with the game's command line, its account names, session tokens and ids, the
 # Mac's name, IP and MAC addresses and home folders taken out as well (see launcher_rules).
 # Every file is redacted on the way in: home folder → ~, user and full name → USER and NAME,
@@ -256,6 +258,32 @@ crash_reports() {
         n=$((n + 1)); total=$((total + size))
       fi
     done
+}
+
+# The game's graphics settings (a visual bug depends on them): the [Renderer] section of
+# client_settings.ini in the app's prefix (its user is crossover, as in som.sh). Nothing else of
+# the settings folder: [Game] holds paths, the other files and their names have the account and
+# character names. Only "key = value" lines, a key of letters, digits and _, a value of
+# letters, digits, spaces and . _ : + - (numbers, true/false, a vendor's name); a line of
+# another form is left out and counted. → $work/renderer ("Key = Value" lines), or a note on
+# why there is none in $work/renderer-none.
+GAME_SETTINGS="$SOM/prefix/drive_c/users/crossover/AppData/Local/SWTOR/swtor/settings/client_settings.ini"
+renderer_settings() {
+  if [ ! -f "$GAME_SETTINGS" ]; then
+    echo "none (no client_settings.ini in the app's prefix)" >"$work/renderer-none"; return 0
+  fi
+  LC_ALL=C awk '
+    { sub(/\r$/, "") }
+    /^[ \t]*\[/ { s = $0; gsub(/[ \t]/, "", s); r = (s == "[Renderer]"); if (r) found = 1; next }
+    !r || /^[ \t]*$/ { next }
+    /^[ \t]*[A-Za-z0-9_]+[ \t]*=[ \t]*[A-Za-z0-9 ._:+-]*$/ {
+      k = $0; sub(/[ \t]*=.*/, "", k); sub(/^[ \t]+/, "", k)
+      v = $0; sub(/^[^=]*=[ \t]*/, "", v); sub(/[ \t]+$/, "", v)
+      print k " = " v; next
+    }
+    { other++ }
+    END { if (other) print "(" other " lines of another form left out)"; exit !found }' "$GAME_SETTINGS" >"$work/renderer" ||
+    { rm -f "$work/renderer"; echo "none (no [Renderer] section in client_settings.ini)" >"$work/renderer-none"; }
 }
 
 # GPU errors: macOS's unified log of the last GPU_HOURS hours (the game's wine.log is written
@@ -792,6 +820,8 @@ for f in "$LAUNCHER_LOGS"/*.log; do
 done
 for f in env settings.conf dxvk.conf install-manifest.json d9mt-ab.env; do add "$SOM/$f"; done
 add "$RES/VERSIONS"
+renderer_settings
+[ ! -f "$work/renderer" ] || { echo "[Renderer]"; cat "$work/renderer"; } | redact >"$out/game-graphics-settings.txt"
 # the last game session in short (Resources/session-report.sh: frame rate, hitches, compile
 # waits, memory, d9mt's render-pass statistics)
 if [ -f "$LOGS/wine.log" ] && [ -x "$RES/session-report.sh" ]; then
@@ -903,6 +933,16 @@ esac
     d && sub(/^UI Looks like: /, "", line) { ui = line }
     d && line == "Main Display: Yes" { main = 1 }
     END { out() }'
+  # the game's settings a visual bug report needs first, as the file has them (missing: not in
+  # it): quality preset, shader set, shadows, bloom, SSAO, anti-aliasing, resolution, fullscreen
+  if [ -f "$work/renderer" ]; then
+    echo "Game graphics settings (client_settings.ini [Renderer], all of it in game-graphics-settings.txt): $(LC_ALL=C awk -F ' = ' '
+      { v[tolower($1)] = $2 }
+      END { n = split("GraphicsQuality ShaderSet doShadows EnableBloom EnableSSAO AntiAliasingLevel Width Height FullScreen D3DFullScreen", k, " ")
+        for (i = 1; i <= n; i++) printf "%s%s=%s", (i > 1 ? ", " : ""), k[i], (tolower(k[i]) in v ? v[tolower(k[i])] : "missing") }' "$work/renderer")"
+  else
+    echo "Game graphics settings: $(cat "$work/renderer-none")"
+  fi
   echo
   echo "Broadsword's Wine (bin, bin-real):"
   for d in bin bin-real; do
