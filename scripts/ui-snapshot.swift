@@ -283,8 +283,8 @@ func alertKeys() async {
 // The update window (Updates.swift's UpdateWindow, as Sparkle's user driver calls it) through a
 // whole update: checking, found with notes, a download in small chunks, extracting, ready,
 // installing, then held, up to date and an error. Prints the window's size in each state; with
-// a directory, also a PNG of each. It fails when the window resizes from inside AppKit's layout
-// pass: on macOS 26 such a resize asked for another constraints pass from within the pass until
+// a directory, also a PNG of each. It fails when the window is not at its content's size in a
+// state, and when it resizes from inside AppKit's layout pass: on macOS 26 such a resize asked for another constraints pass from within the pass until
 // AppKit aborted the app ("needing another Update Constraints in Window pass"). The window opens
 // on the main display, where it centres itself, so this runs only on CI (the Checks workflow).
 @MainActor var resizesInLayout: [String] = []
@@ -315,6 +315,7 @@ func updateFlow(_ dir: URL?) async {
       }
     }
   }
+  var misfits: [String] = []
   let start = Date()
   let update = UpdateWindow(currentVersion: "0.1.7.1", icon: NSApp.applicationIconImage)
   func step(_ name: String, _ seconds: Double = 1.0) async {
@@ -323,6 +324,13 @@ func updateFlow(_ dir: URL?) async {
     print(String(format: "%5.1f s  %@  %@", Date().timeIntervalSince(start), name,
                  win.map { "\(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "no window"))
     if let dir, let win { capture(win, to: dir.appendingPathComponent("update-\(name).png")) }
+    // the window at its content's size: nothing cut off, no empty space
+    if let win, let hosting = win.contentViewController as? NSHostingController<UpdateView> {
+      let content = hosting.sizeThatFits(in: CGSize(width: UpdateView.width, height: 10_000))
+      if abs(win.contentRect(forFrameRect: win.frame).height - content.height) > 0.5 {
+        misfits.append("\(name): window \(win.frame.size), content \(content)")
+      }
+    }
   }
   update.showChecking(cancel: {})
   await step("checking")
@@ -354,12 +362,16 @@ func updateFlow(_ dir: URL?) async {
   await step("failed")
   update.close()
   NotificationCenter.default.removeObserver(observer)
+  guard misfits.isEmpty else {
+    print("update window: not at its content's size in \(misfits.count) states:\n" + misfits.joined(separator: "\n"))
+    exit(1)
+  }
   guard resizesInLayout.isEmpty else {
     print("update window: resized \(resizesInLayout.count) times from inside AppKit's layout pass; the first:")
     print(resizesInLayout[0])
     exit(1)
   }
-  print("update window: the whole flow ran, and the window never resized from inside AppKit's layout pass")
+  print("update window: the whole flow ran, the window fitted its content in each state and never resized from inside AppKit's layout pass")
 }
 
 // The installed main window in dark, for comparing the warp's variants.

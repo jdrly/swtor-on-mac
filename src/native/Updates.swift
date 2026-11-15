@@ -409,7 +409,9 @@ final class UpdateWindow: NSObject, NSWindowDelegate {
       window.isReleasedWhenClosed = false
       window.delegate = self
       // Center at the content's real size; centred while still empty, the window would grow
-      // from there and end up low on the screen.
+      // from there and end up low on the screen. Twice: the title bar's safe area reaches the
+      // content only once the window has a size.
+      fit(window)
       fit(window)
       window.center()
       self.window = window
