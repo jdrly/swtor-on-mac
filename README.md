@@ -404,7 +404,8 @@ Every pull request and every push to `main` runs
 shellcheck and the workflows with actionlint, checks the scripts' syntax under macOS's
 `/bin/bash` 3.2, builds the app on macOS 27 with Xcode 27, checks that every binary in it runs on
 macOS 26, runs the installer in an empty sandbox and runs the fixture checks on the packaged
-app.
+app. It also takes the update window through a whole update on macOS 27 and on macOS 26
+(`ui-snapshot updateflow`, [docs/building.md](docs/building.md)).
 
 The installer's end-to-end test needs the official app, so it runs on a developer's Mac, never
 against the real install:

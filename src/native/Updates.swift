@@ -330,6 +330,7 @@ final class UpdateWindow: NSObject, NSWindowDelegate {
 
   func setExpectedLength(_ expected: UInt64) {
     if case .downloading(let received, _) = model.phase { model.phase = .downloading(received: received, expected: expected) }
+    if let window { fit(window) }  // a progress bar with a length in place of one without
   }
 
   func addReceived(_ length: UInt64) {
@@ -390,9 +391,16 @@ final class UpdateWindow: NSObject, NSWindowDelegate {
 
   private func show(_ phase: UpdateModel.Phase) {
     withAnimation(.smooth) { model.phase = phase }
-    if window == nil {
+    if let window {
+      fit(window)
+    } else {
+      // The window takes no size from SwiftUI (no sizingOptions): fit() sets it, here, outside
+      // AppKit's layout pass. With .preferredContentSize the window resized itself inside that
+      // pass when a state had another height, and on macOS 26 the resize asked for another
+      // constraints pass from within it until AppKit aborted the app (NSException "needing
+      // another Update Constraints in Window pass").
       let hosting = NSHostingController(rootView: UpdateView(model: model))
-      hosting.sizingOptions = [.preferredContentSize]
+      hosting.sizingOptions = []
       let window = NSWindow(contentViewController: hosting)
       window.styleMask = [.titled, .closable, .fullSizeContentView]
       window.titlebarAppearsTransparent = true
@@ -402,12 +410,21 @@ final class UpdateWindow: NSObject, NSWindowDelegate {
       window.delegate = self
       // Center at the content's real size; centred while still empty, the window would grow
       // from there and end up low on the screen.
-      hosting.view.layoutSubtreeIfNeeded()
-      window.setContentSize(hosting.view.fittingSize)
+      fit(window)
       window.center()
       self.window = window
     }
     bringToFront()
+  }
+
+  // The window at the content's size for the current state, its top edge kept in place.
+  private func fit(_ window: NSWindow) {
+    guard let hosting = window.contentViewController as? NSHostingController<UpdateView> else { return }
+    let size = hosting.sizeThatFits(in: CGSize(width: UpdateView.width, height: 10_000))
+    var frame = window.frameRect(forContentRect: CGRect(origin: .zero, size: size))
+    guard frame.size != window.frame.size else { return }
+    frame.origin = CGPoint(x: window.frame.minX, y: window.frame.maxY - frame.height)
+    window.setFrame(frame, display: true)
   }
 
   // The close button: whatever stands for "not now" in the current state.
@@ -421,6 +438,7 @@ final class UpdateWindow: NSObject, NSWindowDelegate {
 }
 
 struct UpdateView: View {
+  static let width: CGFloat = 540
   let model: UpdateModel
 
   var body: some View {
@@ -435,7 +453,7 @@ struct UpdateView: View {
     .padding(.horizontal, 32)
     .padding(.top, 30)
     .padding(.bottom, 24)
-    .frame(width: 540)
+    .frame(width: UpdateView.width)
     .animation(.smooth, value: model.phase)
   }
 }

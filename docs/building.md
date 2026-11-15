@@ -38,7 +38,10 @@
   screenshots of the main window in its states, of Settings, of the Logs collected alert and of
   the notice (`shots`), which keys close that alert (`alertkeys`), and what the warp costs (`measure`,
   `sweep`, `findcost`, `idlecheck`, `stillcheck`: CPU, instructions, the GPU time the GPU driver
-  counts for the process, frames drawn).
+  counts for the process, frames drawn). `updateflow` takes the update window through a whole
+  update as Sparkle drives it, with its size and a screenshot in each state, and fails when the
+  window resizes from inside AppKit's layout pass; its window opens on the main display, so it
+  runs only on CI (the Checks workflow, on macOS 27 and 26).
 - `.github/workflows/checks.yml` lints the scripts and builds the app on GitHub's `xcode-27`
   image (macOS 27 with Xcode 27, a public preview; there is no `macos-27` label). No workflow
   signs, notarizes or builds a release.
