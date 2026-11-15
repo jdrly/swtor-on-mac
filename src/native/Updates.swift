@@ -420,6 +420,9 @@ final class UpdateWindow: NSObject, NSWindowDelegate {
   // The window at the content's size for the current state, its top edge kept in place.
   private func fit(_ window: NSWindow) {
     guard let hosting = window.contentViewController as? NSHostingController<UpdateView> else { return }
+    // the new state and the title bar's safe area in the content first; otherwise this is the
+    // previous state's size
+    hosting.view.layoutSubtreeIfNeeded()
     let size = hosting.sizeThatFits(in: CGSize(width: UpdateView.width, height: 10_000))
     var frame = window.frameRect(forContentRect: CGRect(origin: .zero, size: size))
     guard frame.size != window.frame.size else { return }
