@@ -4,8 +4,9 @@
 # (mullion-session.log; its first line names the commit it came from) behind the wrapper's lines:
 # the renderer from Mullion's header, frame rows from its STATS, a hitch the driver's by
 # inDriverMs, the footprint and swap from DIAG MEM, the removed device, GPU error and stuck
-# command buffer. Then made-up logs: the failed shader and late pipeline totals, a session
-# without Mullion's header, D3DMetal, d9mt's GPU lines, a session on different renderers side by
+# command buffer. Then made-up logs: the failed shader and late pipeline totals, Mullion's
+# present thread with its dropped frames and blocked nextDrawable calls, a session without
+# Mullion's header, D3DMetal, d9mt's GPU lines, a session on different renderers side by
 # side, and an A/B/A of Mullion arms by the driver files line. Needs neither the official app nor
 # Wine. Sourced; check and the counters come from lib.sh.
 #
@@ -62,6 +63,25 @@ fx_session_report_dx12() {
   "$SR" "$R/totals.log" >"$R/totals.txt" 2>&1 || true
   check "dx12 report: failed shaders and late pipelines" eval 'sdx_in "$R/totals.txt" "^  Failed shaders +3 failed \(convert:2,metal:1\), 41 draws skipped, 3 dumped$" && sdx_in "$R/totals.txt" "^  Late pipelines +15 made after the first Present, 452 ms in all, the longest 88\.1 ms$"'
   check "dx12 report: no failed shader or late pipeline rows without their lines" eval '! grep -E "Failed shaders|Late pipelines" "$R/mullion.txt" >/dev/null'
+
+  # 3b. Mullion's presents (fork #37, #40): its present thread, the frames it dropped, and the
+  # nextDrawable calls of 50 ms or more (each line, and those its limiter left out)
+  { cat "$R/mullion.log"
+    echo 'info:  Mullion: present thread=1'
+    echo 'mullion: nextDrawable blocked 1200 ms got=1 visibility=0x0 at=20:00:34.712'
+    echo 'mullion: nextDrawable blocked 1193 ms got=1 visibility=0x1 at=20:00:41.020'
+    echo 'mullion: nextDrawable blocked 51 ms got=0 visibility=unknown at=20:00:50.004 [4 earlier lines suppressed]'
+    echo 'info:  Mullion: present dropped=11 since=1203 drawableMs=1200 at=20:00:34.713'
+    echo 'info:  Mullion: present dropped=2 since=1000 drawableMs=31 at=20:00:35.714'; } >"$R/present.log"
+  "$SR" "$R/present.log" >"$R/present.txt" 2>&1 || true
+  check "dx12 report: Mullion's present thread, its dropped frames and the blocked nextDrawable calls" \
+    eval 'sdx_in "$R/present.txt" "^  Present thread \(Mullion\) +on: the drawables off the commit thread \(MULLION_PRESENT_THREAD=1\)$" && sdx_in "$R/present.txt" "^  nextDrawable waits of 50 ms or more +7 \(the longest 1200 ms\)$" && sdx_in "$R/present.txt" "^  Frames the present thread dropped +13 frames \(the longest wait for a drawable 1200 ms\)$"'
+  check "dx12 report: the present lines change no frame or hitch row" \
+    eval '[ "$(grep -vE "^SWTOR on Mac session report: |^  (Present thread|nextDrawable waits|Frames the present thread)" "$R/present.txt")" = "$(grep -v "^SWTOR on Mac session report: " "$R/mullion.txt")" ]'
+  sed 's/Mullion: present thread=1/Mullion: present thread=0/' "$R/present.log" >"$R/present-off.log"
+  check "dx12 report: the present thread off (MULLION_PRESENT_THREAD=0)" \
+    eval '"$SR" "$R/present-off.log" | grep -E "^  Present thread \(Mullion\) +off: the drawables on the commit thread \(MULLION_PRESENT_THREAD=0\)$" >/dev/null'
+  check "dx12 report: no present rows without their lines" eval '! grep -E "Present thread|nextDrawable waits|present thread dropped" "$R/mullion.txt" >/dev/null'
 
   # 4. Mullion without its header (Debug Logging off): the wrapper's line names the build
   sdx_head "$SDX_MULLION" >"$R/plain.log"

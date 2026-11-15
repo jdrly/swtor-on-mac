@@ -65,6 +65,10 @@
 #                 multisampled textures before Apple10 (M1 to M4; fork #18)
 #   The shader cache keys on the first two: the first start with one of them on converts the
 #   game's shaders again.
+# And the one Mullion switch the pinned build has on, to compare against the code before it:
+#   mullion-present-off   MULLION_PRESENT_THREAD=0: a present takes its drawable on the queue's
+#                 commit thread again, as before fork #40, which brings back the ~1.2 s fence
+#                 stall at a switch away from the game's Space (the DirectX 12 crash there)
 #
 # SWTOR_ON_MAC_ROOT=/abs/dir: a sandbox (as for som.sh).
 set -euo pipefail
@@ -148,6 +152,7 @@ for a in "$@"; do
     mullion-check-ranges) add "$a"; var 'MULLION_D3D12_CHECK_RANGES=1' ;;
     mullion-reset-waits) add "$a"; var 'MULLION_D3D12_RESET_WAITS=1' ;;
     mullion-msaa-auto) add "$a"; var 'MULLION_TEX_MSAA_COMPRESSION=auto' ;;
+    mullion-present-off) add "$a"; var 'MULLION_PRESENT_THREAD=0' ;;
     *) echo "Unknown switch: $a" >&2; usage ;;
   esac
 done

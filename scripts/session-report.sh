@@ -81,7 +81,10 @@
 #             "Mullion: mac" header (Debug Logging on), and STATS, HITCH, COMPILE and DIAG MEM in
 #             d9mt's form (HITCH's driver share is inDriverMs, its categories included; DIAG MEM
 #             adds the process footprint and the swap), MULLION-DEVICE-REMOVED, MULLION-GPU-ERROR,
-#             MULLION-GPU-HUNG, MULLION-SHADER-TOTALS and MULLION-PIPELINE-TOTALS. My fork's builds
+#             MULLION-GPU-HUNG, MULLION-SHADER-TOTALS and MULLION-PIPELINE-TOTALS; its present
+#             thread's "Mullion: present thread=" and "present dropped=" lines (fork #40) and the
+#             bridge's "mullion: nextDrawable blocked" line (fork #37: the Mac held the drawable
+#             50 ms or more, as at a switch away from the game's Space). My fork's builds
 #             since its window lines (fork #24) write d9mt's MtlPresenter visibility line; older
 #             ones log no visibility (every second counts as shown, no mark); D3DMetal logs no numbers
 #
@@ -317,6 +320,21 @@ analyze() {
     / MULLION-DEVICE-REMOVED at=/ {
       ndrm++
       if (drm1 == "") drm1 = sprintf("%s, cause %s, frame %s", field("reason"), field("cause"), field("frame"))
+      next
+    }
+    # Mullion'"'"'s presents (fork #37, #40): a nextDrawable of 50 ms or more (each line, and those
+    # its limiter left out; the longest of the lines written), whether the presenter'"'"'s thread
+    # took the drawables, and the frames it dropped (at most one line a second)
+    /(^| )mullion: nextDrawable blocked [0-9]+ ms/ {
+      ndb += 1 + suppressed()
+      l = $0; sub(/.*mullion: nextDrawable blocked /, "", l); sub(/ .*/, "", l)
+      if (num(l) > dbmax) dbmax = num(l)
+      next
+    }
+    / Mullion: present thread=[01]/ { pthr = index($0, "present thread=1") ? "on" : "off"; next }
+    / Mullion: present dropped=[0-9]/ {
+      npd += num(field("dropped"))
+      if (num(field("drawableMs")) > pdmax) pdmax = num(field("drawableMs"))
       next
     }
     # Mullion'"'"'s totals: failed shaders at the end (the last line counts), and the pipelines made
@@ -660,6 +678,10 @@ analyze() {
       if (ngerr) printf "gpu_errors=%d (the first: %s)\n", ngerr, gerr1
       if (nhung) printf "gpu_hung=%d (the first: %s)\n", nhung, hung1
       if (glost) printf "gpu_lost=%d command buffers\n", glost
+      if (pthr == "on") print "present_thread=on: the drawables off the commit thread (MULLION_PRESENT_THREAD=1)"
+      else if (pthr == "off") print "present_thread=off: the drawables on the commit thread (MULLION_PRESENT_THREAD=0)"
+      if (ndb) printf "drawable_blocked=%d (the longest %d ms)\n", ndb, dbmax
+      if (npd) printf "present_dropped=%d frames (the longest wait for a drawable %d ms)\n", npd, pdmax
       if (shtot != "") print "shaders_failed=" shtot
       if (npt) printf "pipelines_late=%d made after the first Present, %.0f ms in all, the longest %.1f ms\n", ptlate, ptms, ptmax
       printf "hitches=%d\n", nh
@@ -873,6 +895,9 @@ report() {
   row "GPU errors (command buffers)" gpu_errors
   row "Stuck command buffers (GPU hung)" gpu_hung
   row "GPU work lost (d9mt's canary)" gpu_lost
+  row "Present thread (Mullion)" present_thread
+  row "nextDrawable waits of 50 ms or more" drawable_blocked
+  row "Frames the present thread dropped" present_dropped
   row "Failed shaders" shaders_failed
   row "Late pipelines" pipelines_late
   row "Render passes per frame" rp

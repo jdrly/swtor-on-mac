@@ -69,7 +69,9 @@ they differ from releases in four ways:
   pinned build leaves off: `mullion-guard-static` (`MULLION_D3D12_GUARD_STATIC_RANGES=1`),
   `mullion-check-ranges` (`MULLION_D3D12_CHECK_RANGES=1`), `mullion-reset-waits`
   (`MULLION_D3D12_RESET_WAITS=1`) and `mullion-msaa-auto` (`MULLION_TEX_MSAA_COMPRESSION=auto`;
-  see [Settings](settings.md#directx-12-experimental-development-builds)), and `air-legacy` (`D9MT_AIR_LEGACY=1`, d9mt #167: the game's shaders in the AIR
+  see [Settings](settings.md#directx-12-experimental-development-builds)), `mullion-present-off`
+  (`MULLION_PRESENT_THREAD=0`: Mullion's presents take their drawable on the queue's commit
+  thread again, as before fork #40, for an A/B of the Space-switch fix), and `air-legacy` (`D9MT_AIR_LEGACY=1`, d9mt #167: the game's shaders in the AIR
   format d9mt wrote before 0.1.8, for a Mac where the format of its macOS fails. It gets a
   shader cache and pipeline archives of its own in `d9mt-ab/air-legacy`, or `cold=<name>`'s,
   and keeps them from start to start: a cache file holds one format's shaders and drops the
