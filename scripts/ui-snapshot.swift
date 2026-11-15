@@ -301,13 +301,14 @@ func updateFlow(_ dir: URL?) async {
 
     - d9mt 9b64581.
     """
+  if let screen = NSScreen.main { print("main display \(screen.frame.size), scale \(screen.backingScaleFactor)") }
   let start = Date()
   let update = UpdateWindow(currentVersion: "0.1.7.1", icon: NSApp.applicationIconImage)
   func step(_ name: String, _ seconds: Double = 1.0) async {
     await settle(seconds)
     let win = NSApp.windows.first { $0.title == "Software Update" && $0.isVisible }
     print(String(format: "%5.1f s  %@  %@", Date().timeIntervalSince(start), name,
-                 win.map { "\(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "no window"))
+                 win.map { "\($0.frame.width)x\($0.frame.height) at \($0.frame.origin.x),\($0.frame.origin.y), scale \($0.backingScaleFactor)" } ?? "no window"))
     if let dir, let win { capture(win, to: dir.appendingPathComponent("update-\(name).png")) }
   }
   update.showChecking(cancel: {})

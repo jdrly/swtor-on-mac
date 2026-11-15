@@ -150,6 +150,10 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ui-snapshot
@@ -159,12 +163,28 @@ jobs:
         run: |
           sw_vers
           tar -xzf "$RUNNER_TEMP/ui-snapshot.tgz" -C "$RUNNER_TEMP"
-          "$RUNNER_TEMP/UISnapshot.app/Contents/MacOS/ui-snapshot" updateflow "$RUNNER_TEMP/update-window/macos-26"
+          clang -fobjc-arc -framework Foundation -framework CoreGraphics -o "$RUNNER_TEMP/retina-display" scripts/retina-display.m
+          snap="$RUNNER_TEMP/UISnapshot.app/Contents/MacOS/ui-snapshot"
+          echo "=== 1x"
+          "$snap" updateflow "$RUNNER_TEMP/update-window/macos-26-1x"
+          for size in "1470 956" "1280 832"; do
+            echo "=== Retina $size"
+            # shellcheck disable=SC2086
+            "$RUNNER_TEMP/retina-display" $size >"$RUNNER_TEMP/rd.out" &
+            rd=$!
+            for _ in $(seq 50); do grep -q '' "$RUNNER_TEMP/rd.out" && break; sleep 0.2; done
+            cat "$RUNNER_TEMP/rd.out"
+            grep -q '^ready' "$RUNNER_TEMP/rd.out"
+            status=0
+            "$snap" updateflow "$RUNNER_TEMP/update-window/macos-26-${size// /x}" || status=$?
+            kill "$rd"; wait "$rd" || true
+            [ "$status" = 0 ] || { echo "updateflow ended with $status"; exit "$status"; }
+          done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: update-window-macos-26
-          path: ${{ runner.temp }}/update-window/macos-26
+          path: ${{ runner.temp }}/update-window
           retention-days: 7
           if-no-files-found: ignore
