@@ -282,13 +282,16 @@ func alertKeys() async {
 
 // The update window (Updates.swift's UpdateWindow, as Sparkle's user driver calls it) through a
 // whole update: checking, found with notes, a download in small chunks, extracting, ready,
-// installing, then held, up to date and an error. It opens on the main display, where the
-// window centres itself, so it runs only on CI (scripts/ui-snapshot.sh updateflow). On macOS 26
-// the window used to resize itself in AppKit's layout pass and abort the app ("needing another
-// Update Constraints in Window pass"); a crash ends this program the same way. Prints the
-// window's size in each state; with a directory, also a PNG of each.
+// installing, then held, up to date and an error. Prints the window's size in each state; with
+// a directory, also a PNG of each. It fails when the window resizes from inside AppKit's layout
+// pass: on macOS 26 such a resize asked for another constraints pass from within the pass until
+// AppKit aborted the app ("needing another Update Constraints in Window pass"). The window opens
+// on the main display, where it centres itself, so this runs only on CI (the Checks workflow).
+@MainActor var resizesInLayout: [String] = []
+
 @MainActor
 func updateFlow(_ dir: URL?) async {
+  guard ProcessInfo.processInfo.environment["CI"] == "true" else { fail("updateflow opens a window on the main display: CI only") }
   NSApp.setActivationPolicy(.regular)
   if let dir { try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
   let notes = """
@@ -301,14 +304,24 @@ func updateFlow(_ dir: URL?) async {
 
     - d9mt 9b64581.
     """
-  if let screen = NSScreen.main { print("main display \(screen.frame.size), scale \(screen.backingScaleFactor)") }
+  // AppKit's frames on the way from its layout pass to a window resize (the crash's backtrace)
+  let layoutPass = ["_changeWindowFrameFromConstraintsIfNecessary", "DisplayCycleObserverForLayout"]
+  let observer = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: nil, queue: nil) { note in
+    let stack = Thread.callStackSymbols
+    MainActor.assumeIsolated {
+      guard let win = note.object as? NSWindow, win.title == "Software Update" else { return }
+      if stack.contains(where: { line in layoutPass.contains { line.contains($0) } }) {
+        resizesInLayout.append("to \(win.frame.size):\n" + stack.prefix(30).joined(separator: "\n"))
+      }
+    }
+  }
   let start = Date()
   let update = UpdateWindow(currentVersion: "0.1.7.1", icon: NSApp.applicationIconImage)
   func step(_ name: String, _ seconds: Double = 1.0) async {
     await settle(seconds)
     let win = NSApp.windows.first { $0.title == "Software Update" && $0.isVisible }
     print(String(format: "%5.1f s  %@  %@", Date().timeIntervalSince(start), name,
-                 win.map { "\($0.frame.width)x\($0.frame.height) at \($0.frame.origin.x),\($0.frame.origin.y), scale \($0.backingScaleFactor)" } ?? "no window"))
+                 win.map { "\(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "no window"))
     if let dir, let win { capture(win, to: dir.appendingPathComponent("update-\(name).png")) }
   }
   update.showChecking(cancel: {})
@@ -319,8 +332,8 @@ func updateFlow(_ dir: URL?) async {
   update.showDownloading(cancel: {})
   await step("downloading", 0.3)
   update.setExpectedLength(180_000_000)
-  for _ in 0..<600 {
-    update.addReceived(300_000)
+  for _ in 0..<200 {
+    update.addReceived(900_000)
     await settle(0.005)
   }
   await step("downloaded", 0.3)
@@ -340,7 +353,13 @@ func updateFlow(_ dir: URL?) async {
   update.showError("The update could not be downloaded.", acknowledge: {})
   await step("failed")
   update.close()
-  print("update window: the whole flow ran without a crash")
+  NotificationCenter.default.removeObserver(observer)
+  guard resizesInLayout.isEmpty else {
+    print("update window: resized \(resizesInLayout.count) times from inside AppKit's layout pass; the first:")
+    print(resizesInLayout[0])
+    exit(1)
+  }
+  print("update window: the whole flow ran, and the window never resized from inside AppKit's layout pass")
 }
 
 // The installed main window in dark, for comparing the warp's variants.

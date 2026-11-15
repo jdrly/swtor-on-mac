@@ -120,22 +120,22 @@ jobs:
       - name: fixtures
         run: FIXTURE_ROOT="$RUNNER_TEMP/fixtures" scripts/test-fixtures.sh "dist/SWTOR on Mac.app"
 
-      # The update window through a whole update (scripts/ui-snapshot.sh updateflow): here on
-      # macOS 27, and built here for the update-window job on macOS 26, where the window once
-      # aborted the app.
-      - name: Update window (macOS 27)
+      # The update window through a whole update (ui-snapshot updateflow, scripts/ui-snapshot.sh):
+      # here on macOS 27, and built here for the update-window job on macOS 26, where the window
+      # once aborted the app.
+      - name: Build the update window check
         run: |
-          scripts/ui-snapshot.sh updateflow "$RUNNER_TEMP/update-window/macos-27"
+          scripts/ui-snapshot.sh build
           tar -C .cache/ui-snapshot -czf "$RUNNER_TEMP/ui-snapshot.tgz" UISnapshot.app
-          tar -C dist -czf "$RUNNER_TEMP/app.tgz" "SWTOR on Mac.app"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-snapshot
-          path: |
-            ${{ runner.temp }}/ui-snapshot.tgz
-            ${{ runner.temp }}/app.tgz
+          path: ${{ runner.temp }}/ui-snapshot.tgz
           retention-days: 3
+
+      - name: Update window (macOS 27)
+        run: .cache/ui-snapshot/UISnapshot.app/Contents/MacOS/ui-snapshot updateflow "$RUNNER_TEMP/update-window/macos-27"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
@@ -153,10 +153,6 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ui-snapshot
@@ -166,72 +162,12 @@ jobs:
         run: |
           sw_vers
           tar -xzf "$RUNNER_TEMP/ui-snapshot.tgz" -C "$RUNNER_TEMP"
-          clang -fobjc-arc -framework Foundation -framework CoreGraphics -o "$RUNNER_TEMP/retina-display" scripts/retina-display.m
-          snap="$RUNNER_TEMP/UISnapshot.app/Contents/MacOS/ui-snapshot"
-          echo "=== 1x"
-          "$snap" updateflow "$RUNNER_TEMP/update-window/macos-26-1x"
-          # EXPERIMENT: the real app (sandbox) with a local feed offering 9.9.9, per display size
-          tar -xzf "$RUNNER_TEMP/app.tgz" -C "$RUNNER_TEMP"
-          mkdir -p "$RUNNER_TEMP/feed"
-          cat >"$RUNNER_TEMP/feed/appcast.xml" <<'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-          <channel><title>test</title>
-          <item><title>9.9.9</title><sparkle:version>9.9.9</sparkle:version><sparkle:shortVersionString>9.9.9</sparkle:shortVersionString>
-          <description><![CDATA[<h2>Test</h2><ul><li>One change.</li><li>Another change.</li></ul>]]></description>
-          <enclosure url="http://127.0.0.1:8000/x.dmg" length="1000" type="application/octet-stream" sparkle:edSignature="AAAA"/>
-          </item></channel></rss>
-          XML
-          (cd "$RUNNER_TEMP/feed" && exec python3 -m http.server 8000 --bind 127.0.0.1) >/dev/null 2>&1 &
-          app="$RUNNER_TEMP/SWTOR on Mac.app/Contents/MacOS/SWTORonMac"
-          for size in "1024 666" "1280 832" "1470 956"; do
-            echo "=== app, Retina $size"
-            # shellcheck disable=SC2086
-            "$RUNNER_TEMP/retina-display" $size >"$RUNNER_TEMP/rd.out" &
-            rd=$!
-            for _ in $(seq 50); do grep -q '' "$RUNNER_TEMP/rd.out" && break; sleep 0.2; done
-            cat "$RUNNER_TEMP/rd.out"
-            d=cz.jandrly.swtoronmac
-            defaults write $d SWTORUpdateFeedURL http://127.0.0.1:8000/appcast.xml
-            defaults write $d acceptedNotice -bool true
-            defaults write $d SUHasLaunchedBefore -bool true
-            defaults write $d SULastCheckTime -date "2020-01-01 00:00:00 +0000"
-            defaults delete $d SUSkippedVersion 2>/dev/null || true
-            rm -rf "$RUNNER_TEMP/sandbox"; mkdir -p "$RUNNER_TEMP/sandbox"
-            SWTOR_ON_MAC_ROOT="$RUNNER_TEMP/sandbox" "$app" >"$RUNNER_TEMP/app.log" 2>&1 &
-            a=$!
-            for _ in $(seq 45); do kill -0 "$a" 2>/dev/null || break; sleep 1; done
-            if kill -0 "$a" 2>/dev/null; then echo "app still running after 45 s"; screencapture -x "$RUNNER_TEMP/update-window/app-${size// /x}.png" || true; kill "$a"; wait "$a" || true
-            else wait "$a"; echo "APP EXITED: $?"; fi
-            grep -E "SWTOR on Mac:|Terminating|reason|exception" "$RUNNER_TEMP/app.log" | head -20
-            kill "$rd"; wait "$rd" || true
-          done
-          find ~/Library/Logs/DiagnosticReports -name 'SWTORonMac*' 2>/dev/null
-          mkdir -p "$RUNNER_TEMP/update-window"
-          echo "=== harness, Retina 1024 666"
-          "$RUNNER_TEMP/retina-display" 1024 666 >"$RUNNER_TEMP/rd.out" &
-          rd=$!
-          sleep 3; cat "$RUNNER_TEMP/rd.out"
-          "$snap" updateflow "$RUNNER_TEMP/update-window/macos-26-1024x666" || echo "HARNESS EXITED: $?"
-          kill "$rd"; wait "$rd" || true
-          for size in "1470 956" "1280 832"; do
-            echo "=== Retina $size"
-            # shellcheck disable=SC2086
-            "$RUNNER_TEMP/retina-display" $size >"$RUNNER_TEMP/rd.out" &
-            rd=$!
-            for _ in $(seq 50); do grep -q '' "$RUNNER_TEMP/rd.out" && break; sleep 0.2; done
-            cat "$RUNNER_TEMP/rd.out"
-            grep -q '^ready' "$RUNNER_TEMP/rd.out"
-            status=0
-            "$snap" updateflow "$RUNNER_TEMP/update-window/macos-26-${size// /x}" || status=$?
-            kill "$rd"; wait "$rd" || true
-            [ "$status" = 0 ] || { echo "updateflow ended with $status"; exit "$status"; }
-          done
+          "$RUNNER_TEMP/UISnapshot.app/Contents/MacOS/ui-snapshot" updateflow "$RUNNER_TEMP/update-window/macos-26"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: update-window-macos-26
-          path: ${{ runner.temp }}/update-window
+          path: ${{ runner.temp }}/update-window/macos-26
           retention-days: 7
           if-no-files-found: ignore
