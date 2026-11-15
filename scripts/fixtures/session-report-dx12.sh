@@ -103,9 +103,11 @@ fx_session_report_dx12() {
   "$SR" "$R/resetwait.log" >"$R/resetwait.txt" 2>&1 || true
   check "dx12 report: Mullion's allocator waits summed, and its textures line (the last device's)" \
     eval 'sdx_in "$R/resetwait.txt" "^  Allocator resets that waited +4 waits, 12 ms in all, the longest 7\.0 ms \(2 allocators\)$" && sdx_in "$R/resetwait.txt" "^  Textures \(Mullion\) +compression=metal msaa=off msaaSwitch=auto apple10=no$"'
+  # MULLION-RESET-WAIT lines but no RESETWAIT section: Debug Logging off, or (on) a Reset that
+  # never returned or a session that ended before the next STATS line; the report can't tell
   grep -v "RESETWAIT waits=" "$R/resetwait.log" >"$R/resetwait-nostats.log"
-  check "dx12 report: allocator waits without STATS (Debug Logging off): the allocators only" \
-    eval '"$SR" "$R/resetwait-nostats.log" | grep -E "^  Allocator resets that waited +2 allocators waited \(their times are in STATS: Debug Logging off\)$" >/dev/null'
+  check "dx12 report: MULLION-RESET-WAIT lines without a RESETWAIT section: the allocators only, no times, no guess why" \
+    eval '"$SR" "$R/resetwait-nostats.log" >"$R/resetwait-nostats.txt" 2>&1; sdx_in "$R/resetwait-nostats.txt" "^  Allocator resets that waited +2 allocators waited \(no RESETWAIT timing samples logged\)$" && ! grep -q "Debug Logging off" "$R/resetwait-nostats.txt"'
   check "dx12 report: no allocator wait or textures row without their lines" eval '! grep -E "Allocator resets|Textures \(Mullion\)" "$R/mullion.txt" >/dev/null'
 
   # 4. Mullion without its header (Debug Logging off): the wrapper's line names the build

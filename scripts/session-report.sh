@@ -696,7 +696,7 @@ analyze() {
       if (ndb) printf "drawable_blocked=%d (the longest logged wait %d ms)\n", ndb, dbmax
       if (npd) printf "present_dropped=%d frames (the longest wait for a drawable %d ms)\n", npd, pdmax
       if (rwn) printf "reset_waits=%d waits, %.0f ms in all, the longest %.1f ms%s\n", rwn, rwms, rwmax, (rwalloc ? sprintf(" (%d allocator%s)", rwalloc, (rwalloc > 1 ? "s" : "")) : "")
-      else if (rwalloc) printf "reset_waits=%d allocator%s waited (their times are in STATS: Debug Logging off)\n", rwalloc, (rwalloc > 1 ? "s" : "")
+      else if (rwalloc) printf "reset_waits=%d allocator%s waited (no RESETWAIT timing samples logged)\n", rwalloc, (rwalloc > 1 ? "s" : "")
       if (mtex != "") print "textures=" mtex
       if (shtot != "") print "shaders_failed=" shtot
       if (npt) printf "pipelines_late=%d made after the first Present, %.0f ms in all, the longest %.1f ms\n", ptlate, ptms, ptmax
