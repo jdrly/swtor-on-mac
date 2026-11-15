@@ -8,8 +8,8 @@
 #
 # Groups (default: all): session-report (the suite's section 6f: the packaged session-report.sh on
 # a sample log); session-report-dx12 (session-report.sh on a DirectX 12 session: a copy of my
-# Mullion fork's sample log, D3DMetal, d9mt's GPU lines, different renderers side by side; only
-# here); field-kit (what a before/after field test reads: session-report.sh's
+# Mullion fork's sample log, its present thread's lines, D3DMetal, d9mt's GPU lines, different
+# renderers side by side; only here); field-kit (what a before/after field test reads: session-report.sh's
 # measurement, interval, missing percentiles and A/B/A, the wrapper's lines at a game start,
 # Collect Logs' comparison of the kept starts; only here); job-sandbox (the suite's end under a job runner, on planted sandboxes, with copies
 # that fail; only here, so the suite's counts stay); orphan-as (the suite's orphan_as: argv[0]

@@ -3,7 +3,7 @@
 # reads d9mt-ab.env as a development build's does, in a sandbox root of its own, without the app,
 # Wine or a game start. The checks read what the game would get, by sourcing that env. Fixture
 # group d9mt-ab (scripts/test-fixtures.sh only) covers the air-legacy switch and its own caches,
-# and Mullion's safety switches;
+# and Mullion's switches;
 # the other switches are checked by scripts/test-sandbox.sh's section 4d on an installed
 # development build. Sourced; check and its counters come from lib.sh.
 
@@ -69,6 +69,13 @@ fx_d9mt_ab() {
   fx_ab mullion-check-ranges
   check "d9mt-ab: mullion-check-ranges alone: the other three off again ($FX_RC)" \
     eval '[ "$FX_RC" = 0 ] && [ "$(fx_ab_env MULLION_D3D12_GUARD_STATIC_RANGES)/$(fx_ab_env MULLION_D3D12_CHECK_RANGES)/$(fx_ab_env MULLION_D3D12_RESET_WAITS)/$(fx_ab_env MULLION_TEX_MSAA_COMPRESSION)" = "<unset>/1/<unset>/<unset>" ]'
+  # the present thread, on in the pinned build: mullion-present-off turns it off, and only it
+  fx_ab mullion-present-off
+  check "d9mt-ab: mullion-present-off: MULLION_PRESENT_THREAD=0, named, the safety switches unset ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_ab_env MULLION_PRESENT_THREAD)" = 0 ] && [ "$(fx_ab_env SWTOR_D9MT_AB)" = mullion-present-off ] && [ "$(fx_ab_env MULLION_D3D12_CHECK_RANGES)" = "<unset>" ]'
+  fx_ab mullion-check-ranges
+  check "d9mt-ab: without mullion-present-off: no MULLION_PRESENT_THREAD, the build's default ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_ab_env MULLION_PRESENT_THREAD)" = "<unset>" ]'
 
   fx_ab air-legacy
   fx_ab reset
