@@ -15,6 +15,8 @@
 //   ui-snapshot bench <frames>                        the warp's drawing alone, off-screen
 //   ui-snapshot alertkeys                             which button Esc and Return press in the Logs collected alert,
 //                                                     and its Discord link
+//   ui-snapshot updateflow [dir]                      the update window through a whole update, on the main
+//                                                     display: CI only (see updateFlow)
 
 import AppKit
 import SwiftUI
@@ -33,8 +35,9 @@ struct UISnapshot {
         case "measure" where args.count == 3: await measure(args[1], seconds: Double(args[2]) ?? 30)
         case "bench" where args.count == 2: bench(frames: Int(args[1]) ?? 300)
         case "alertkeys": await alertKeys()
+        case "updateflow" where args.count <= 2: await updateFlow(args.count == 2 ? URL(fileURLWithPath: args[1]) : nil)
         default:
-          print("usage: ui-snapshot shots <dir> | measure <animating|paused|game|closed> <seconds> | bench <frames> | alertkeys")
+          print("usage: ui-snapshot shots <dir> | measure <animating|paused|game|closed> <seconds> | bench <frames> | alertkeys | updateflow [dir]")
           exit(2)
         }
         exit(0)
@@ -275,6 +278,103 @@ func alertKeys() async {
   }
   let hidden = views.compactMap { $0 as? NSTextField }.filter { $0.isHidden && $0.stringValue == alert.informativeText }.count
   print("Link: \(links.map(\.absoluteString)) over \(hidden) hidden text field")
+}
+
+// The update window (Updates.swift's UpdateWindow, as Sparkle's user driver calls it) through a
+// whole update: checking, found with notes, a download in small chunks, extracting, ready,
+// installing, then held, up to date and an error. Prints the window's size in each state; with
+// a directory, also a PNG of each. It fails when the window is missing or not at its content's
+// size in a state, and when it resizes from inside AppKit's layout pass: aborts of 0.1.7.1 on
+// macOS 26 ("needing another Update Constraints in Window pass") came from such a resize, most
+// likely this window's. The window opens on the main display, where it centres itself, so this
+// runs only on CI (the Checks workflow).
+@MainActor var resizesInLayout: [String] = []
+
+@MainActor
+func updateFlow(_ dir: URL?) async {
+  guard ProcessInfo.processInfo.environment["CI"] == "true" else { fail("updateflow opens a window on the main display: CI only") }
+  NSApp.setActivationPolicy(.regular)
+  if let dir { try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
+  let notes = """
+    ## SWTOR on Mac 0.1.8
+
+    - Fixes a crash when the game starts on some Macs, and the shadows that flickered in some areas.
+    - The Settings window explains each option.
+
+    ## Under the hood
+
+    - d9mt 9b64581.
+    """
+  // AppKit's frames on the way from its layout pass to a window resize (the crash's backtrace)
+  let layoutPass = ["_changeWindowFrameFromConstraintsIfNecessary", "DisplayCycleObserverForLayout"]
+  let observer = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: nil, queue: nil) { note in
+    let stack = Thread.callStackSymbols
+    MainActor.assumeIsolated {
+      guard let win = note.object as? NSWindow, win.title == "Software Update" else { return }
+      if stack.contains(where: { line in layoutPass.contains { line.contains($0) } }) {
+        resizesInLayout.append("to \(win.frame.size):\n" + stack.prefix(30).joined(separator: "\n"))
+      }
+    }
+  }
+  var misfits: [String] = []
+  let start = Date()
+  let update = UpdateWindow(currentVersion: "0.1.7.1", icon: NSApp.applicationIconImage)
+  func step(_ name: String, _ seconds: Double = 1.0) async {
+    await settle(seconds)
+    let win = NSApp.windows.first { $0.title == "Software Update" && $0.isVisible }
+    print(String(format: "%5.1f s  %@  %@", Date().timeIntervalSince(start), name,
+                 win.map { "\(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "no window"))
+    if let dir, let win { capture(win, to: dir.appendingPathComponent("update-\(name).png")) }
+    // the window at its content's size: nothing cut off, no empty space
+    guard let win, let hosting = win.contentViewController as? NSHostingController<UpdateView> else {
+      misfits.append("\(name): no update window")
+      return
+    }
+    let content = hosting.sizeThatFits(in: CGSize(width: UpdateView.width, height: 10_000))
+    if abs(win.contentRect(forFrameRect: win.frame).height - content.height) > 0.5 {
+      misfits.append("\(name): window \(win.frame.size), content \(content)")
+    }
+  }
+  update.showChecking(cancel: {})
+  await step("checking")
+  update.showFound(version: "0.1.8", notes: notes, notesFormat: "markdown", readyToInstall: false) { _ in }
+  await step("found")
+  // Sparkle: download started, the length, then the data as it comes
+  update.showDownloading(cancel: {})
+  await step("downloading", 0.3)
+  update.setExpectedLength(180_000_000)
+  for _ in 0..<200 {
+    update.addReceived(900_000)
+    await settle(0.005)
+  }
+  await step("downloaded", 0.3)
+  for i in 0...20 {
+    update.showExtracting(Double(i) / 20)
+    await settle(0.03)
+  }
+  await step("extracting", 0.3)
+  update.showReadyToInstall { _ in }
+  await step("ready")
+  update.showInstalling()
+  await step("installing")
+  update.showHeld()
+  await step("held")
+  update.showUpToDate("SWTOR on Mac 0.1.8 is the latest version.", acknowledge: {})
+  await step("uptodate")
+  update.showError("The update could not be downloaded.", acknowledge: {})
+  await step("failed")
+  update.close()
+  NotificationCenter.default.removeObserver(observer)
+  guard misfits.isEmpty else {
+    print("update window: missing or not at its content's size in \(misfits.count) states:\n" + misfits.joined(separator: "\n"))
+    exit(1)
+  }
+  guard resizesInLayout.isEmpty else {
+    print("update window: resized \(resizesInLayout.count) times from inside AppKit's layout pass; the first:")
+    print(resizesInLayout[0])
+    exit(1)
+  }
+  print("update window: the whole flow ran, the window fitted its content in each state and never resized from inside AppKit's layout pass")
 }
 
 // The installed main window in dark, for comparing the warp's variants.
