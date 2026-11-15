@@ -52,23 +52,25 @@
 #                 cache file keeps one format's shaders and drops the other's. A d9mt before
 #                 #167 (the pin of 0.1.7 and older) doesn't read the variable.
 #
-# Mullion's safety switches, for DirectX 12 on a Mullion driver (docs/settings.md): my fork's
-# build has each off until it is measured on a Mac, and these turn it on for the next starts.
+# Mullion's switches, for DirectX 12 on a Mullion driver (docs/settings.md). Two safety
+# switches my fork's build has off until each is measured on a Mac; these turn one on for the
+# next starts:
 #   mullion-guard-static  MULLION_D3D12_GUARD_STATIC_RANGES=1: shaders keep the bounds checks
 #                 of buffer views in static descriptor ranges (fork #16)
 #   mullion-check-ranges  MULLION_D3D12_CHECK_RANGES=1: a copy, view, root view, descriptor
 #                 index or ExecuteIndirect that runs past its resource is dropped or clamped
 #                 (fork #20, #23, #25, #29-#31)
-#   mullion-reset-waits   MULLION_D3D12_RESET_WAITS=1: a command allocator's Reset waits for
-#                 the lists still on the GPU (fork #17)
-#   mullion-msaa-auto     MULLION_TEX_MSAA_COMPRESSION=auto: no lossless compression for
-#                 multisampled textures before Apple10 (M1 to M4; fork #18)
-#   The shader cache keys on the first two: the first start with one of them on converts the
+#   The shader cache keys on these two: the first start with one of them on converts the
 #   game's shaders again.
-# And the one Mullion switch the pinned build has on, to compare against the code before it:
+# And the ones the pinned build has on; these turn one off, to compare against the code before it:
 #   mullion-present-off   MULLION_PRESENT_THREAD=0: a present takes its drawable on the queue's
 #                 commit thread again, as before fork #40, which brings back the ~1.2 s fence
 #                 stall at a switch away from the game's Space (the DirectX 12 crash there)
+#   mullion-reset-waits-off  MULLION_D3D12_RESET_WAITS=0: a command allocator's Reset with
+#                 lists still on the GPU resets at once again, as before fork #44 (fork #17's
+#                 wait off)
+#   mullion-msaa-compress  MULLION_TEX_MSAA_COMPRESSION=1: multisampled textures keep Metal's
+#                 lossless compression before Apple10 (M1 to M4) again, as before fork #44
 #
 # SWTOR_ON_MAC_ROOT=/abs/dir: a sandbox (as for som.sh).
 set -euo pipefail
@@ -150,8 +152,8 @@ for a in "$@"; do
     air-legacy) add "$a"; var 'D9MT_AIR_LEGACY=1'; legacy=1 ;;
     mullion-guard-static) add "$a"; var 'MULLION_D3D12_GUARD_STATIC_RANGES=1' ;;
     mullion-check-ranges) add "$a"; var 'MULLION_D3D12_CHECK_RANGES=1' ;;
-    mullion-reset-waits) add "$a"; var 'MULLION_D3D12_RESET_WAITS=1' ;;
-    mullion-msaa-auto) add "$a"; var 'MULLION_TEX_MSAA_COMPRESSION=auto' ;;
+    mullion-reset-waits-off) add "$a"; var 'MULLION_D3D12_RESET_WAITS=0' ;;
+    mullion-msaa-compress) add "$a"; var 'MULLION_TEX_MSAA_COMPRESSION=1' ;;
     mullion-present-off) add "$a"; var 'MULLION_PRESENT_THREAD=0' ;;
     *) echo "Unknown switch: $a" >&2; usage ;;
   esac
