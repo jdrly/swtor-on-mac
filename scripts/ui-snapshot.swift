@@ -284,8 +284,8 @@ func alertKeys() async {
 // whole update: checking, found with notes, a download in small chunks, extracting, ready,
 // installing, then held, up to date and an error. Prints the window's size in each state; with
 // a directory, also a PNG of each. It fails when the window is missing or not at its content's
-// size in a state, and when it resizes from inside AppKit's layout pass: three aborts of 0.1.7.1
-// on macOS 26 ("needing another Update Constraints in Window pass") came from such a resize, most
+// size in a state, and when it resizes from inside AppKit's layout pass: aborts of 0.1.7.1 on
+// macOS 26 ("needing another Update Constraints in Window pass") came from such a resize, most
 // likely this window's. The window opens on the main display, where it centres itself, so this
 // runs only on CI (the Checks workflow).
 @MainActor var resizesInLayout: [String] = []
