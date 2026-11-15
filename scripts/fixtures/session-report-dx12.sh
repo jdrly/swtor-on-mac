@@ -5,7 +5,8 @@
 # the renderer from Mullion's header, frame rows from its STATS, a hitch the driver's by
 # inDriverMs, the footprint and swap from DIAG MEM, the removed device, GPU error and stuck
 # command buffer. Then made-up logs: the failed shader and late pipeline totals, Mullion's
-# present thread with its dropped frames and blocked nextDrawable calls, a session without
+# present thread with its dropped frames and blocked nextDrawable calls, its allocator waits and
+# textures line, a session without
 # Mullion's header, D3DMetal, d9mt's GPU lines, a session on different renderers side by
 # side, and an A/B/A of Mullion arms by the driver files line. Needs neither the official app nor
 # Wine. Sourced; check and the counters come from lib.sh.
@@ -89,6 +90,23 @@ fx_session_report_dx12() {
   check "dx12 report: the present thread off (MULLION_PRESENT_THREAD=0)" \
     eval '"$SR" "$R/present-off.log" | grep -E "^  Present thread \(Mullion\) +off: the drawables on the commit thread \(MULLION_PRESENT_THREAD=0\)$" >/dev/null'
   check "dx12 report: no present rows without their lines" eval '! grep -E "Present thread|nextDrawable waits|present thread dropped" "$R/mullion.txt" >/dev/null'
+
+  # 3c. Mullion's allocator waits (MULLION_D3D12_RESET_WAITS, on since fork #44): STATS's RESETWAIT
+  # section summed, the allocators from MULLION-RESET-WAIT; and its textures line, the last one
+  { cat "$R/mullion.log"
+    echo 'info:  Mullion: textures compression=metal msaa=metal msaaSwitch=1 apple10=no'
+    echo 'warn:  MULLION-RESET-WAIT at=20:00:12.004 type=direct lists=1 frame=410 allocator=1'
+    echo 'warn:  RESETWAIT waits=3 ms=4.5 longestMs=2.5'
+    echo 'warn:  MULLION-RESET-WAIT at=20:00:20.112 type=compute lists=2 frame=901 allocator=2'
+    echo 'warn:  RESETWAIT waits=1 ms=7.0 longestMs=7.0'
+    echo 'info:  Mullion: textures compression=metal msaa=off msaaSwitch=auto apple10=no'; } >"$R/resetwait.log"
+  "$SR" "$R/resetwait.log" >"$R/resetwait.txt" 2>&1 || true
+  check "dx12 report: Mullion's allocator waits summed, and its textures line (the last device's)" \
+    eval 'sdx_in "$R/resetwait.txt" "^  Allocator resets that waited +4 waits, 12 ms in all, the longest 7\.0 ms \(2 allocators\)$" && sdx_in "$R/resetwait.txt" "^  Textures \(Mullion\) +compression=metal msaa=off msaaSwitch=auto apple10=no$"'
+  grep -v "RESETWAIT waits=" "$R/resetwait.log" >"$R/resetwait-nostats.log"
+  check "dx12 report: allocator waits without STATS (Debug Logging off): the allocators only" \
+    eval '"$SR" "$R/resetwait-nostats.log" | grep -E "^  Allocator resets that waited +2 allocators waited \(their times are in STATS: Debug Logging off\)$" >/dev/null'
+  check "dx12 report: no allocator wait or textures row without their lines" eval '! grep -E "Allocator resets|Textures \(Mullion\)" "$R/mullion.txt" >/dev/null'
 
   # 4. Mullion without its header (Debug Logging off): the wrapper's line names the build
   sdx_head "$SDX_MULLION" >"$R/plain.log"
