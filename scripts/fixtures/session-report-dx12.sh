@@ -65,8 +65,9 @@ fx_session_report_dx12() {
   check "dx12 report: no failed shader or late pipeline rows without their lines" eval '! grep -E "Failed shaders|Late pipelines" "$R/mullion.txt" >/dev/null'
 
   # 3b. Mullion's presents (fork #37, #40): its present thread, the frames it dropped, and the
-  # nextDrawable calls of 50 ms or more (each line, and those its limiter left out)
-  { cat "$R/mullion.log"
+  # nextDrawable calls of 50 ms or more (each line, and those its limiter left out), behind the
+  # sample session with a drawableMs in its 120 ms HITCH (the fork's sample since #37)
+  { sed 's/ encodeMs=2\.1 behind=2 / encodeMs=2.1 drawableMs=1149.3 behind=2 /' "$R/mullion.log"
     echo 'info:  Mullion: present thread=1'
     echo 'mullion: nextDrawable blocked 1200 ms got=1 visibility=0x0 at=20:00:34.712'
     echo 'mullion: nextDrawable blocked 1193 ms got=1 visibility=0x1 at=20:00:41.020'
@@ -75,9 +76,15 @@ fx_session_report_dx12() {
     echo 'info:  Mullion: present dropped=2 since=1000 drawableMs=31 at=20:00:35.714'; } >"$R/present.log"
   "$SR" "$R/present.log" >"$R/present.txt" 2>&1 || true
   check "dx12 report: Mullion's present thread, its dropped frames and the blocked nextDrawable calls" \
-    eval 'sdx_in "$R/present.txt" "^  Present thread \(Mullion\) +on: the drawables off the commit thread \(MULLION_PRESENT_THREAD=1\)$" && sdx_in "$R/present.txt" "^  nextDrawable waits of 50 ms or more +7 \(the longest 1200 ms\)$" && sdx_in "$R/present.txt" "^  Frames the present thread dropped +13 frames \(the longest wait for a drawable 1200 ms\)$"'
-  check "dx12 report: the present lines change no frame or hitch row" \
-    eval '[ "$(grep -vE "^SWTOR on Mac session report: |^  (Present thread|nextDrawable waits|Frames the present thread)" "$R/present.txt")" = "$(grep -v "^SWTOR on Mac session report: " "$R/mullion.txt")" ]'
+    eval 'sdx_in "$R/present.txt" "^  Present thread \(Mullion\) +on: the drawables off the commit thread \(MULLION_PRESENT_THREAD=1\)$" && sdx_in "$R/present.txt" "^  nextDrawable waits of 50 ms or more +7 \(the longest logged wait 1200 ms\)$" && sdx_in "$R/present.txt" "^  Frames the present thread dropped +13 frames \(the longest wait for a drawable 1200 ms\)$"'
+  check "dx12 report: the present lines and a HITCH's drawableMs (planted: $(grep -c " drawableMs=1149\.3 behind=2 " "$R/present.log") line) change no frame or hitch row" \
+    eval '[ "$(grep -c " HITCH .* drawableMs=1149\.3 behind=2 " "$R/present.log")" = 1 ] && [ "$(grep -vE "^SWTOR on Mac session report: |^  (Present thread|nextDrawable waits|Frames the present thread)" "$R/present.txt")" = "$(grep -v "^SWTOR on Mac session report: " "$R/mullion.txt")" ]'
+  # the longest wait is the longest of the lines written: the limiter's lines carry no time
+  { sdx_head "$SDX_MULLION"
+    echo 'mullion: nextDrawable blocked 51 ms got=1 visibility=0x0 at=20:00:34.712'
+    echo 'mullion: nextDrawable blocked 52 ms got=1 visibility=0x0 at=20:00:44.800 [1 earlier lines suppressed]'; } >"$R/present-supp.log"
+  check "dx12 report: a wait among the limiter's lines has no time: 3 waits, the longest logged one 52 ms" \
+    eval '"$SR" "$R/present-supp.log" | grep -E "^  nextDrawable waits of 50 ms or more +3 \(the longest logged wait 52 ms\)$" >/dev/null'
   sed 's/Mullion: present thread=1/Mullion: present thread=0/' "$R/present.log" >"$R/present-off.log"
   check "dx12 report: the present thread off (MULLION_PRESENT_THREAD=0)" \
     eval '"$SR" "$R/present-off.log" | grep -E "^  Present thread \(Mullion\) +off: the drawables on the commit thread \(MULLION_PRESENT_THREAD=0\)$" >/dev/null'

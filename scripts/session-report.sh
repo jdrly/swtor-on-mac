@@ -680,7 +680,7 @@ analyze() {
       if (glost) printf "gpu_lost=%d command buffers\n", glost
       if (pthr == "on") print "present_thread=on: the drawables off the commit thread (MULLION_PRESENT_THREAD=1)"
       else if (pthr == "off") print "present_thread=off: the drawables on the commit thread (MULLION_PRESENT_THREAD=0)"
-      if (ndb) printf "drawable_blocked=%d (the longest %d ms)\n", ndb, dbmax
+      if (ndb) printf "drawable_blocked=%d (the longest logged wait %d ms)\n", ndb, dbmax
       if (npd) printf "present_dropped=%d frames (the longest wait for a drawable %d ms)\n", npd, pdmax
       if (shtot != "") print "shaders_failed=" shtot
       if (npt) printf "pipelines_late=%d made after the first Present, %.0f ms in all, the longest %.1f ms\n", ptlate, ptms, ptmax
