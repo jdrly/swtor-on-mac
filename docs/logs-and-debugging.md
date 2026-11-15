@@ -143,8 +143,9 @@ switches cost on DirectX 12 has not been measured.
 - with Mullion, its presents: whether its present thread took the drawables
   (`Mullion: present thread=1`, or `=0` with `MULLION_PRESENT_THREAD=0`), the frames that thread
   dropped and its longest wait for a drawable (`Mullion: present dropped=`), and how often macOS
-  held a drawable 50 ms or more, with the longest (`mullion: nextDrawable blocked`, as at a
-  switch away from the game's Space, and the lines its limiter left out);
+  held a drawable 50 ms or more, with the longest logged wait (`mullion: nextDrawable blocked`,
+  as at a switch away from the game's Space; the count includes the lines its limiter left out,
+  which carry no time, so a longer wait among them isn't seen);
 - render passes and the attachment traffic d9mt saved, and (0.0.6 and later) the
   render thread's CPU time in that optimization and the clears per frame, to tell its cost
   apart from compile waits (a cold shader cache);
