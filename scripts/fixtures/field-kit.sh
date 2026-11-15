@@ -6,8 +6,9 @@
 # side and the A/B/A over the last three; the wrapper's settings, conditions and d9mt files lines
 # on stand-ins; Collect Logs on planted logs: one zip with every kept game start side by side,
 # each start's first lines kept when its log is cut, and no account name, home folder or path in
-# what this adds. Needs neither the official app nor Wine. Sourced; check, piped and the counters
-# come from lib.sh.
+# what this adds; the game's graphics settings, only client_settings.ini's [Renderer] section,
+# and one line when there is no section or no file. Needs neither the official app nor Wine.
+# Sourced; check, piped and the counters come from lib.sh.
 #
 #   fx_field_kit <app> <wine-wrapper.sh> <folder>
 
@@ -254,6 +255,17 @@ SL
   : >"$som/prefix/drive_c/users/u/AppData/Local/SWTOR/swtor/settings/${acct}_Account.ini"
   cp "$R/a.log" "$L/wine.log.2"; cp "$R/b.log" "$L/wine.log.1"; cp "$R/a2.log" "$L/wine.log"
   echo "warn:  something about $acct" >>"$L/wine.log.1"
+  # the game's settings in the app's prefix (user crossover): client_settings.ini (CRLF, as the
+  # game writes it) with its [Renderer] section, a value of another form, an account name, and a
+  # [Game] section with paths; a per-account and a per-character file beside it
+  local gs="$som/prefix/drive_c/users/crossover/AppData/Local/SWTOR/swtor/settings" gsi
+  gsi="$gs/client_settings.ini"
+  mkdir -p "$gs/GUIProfiles"
+  printf '%s\r\n' '[Renderer]' 'GraphicsQuality = 3' 'ShaderSet = 2' 'doShadows = true' 'EnableBloom = false' \
+    'EnableSSAO = true' 'AntiAliasingLevel = 4' 'Width = 1728' 'Height = 1117' 'FullScreen = true' \
+    'InfoGraphicsVendor = Apple '"$acct" 'FkOdd = C:\users\crossover\FkOddSentinel' '' \
+    '[Game]' 'MoviesFolder = C:\users\crossover\Videos\FkMoviesSentinel' 'SwtorRegKey = FkRegKeySentinel' >"$gsi"
+  : >"$gs/${acct}_Account.ini"; : >"$gs/he4000_Fkcharsentinel_PlayerGUIState.ini"; : >"$gs/GUIProfiles/FkGuiSentinel.xml"
   { fk_head 0.1.7-dev.2 1111111 "2026-11-01 19:00:00"
     LC_ALL=C awk 'BEGIN { for (t = 1; t <= 9000; t++) printf "warn:  STATS t=%d fps=60.0 ms=16.7/17.0/17.5 slow33=0 slow50=0 | rp=1.0 skip=0.0 cb=1.0 draws=1500 | ld=0.0 clr=0.0 ldDc=0.0 st=0.0 stDc=0.0 rsv=0.0 restore=0.0 savedMiB=0.0 attMs=0.1 clrFold=0.0 clrPass=0.0 | sh=0 pso=0 wait=0/0.0ms | allocMiB=100 att=on%400s\n", t, "" }'
   } >"$L/wine.log.3"
@@ -270,7 +282,15 @@ SL
   check "collect: the account name replaced in the logs and the comparison" eval '! grep -rqF "$acct" "$zd" && grep -q "something about ACCOUNT" "$zd/logs/wine.log.1"'
   check "collect: no home folder, nothing left out" eval '! grep -rqF "$HOME/" "$zd" && ! grep -rqF "$H/" "$zd" && [ ! -e "$zd/left-out.txt" ]'
   check "collect: the thermal warnings now" fk_in "$zd/system-info.txt" '^Thermal and performance warnings now \(pmset -g therm\): '
+  check "collect: the game's graphics settings: [Renderer] alone, redacted, the line of another form counted" eval '[ "$(cat "$zd/game-graphics-settings.txt")" = "$(printf "%s\n" "[Renderer]" "GraphicsQuality = 3" "ShaderSet = 2" "doShadows = true" "EnableBloom = false" "EnableSSAO = true" "AntiAliasingLevel = 4" "Width = 1728" "Height = 1117" "FullScreen = true" "InfoGraphicsVendor = Apple ACCOUNT" "(1 lines of another form left out)")" ]'
+  check "collect: nothing else of the settings folder: no [Game], no other file or its name" eval '! LC_ALL=C grep -r -q -e FkOddSentinel -e FkMoviesSentinel -e FkRegKeySentinel -e MoviesFolder -e SwtorRegKey -e "\[Game\]" -e Fkcharsentinel -e FkGuiSentinel -e PlayerGUIState "$zd" && [ "$(cd "$zd" && find . -name "*.ini" -o -name "*.xml" -o -name GUIProfiles)" = "" ]'
+  check "collect: system info names the main graphics settings, a missing one as missing" fk_in "$zd/system-info.txt" '^Game graphics settings \(client_settings\.ini \[Renderer\], all of it in game-graphics-settings\.txt\): GraphicsQuality=3, ShaderSet=2, doShadows=true, EnableBloom=false, EnableSSAO=true, AntiAliasingLevel=4, Width=1728, Height=1117, FullScreen=true, D3DFullScreen=missing$'
   rm -f "$L/wine.log.3" "$L/wine.log.2" "$L/wine.log.1"; mkdir -p "$R/zip1"
+  printf '%s\r\n' '[Game]' 'SwtorRegKey = FkRegKeySentinel' >"$gsi"
   z=$(SWTOR_ON_MAC_GPU_TIMEOUT=5 SWTOR_ON_MAC_BTM_TIMEOUT=5 "$app/Contents/Resources/collect-logs.sh" "$R/zip1" 2>>"$R/collect.err" || true)
   check "collect: one start, no comparison" eval '[ -f "$z" ] && ! unzip -l "$z" | piped sessions-compared.txt'
+  check "collect: no [Renderer] section: one line, no settings file" eval '[ -f "$z" ] && ! unzip -l "$z" | piped game-graphics-settings && unzip -p "$z" "*/system-info.txt" | piped -x "Game graphics settings: none (no \[Renderer\] section in client_settings.ini)"'
+  rm -f "$gsi"; mkdir -p "$R/zip2"
+  z=$(SWTOR_ON_MAC_GPU_TIMEOUT=5 SWTOR_ON_MAC_BTM_TIMEOUT=5 "$app/Contents/Resources/collect-logs.sh" "$R/zip2" 2>>"$R/collect.err" || true)
+  check "collect: no client_settings.ini: one line, the zip still made" eval '[ -f "$z" ] && ! unzip -l "$z" | piped game-graphics-settings && unzip -p "$z" "*/system-info.txt" | piped -x "Game graphics settings: none (no client_settings.ini in the app.s prefix)"'
 }

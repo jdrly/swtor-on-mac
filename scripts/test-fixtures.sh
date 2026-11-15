@@ -9,7 +9,7 @@
 # Groups (default: all): session-report (the suite's section 6f: the packaged session-report.sh on
 # a sample log); field-kit (what a before/after field test reads: session-report.sh's
 # measurement, interval, missing percentiles and A/B/A, the wrapper's lines at a game start,
-# Collect Logs' comparison of the kept starts; only here); job-sandbox (the suite's end under a job runner, on planted sandboxes, with copies
+# Collect Logs' comparison of the kept starts and the game's graphics settings; only here); job-sandbox (the suite's end under a job runner, on planted sandboxes, with copies
 # that fail; only here, so the suite's counts stay); orphan-as (the suite's orphan_as: argv[0]
 # rewritten, and never on the rewriting shell's command line; only here, too); is-launcher (the
 # suite's section 2b call by executable isn't the running launcher to a process scan); eval-exit
