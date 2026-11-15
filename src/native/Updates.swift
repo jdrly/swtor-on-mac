@@ -396,9 +396,9 @@ final class UpdateWindow: NSObject, NSWindowDelegate {
     } else {
       // The window takes no size from SwiftUI (no sizingOptions): fit() sets it, here, outside
       // AppKit's layout pass. With .preferredContentSize the window resized itself inside that
-      // pass when a state had another height, and on macOS 26 the resize asked for another
-      // constraints pass from within it until AppKit aborted the app (NSException "needing
-      // another Update Constraints in Window pass").
+      // pass when a state had another height. On macOS 26 such a resize can ask for another
+      // constraints pass from within the pass until AppKit aborts the app (NSException "needing
+      // another Update Constraints in Window pass"): most likely the aborts of 0.1.7.1 there.
       let hosting = NSHostingController(rootView: UpdateView(model: model))
       hosting.sizingOptions = []
       let window = NSWindow(contentViewController: hosting)

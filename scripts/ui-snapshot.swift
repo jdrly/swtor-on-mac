@@ -283,10 +283,11 @@ func alertKeys() async {
 // The update window (Updates.swift's UpdateWindow, as Sparkle's user driver calls it) through a
 // whole update: checking, found with notes, a download in small chunks, extracting, ready,
 // installing, then held, up to date and an error. Prints the window's size in each state; with
-// a directory, also a PNG of each. It fails when the window is not at its content's size in a
-// state, and when it resizes from inside AppKit's layout pass: on macOS 26 such a resize asked for another constraints pass from within the pass until
-// AppKit aborted the app ("needing another Update Constraints in Window pass"). The window opens
-// on the main display, where it centres itself, so this runs only on CI (the Checks workflow).
+// a directory, also a PNG of each. It fails when the window is missing or not at its content's
+// size in a state, and when it resizes from inside AppKit's layout pass: three aborts of 0.1.7.1
+// on macOS 26 ("needing another Update Constraints in Window pass") came from such a resize, most
+// likely this window's. The window opens on the main display, where it centres itself, so this
+// runs only on CI (the Checks workflow).
 @MainActor var resizesInLayout: [String] = []
 
 @MainActor
@@ -325,11 +326,13 @@ func updateFlow(_ dir: URL?) async {
                  win.map { "\(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "no window"))
     if let dir, let win { capture(win, to: dir.appendingPathComponent("update-\(name).png")) }
     // the window at its content's size: nothing cut off, no empty space
-    if let win, let hosting = win.contentViewController as? NSHostingController<UpdateView> {
-      let content = hosting.sizeThatFits(in: CGSize(width: UpdateView.width, height: 10_000))
-      if abs(win.contentRect(forFrameRect: win.frame).height - content.height) > 0.5 {
-        misfits.append("\(name): window \(win.frame.size), content \(content)")
-      }
+    guard let win, let hosting = win.contentViewController as? NSHostingController<UpdateView> else {
+      misfits.append("\(name): no update window")
+      return
+    }
+    let content = hosting.sizeThatFits(in: CGSize(width: UpdateView.width, height: 10_000))
+    if abs(win.contentRect(forFrameRect: win.frame).height - content.height) > 0.5 {
+      misfits.append("\(name): window \(win.frame.size), content \(content)")
     }
   }
   update.showChecking(cancel: {})
@@ -363,7 +366,7 @@ func updateFlow(_ dir: URL?) async {
   update.close()
   NotificationCenter.default.removeObserver(observer)
   guard misfits.isEmpty else {
-    print("update window: not at its content's size in \(misfits.count) states:\n" + misfits.joined(separator: "\n"))
+    print("update window: missing or not at its content's size in \(misfits.count) states:\n" + misfits.joined(separator: "\n"))
     exit(1)
   }
   guard resizesInLayout.isEmpty else {

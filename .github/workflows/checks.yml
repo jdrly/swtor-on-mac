@@ -121,8 +121,8 @@ jobs:
         run: FIXTURE_ROOT="$RUNNER_TEMP/fixtures" scripts/test-fixtures.sh "dist/SWTOR on Mac.app"
 
       # The update window through a whole update (ui-snapshot updateflow, scripts/ui-snapshot.sh):
-      # here on macOS 27, and built here for the update-window job on macOS 26, where the window
-      # once aborted the app.
+      # here on macOS 27, and built here for the update-window job on macOS 26, where a window
+      # resizing in AppKit's layout pass aborted the app.
       - name: Build the update window check
         run: |
           scripts/ui-snapshot.sh build
@@ -146,8 +146,8 @@ jobs:
           if-no-files-found: ignore
 
   # The update window on macOS 26 (the app's minimum), with the harness the build job compiled
-  # against the macOS 27 SDK, as the app is: there it once ended the app with an uncaught
-  # NSException in AppKit's layout pass.
+  # against the macOS 27 SDK, as the app is: there a window resizing in AppKit's layout pass
+  # ended the app with an uncaught NSException.
   update-window:
     needs: build
     runs-on: macos-26
