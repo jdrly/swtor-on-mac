@@ -19,7 +19,9 @@
 # crash-reports/: macOS's crash, hang and spin reports of the last 7 days for the game, Wine, the
 # official launcher and SWTOR on Mac (see crash_reports), so nobody has to look for them.
 # game-graphics-settings.txt: the [Renderer] section of the game's client_settings.ini in the
-# app's prefix (see renderer_settings; its main settings also in system-info.txt). Never the
+# app's prefix (see renderer_settings; its main settings also in system-info.txt), and
+# game-graphics-settings-dx12.txt: the same of the DirectX 12 client's client_settings_DX12.ini.
+# Never the
 # game's command line (the launcher passes the account name and session on it), nor anything
 # else from the Wine prefixes. launcher-logs/: the official launcher's own logs (the end of
 # large ones), with the game's command line, its account names, session tokens and ids, the
@@ -265,12 +267,16 @@ crash_reports() {
 # the settings folder: [Game] holds paths, the other files and their names have the account and
 # character names. Only "key = value" lines, a key of letters, digits and _, a value of
 # letters, digits, spaces and . _ : + - (numbers, true/false, a vendor's name); a line of
-# another form is left out and counted. → $work/renderer ("Key = Value" lines), or a note on
-# why there is none in $work/renderer-none.
-GAME_SETTINGS="$SOM/prefix/drive_c/users/crossover/AppData/Local/SWTOR/swtor/settings/client_settings.ini"
+# another form is left out and counted. The DirectX 12 client (swtor_RC2.exe) keeps its own,
+# client_settings_DX12.ini beside it (its resolution in DX12_RenderWidth and DX12_RenderHeight),
+# read by the same rules.
+#   renderer_settings <ini> <tag>  → $work/renderer<tag> ("Key = Value" lines), or a note on why
+#                                    there is none in $work/renderer<tag>-none
+GAME_SETTINGS_DIR="$SOM/prefix/drive_c/users/crossover/AppData/Local/SWTOR/swtor/settings"
 renderer_settings() {
-  if [ ! -f "$GAME_SETTINGS" ]; then
-    echo "none (no client_settings.ini in the app's prefix)" >"$work/renderer-none"; return 0
+  local ini="$1" r="$work/renderer$2"
+  if [ ! -f "$ini" ]; then
+    echo "none (no ${ini##*/} in the app's prefix)" >"$r-none"; return 0
   fi
   LC_ALL=C awk '
     { sub(/\r$/, "") }
@@ -282,8 +288,8 @@ renderer_settings() {
       print k " = " v; next
     }
     { other++ }
-    END { if (other) print "(" other " lines of another form left out)"; exit !found }' "$GAME_SETTINGS" >"$work/renderer" ||
-    { rm -f "$work/renderer"; echo "none (no [Renderer] section in client_settings.ini)" >"$work/renderer-none"; }
+    END { if (other) print "(" other " lines of another form left out)"; exit !found }' "$ini" >"$r" ||
+    { rm -f "$r"; echo "none (no [Renderer] section in ${ini##*/})" >"$r-none"; }
 }
 
 # GPU errors: macOS's unified log of the last GPU_HOURS hours (the game's wine.log is written
@@ -821,8 +827,10 @@ for f in "$LAUNCHER_LOGS"/*.log; do
 done
 for f in env settings.conf dxvk.conf install-manifest.json d9mt-ab.env; do add "$SOM/$f"; done
 add "$RES/VERSIONS"
-renderer_settings
+renderer_settings "$GAME_SETTINGS_DIR/client_settings.ini" ""
 [ ! -f "$work/renderer" ] || { echo "[Renderer]"; cat "$work/renderer"; } | redact >"$out/game-graphics-settings.txt"
+renderer_settings "$GAME_SETTINGS_DIR/client_settings_DX12.ini" -dx12
+[ ! -f "$work/renderer-dx12" ] || { echo "[Renderer]"; cat "$work/renderer-dx12"; } | redact >"$out/game-graphics-settings-dx12.txt"
 # the last game session in short (Resources/session-report.sh: frame rate, hitches, compile
 # waits, memory, d9mt's render-pass statistics)
 if [ -f "$LOGS/wine.log" ] && [ -x "$RES/session-report.sh" ]; then
@@ -943,6 +951,15 @@ esac
         for (i = 1; i <= n; i++) printf "%s%s=%s", (i > 1 ? ", " : ""), k[i], (tolower(k[i]) in v ? v[tolower(k[i])] : "missing") }' "$work/renderer")"
   else
     echo "Game graphics settings: $(cat "$work/renderer-none")"
+  fi
+  # ...and the DirectX 12 client's (swtor_RC2.exe), with its resolution first
+  if [ -f "$work/renderer-dx12" ]; then
+    echo "Game graphics settings, DirectX 12 (client_settings_DX12.ini [Renderer], all of it in game-graphics-settings-dx12.txt): $(LC_ALL=C awk -F ' = ' '
+      { v[tolower($1)] = $2 }
+      END { n = split("DX12_RenderWidth DX12_RenderHeight GraphicsQuality ShaderSet doShadows EnableBloom EnableSSAO AntiAliasingLevel Width Height FullScreen D3DFullScreen", k, " ")
+        for (i = 1; i <= n; i++) printf "%s%s=%s", (i > 1 ? ", " : ""), k[i], (tolower(k[i]) in v ? v[tolower(k[i])] : "missing") }' "$work/renderer-dx12")"
+  else
+    echo "Game graphics settings, DirectX 12: $(cat "$work/renderer-dx12-none")"
   fi
   echo
   echo "Broadsword's Wine (bin, bin-real):"

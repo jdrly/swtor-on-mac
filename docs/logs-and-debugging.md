@@ -37,7 +37,11 @@ section (folder paths), the per-account and per-character files, or their names.
 `system-info.txt` names the main ones as the file has them (`GraphicsQuality`, `ShaderSet`,
 `doShadows`, `EnableBloom`, `EnableSSAO`, `AntiAliasingLevel`, `Width`, `Height`, `FullScreen`,
 `D3DFullScreen`; *missing* when the file doesn't have one), or says *none* and why when there is
-no `client_settings.ini` or no `[Renderer]` section. Your home folder, user name, account
+no `client_settings.ini` or no `[Renderer]` section. The DirectX 12 client (`swtor_RC2.exe`)
+keeps its own settings in `client_settings_DX12.ini` beside it, and the same goes for that file:
+its `[Renderer]` section in `game-graphics-settings-dx12.txt`, by the same rules, and a
+*DirectX 12* line in `system-info.txt` with its resolution (`DX12_RenderWidth`,
+`DX12_RenderHeight`) first. Your home folder, user name, account
 names and e-mail addresses are replaced, serial numbers and device identifiers are left out,
 and the game's command line (the launcher passes the account on it) is never included. Your
 Mac's name is replaced too, and in the launcher's logs its IP and MAC addresses, the launcher's

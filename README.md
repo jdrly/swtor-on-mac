@@ -339,6 +339,7 @@ flowchart LR
   ulog["macOS unified log<br/>GPU errors, 2 hours; btm-check, 7 days"] --> cl
   llogs["The official launcher's logs"] --> cl
   gset["The game's client_settings.ini in the app's prefix<br/>its [Renderer] section only"] --> cl
+  gset12["The DirectX 12 client's client_settings_DX12.ini<br/>its [Renderer] section only"] --> cl
   cl["collect-logs.sh<br/>redaction, then a leak check"] --> zip["SWTOR-on-Mac-logs-date.zip"]
 ```
 
