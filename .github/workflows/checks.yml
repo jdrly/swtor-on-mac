@@ -158,3 +158,55 @@ jobs:
       # new root of their own; the script removes it after a pass and keeps it after a failure.
       - name: fixtures
         run: FIXTURE_ROOT="$RUNNER_TEMP/fixtures" scripts/test-fixtures.sh "dist/SWTOR on Mac.app"
+
+      # The update window through a whole update (ui-snapshot updateflow, scripts/ui-snapshot.sh):
+      # here on macOS 27, and built here for the update-window job on macOS 26, where a window
+      # resizing in AppKit's layout pass aborted the app.
+      - name: Build the update window check
+        run: |
+          scripts/ui-snapshot.sh build
+          tar -C .cache/ui-snapshot -czf "$RUNNER_TEMP/ui-snapshot.tgz" UISnapshot.app
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-snapshot
+          path: ${{ runner.temp }}/ui-snapshot.tgz
+          retention-days: 3
+
+      - name: Update window (macOS 27)
+        run: .cache/ui-snapshot/UISnapshot.app/Contents/MacOS/ui-snapshot updateflow "$RUNNER_TEMP/update-window/macos-27"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: update-window-macos-27
+          path: ${{ runner.temp }}/update-window/macos-27
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # The update window on macOS 26 (the app's minimum), with the harness the build job compiled
+  # against the macOS 27 SDK, as the app is: there a window resizing in AppKit's layout pass
+  # ended the app with an uncaught NSException.
+  update-window:
+    needs: build
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ui-snapshot
+          path: ${{ runner.temp }}
+
+      - name: Update window (macOS 26)
+        run: |
+          sw_vers
+          tar -xzf "$RUNNER_TEMP/ui-snapshot.tgz" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/UISnapshot.app/Contents/MacOS/ui-snapshot" updateflow "$RUNNER_TEMP/update-window/macos-26"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: update-window-macos-26
+          path: ${{ runner.temp }}/update-window/macos-26
+          retention-days: 7
+          if-no-files-found: ignore
