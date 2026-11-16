@@ -19,6 +19,12 @@
 #   scripts/ui-snapshot.sh stillcheck           the window as 0.1.4 ships it (the warp still), in
 #                                                front, no input: one draw at most, then nothing
 #   scripts/ui-snapshot.sh alertkeys            which button Return and Esc press in Collect Logs…'s alert
+#   ui-snapshot updateflow [dir]                 (after build, CI only) the update window through a
+#                                                whole update, with a PNG of each state in dir; fails
+#                                                when the window resizes from inside AppKit's layout
+#                                                pass. Its window opens on the main display, so the
+#                                                program refuses it outside CI; the Checks workflow
+#                                                runs it on macOS 27 and 26
 #   scripts/ui-snapshot.sh build                 only builds .cache/ui-snapshot/UISnapshot.app, for
 #                                                several runs in one with-vd.sh call
 #
