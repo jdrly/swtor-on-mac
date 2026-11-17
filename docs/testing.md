@@ -59,7 +59,7 @@ that script records, so the group fails while that id is missing or is 0.1.7's),
 builds' `d9mt-ab.sh air-legacy` on a planted install (group `d9mt-ab`: the game gets
 `D9MT_AIR_LEGACY=1` with a shader cache and pipeline archives of its own, kept from start to
 start, and the variables of Mullion's switches, those that turn one on and those that turn one
-off, with the old `mullion-reset-waits` refused), the release receipt (group `release-receipt`: `scripts/release-receipt.sh` on a planted
+off, with the old `mullion-reset-waits` and `mullion-reset-waits-off` refused), the release receipt (group `release-receipt`: `scripts/release-receipt.sh` on a planted
 git repository and planted release files; each changed input fails verify before a stand-in
 `gh`'s upload, a squash merge's equal tree passes), the version table (group `version-table`:
 release and development versions in order through `build.sh`'s `bundle_version`, the packaged

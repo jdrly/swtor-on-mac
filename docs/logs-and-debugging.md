@@ -158,10 +158,12 @@ switches cost on DirectX 12 has not been measured.
   held a drawable 50 ms or more, with the longest logged wait (`mullion: nextDrawable blocked`,
   as at a switch away from the game's Space; the count includes the lines its limiter left out,
   which carry no time, so a longer wait among them isn't seen);
-- with Mullion, the command allocator resets that waited for their lists
-  (`MULLION_D3D12_RESET_WAITS`: the waits, their time and the longest from `STATS`'s `RESETWAIT`
-  section, and the allocators from `MULLION-RESET-WAIT`), and what multisampled textures got
-  (the `Mullion: textures` line);
+- with Mullion, the command allocator resets with lists still in flight, which hand their
+  recording to the queues (fork #50: the resets and their lists from `STATS`'s `RESETINFLIGHT`
+  section, and the allocators from `MULLION-RESET-IN-FLIGHT`), the interval its presents are
+  paced by (the last `Mullion: present pacing` line, fork #51: the game's interval, or
+  `MULLION_SYNC_INTERVAL`'s if one is set), and what multisampled textures got (the
+  `Mullion: textures` line);
 - render passes and the attachment traffic d9mt saved, and (0.0.6 and later) the
   render thread's CPU time in that optimization and the clears per frame, to tell its cost
   apart from compile waits (a cold shader cache);

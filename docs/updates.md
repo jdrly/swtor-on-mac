@@ -70,9 +70,8 @@ they differ from releases in four ways:
   `mullion-check-ranges` (`MULLION_D3D12_CHECK_RANGES=1`), and the off switches for what it has
   on, to compare against the code before them: `mullion-present-off`
   (`MULLION_PRESENT_THREAD=0`: Mullion's presents take their drawable on the queue's commit
-  thread again, as before fork #40, for an A/B of the Space-switch fix),
-  `mullion-reset-waits-off` (`MULLION_D3D12_RESET_WAITS=0`) and `mullion-msaa-compress`
-  (`MULLION_TEX_MSAA_COMPRESSION=1`), both as before fork #44 (see
+  thread again, as before fork #40, for an A/B of the Space-switch fix) and
+  `mullion-msaa-compress` (`MULLION_TEX_MSAA_COMPRESSION=1`, as before fork #44; see
   [Settings](settings.md#directx-12-experimental-development-builds)), and `air-legacy` (`D9MT_AIR_LEGACY=1`, d9mt #167: the game's shaders in the AIR
   format d9mt wrote before 0.1.8, for a Mac where the format of its macOS fails. It gets a
   shader cache and pipeline archives of its own in `d9mt-ab/air-legacy`, or `cold=<name>`'s,

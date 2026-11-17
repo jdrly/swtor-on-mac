@@ -84,9 +84,11 @@
 #             MULLION-GPU-HUNG, MULLION-SHADER-TOTALS and MULLION-PIPELINE-TOTALS; its present
 #             thread's "Mullion: present thread=" and "present dropped=" lines (fork #40) and the
 #             bridge's "mullion: nextDrawable blocked" line (fork #37: the Mac held the drawable
-#             50 ms or more, as at a switch away from the game's Space); its allocator waits
-#             (MULLION_D3D12_RESET_WAITS: STATS's RESETWAIT section, MULLION-RESET-WAIT) and its
-#             "Mullion: textures" line (MULLION_TEX_MSAA_COMPRESSION's outcome). My fork's builds
+#             50 ms or more, as at a switch away from the game's Space); its allocator resets
+#             with lists in flight (fork #50: STATS's RESETINFLIGHT section, MULLION-RESET-IN-FLIGHT),
+#             its "Mullion: present pacing" line (fork #51: the interval presents are paced by,
+#             MULLION_SYNC_INTERVAL's or the game's) and its "Mullion: textures" line
+#             (MULLION_TEX_MSAA_COMPRESSION's outcome). My fork's builds
 #             since its window lines (fork #24) write d9mt's MtlPresenter visibility line; older
 #             ones log no visibility (every second counts as shown, no mark); D3DMetal logs no numbers
 #
@@ -333,15 +335,21 @@ analyze() {
       if (num(l) > dbmax) dbmax = num(l)
       next
     }
-    # a command allocator'"'"'s Reset that waited for its lists (MULLION_D3D12_RESET_WAITS):
-    # STATS'"'"'s RESETWAIT section each second (Debug Logging), and MULLION-RESET-WAIT once per
-    # allocator (its allocator= counts the process'"'"'s allocators that waited)
-    /(^| )RESETWAIT waits=[0-9]/ {
-      rwn += num(field("waits")); rwms += num(field("ms"))
-      if (num(field("longestMs")) > rwmax) rwmax = num(field("longestMs"))
+    # a command allocator'"'"'s Reset with lists still in flight, which hands their recording to the
+    # queues (fork #50): STATS'"'"'s RESETINFLIGHT section, in a second with one (MULLION_STATS, Debug
+    # Logging), and MULLION-RESET-IN-FLIGHT once per allocator (its allocator= counts the
+    # process'"'"'s allocators reset in flight)
+    /(^| )RESETINFLIGHT resets=[0-9]/ { rifn += num(field("resets")); riflists += num(field("lists")); next }
+    / MULLION-RESET-IN-FLIGHT at=/ { if (num(field("allocator")) > rifalloc) rifalloc = num(field("allocator")); next }
+    # the interval a swap chain paces its presents by (fork #51), at its first present and when
+    # it changes: the last line, and how many there were
+    / Mullion: present pacing interval=[0-9]/ {
+      npace++
+      pace = sprintf("interval %s (the game'"'"'s %s, %s), %s Hz, %s", field("interval"), field("game"),
+        (field("forced") == "no" ? "not forced" : "MULLION_SYNC_INTERVAL=" field("forced")),
+        field("refreshHz"), (num(field("capFps")) > 0 ? "cap " num(field("capFps")) " fps" : "no cap"))
       next
     }
-    / MULLION-RESET-WAIT at=/ { if (num(field("allocator")) > rwalloc) rwalloc = num(field("allocator")); next }
     # what multisampled textures got (compression, msaa, msaaSwitch, apple10), per device: the last
     / Mullion: textures compression=/ { mtex = $0; sub(/.* Mullion: textures /, "", mtex); next }
     / Mullion: present thread=[01]/ { pthr = index($0, "present thread=1") ? "on" : "off"; next }
@@ -695,8 +703,9 @@ analyze() {
       else if (pthr == "off") print "present_thread=off: the drawables on the commit thread (MULLION_PRESENT_THREAD=0)"
       if (ndb) printf "drawable_blocked=%d (the longest logged wait %d ms)\n", ndb, dbmax
       if (npd) printf "present_dropped=%d frames (the longest wait for a drawable %d ms)\n", npd, pdmax
-      if (rwn) printf "reset_waits=%d waits, %.0f ms in all, the longest %.1f ms%s\n", rwn, rwms, rwmax, (rwalloc ? sprintf(" (%d allocator%s)", rwalloc, (rwalloc > 1 ? "s" : "")) : "")
-      else if (rwalloc) printf "reset_waits=%d allocator%s waited (no RESETWAIT timing samples logged)\n", rwalloc, (rwalloc > 1 ? "s" : "")
+      if (rifn) printf "resets_in_flight=%d resets, %d lists handed to the queues%s\n", rifn, riflists, (rifalloc ? sprintf(" (%d allocator%s)", rifalloc, (rifalloc > 1 ? "s" : "")) : "")
+      else if (rifalloc) printf "resets_in_flight=%d allocator%s (no RESETINFLIGHT counts logged)\n", rifalloc, (rifalloc > 1 ? "s" : "")
+      if (npace) printf "present_pacing=%s%s\n", pace, (npace > 1 ? sprintf(" (the last of %d lines)", npace) : "")
       if (mtex != "") print "textures=" mtex
       if (shtot != "") print "shaders_failed=" shtot
       if (npt) printf "pipelines_late=%d made after the first Present, %.0f ms in all, the longest %.1f ms\n", ptlate, ptms, ptmax
@@ -914,7 +923,8 @@ report() {
   row "Present thread (Mullion)" present_thread
   row "nextDrawable waits of 50 ms or more" drawable_blocked
   row "Frames the present thread dropped" present_dropped
-  row "Allocator resets that waited" reset_waits
+  row "Allocator resets in flight" resets_in_flight
+  row "Present pacing (Mullion)" present_pacing
   row "Textures (Mullion)" textures
   row "Failed shaders" shaders_failed
   row "Late pipelines" pipelines_late

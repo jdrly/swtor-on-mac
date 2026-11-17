@@ -62,17 +62,22 @@ fx_d9mt_ab() {
   check "d9mt-ab: pfv after air-legacy: no D9MT_AIR_LEGACY and d9mt's own caches again ($FX_RC)" \
     eval '[ "$FX_RC" = 0 ] && [ "$(fx_ab_env D9MT_TEX_PFV)/$(fx_ab_env D9MT_AIR_LEGACY)/$(fx_ab_env D9MT_AIR_CACHE)/$(fx_ab_env D9MT_PSO_ARCHIVE_DIR)" = "1/<unset>/<unset>/<unset>" ]'
 
-  # Mullion's switches: the two safety switches on (off in the pinned build), and the three the
-  # pinned build has on turned off, each one's variable, named together
-  fx_ab mullion-guard-static mullion-check-ranges mullion-reset-waits-off mullion-msaa-compress
+  # Mullion's switches: the two safety switches on (off in the pinned build), and the MSAA
+  # compression the pinned build has off turned on, each one's variable, named together
+  fx_ab mullion-guard-static mullion-check-ranges mullion-msaa-compress
   check "d9mt-ab: Mullion's switches: the game gets each one's variable, and they are named ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && [ "$(fx_ab_env MULLION_D3D12_GUARD_STATIC_RANGES)/$(fx_ab_env MULLION_D3D12_CHECK_RANGES)/$(fx_ab_env MULLION_D3D12_RESET_WAITS)/$(fx_ab_env MULLION_TEX_MSAA_COMPRESSION)" = 1/1/0/1 ] && [ "$(fx_ab_env SWTOR_D9MT_AB)" = "mullion-guard-static mullion-check-ranges mullion-reset-waits-off mullion-msaa-compress" ]'
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_ab_env MULLION_D3D12_GUARD_STATIC_RANGES)/$(fx_ab_env MULLION_D3D12_CHECK_RANGES)/$(fx_ab_env MULLION_TEX_MSAA_COMPRESSION)" = 1/1/1 ] && [ "$(fx_ab_env SWTOR_D9MT_AB)" = "mullion-guard-static mullion-check-ranges mullion-msaa-compress" ]'
   fx_ab mullion-check-ranges
   check "d9mt-ab: mullion-check-ranges alone: the others unset again, the build's defaults ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && [ "$(fx_ab_env MULLION_D3D12_GUARD_STATIC_RANGES)/$(fx_ab_env MULLION_D3D12_CHECK_RANGES)/$(fx_ab_env MULLION_D3D12_RESET_WAITS)/$(fx_ab_env MULLION_TEX_MSAA_COMPRESSION)" = "<unset>/1/<unset>/<unset>" ]'
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_ab_env MULLION_D3D12_GUARD_STATIC_RANGES)/$(fx_ab_env MULLION_D3D12_CHECK_RANGES)/$(fx_ab_env MULLION_TEX_MSAA_COMPRESSION)" = "<unset>/1/<unset>" ]'
+  # the allocator wait's switches: the fork removed MULLION_D3D12_RESET_WAITS (fork #50), so
+  # both the old mullion-reset-waits and mullion-reset-waits-off are refused, the switches kept
   fx_ab mullion-reset-waits
-  check "d9mt-ab: the old mullion-reset-waits (now the build's default) is refused ($FX_RC)" \
+  check "d9mt-ab: the old mullion-reset-waits is refused ($FX_RC)" \
     eval '[ "$FX_RC" != 0 ] && grep -q "^Unknown switch: mullion-reset-waits$" "$FX_AB_D/out.txt"'
+  fx_ab mullion-reset-waits-off
+  check "d9mt-ab: mullion-reset-waits-off is refused, the fork has no MULLION_D3D12_RESET_WAITS any more, and the switches stay ($FX_RC)" \
+    eval '[ "$FX_RC" != 0 ] && grep -q "^Unknown switch: mullion-reset-waits-off$" "$FX_AB_D/out.txt" && [ "$(fx_ab_env SWTOR_D9MT_AB)" = mullion-check-ranges ] && [ "$(fx_ab_env MULLION_D3D12_RESET_WAITS)" = "<unset>" ]'
   # the present thread, on in the pinned build: mullion-present-off turns it off, and only it
   fx_ab mullion-present-off
   check "d9mt-ab: mullion-present-off: MULLION_PRESENT_THREAD=0, named, the safety switches unset ($FX_RC)" \
