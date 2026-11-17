@@ -5,8 +5,8 @@
 # the renderer from Mullion's header, frame rows from its STATS, a hitch the driver's by
 # inDriverMs, the footprint and swap from DIAG MEM, the removed device, GPU error and stuck
 # command buffer. Then made-up logs: the failed shader and late pipeline totals, Mullion's
-# present thread with its dropped frames and blocked nextDrawable calls, its allocator waits and
-# textures line, a session without
+# present thread with its dropped frames and blocked nextDrawable calls, its allocator resets in
+# flight, present pacing and textures lines, the fork's other new lines left alone, a session without
 # Mullion's header, D3DMetal, d9mt's GPU lines, a session on different renderers side by
 # side, and an A/B/A of Mullion arms by the driver files line. Needs neither the official app nor
 # Wine. Sourced; check and the counters come from lib.sh.
@@ -91,24 +91,57 @@ fx_session_report_dx12() {
     eval '"$SR" "$R/present-off.log" | grep -E "^  Present thread \(Mullion\) +off: the drawables on the commit thread \(MULLION_PRESENT_THREAD=0\)$" >/dev/null'
   check "dx12 report: no present rows without their lines" eval '! grep -E "Present thread|nextDrawable waits|present thread dropped" "$R/mullion.txt" >/dev/null'
 
-  # 3c. Mullion's allocator waits (MULLION_D3D12_RESET_WAITS, on since fork #44): STATS's RESETWAIT
-  # section summed, the allocators from MULLION-RESET-WAIT; and its textures line, the last one
+  # 3c. Mullion's allocator resets with lists in flight (fork #50, in place of #17's wait):
+  # STATS's RESETINFLIGHT section summed, the allocators from MULLION-RESET-IN-FLIGHT; and its
+  # textures line, the last one
   { cat "$R/mullion.log"
     echo 'info:  Mullion: textures compression=metal msaa=metal msaaSwitch=1 apple10=no'
+    echo 'warn:  MULLION-RESET-IN-FLIGHT at=20:00:12.004 type=direct lists=1 frame=410 allocator=1'
+    echo 'warn:  RESETINFLIGHT resets=3 lists=4'
+    echo 'warn:  MULLION-RESET-IN-FLIGHT at=20:00:20.112 type=compute lists=2 frame=901 allocator=2'
+    echo 'warn:  RESETINFLIGHT resets=1 lists=2'
+    echo 'info:  Mullion: textures compression=metal msaa=off msaaSwitch=auto apple10=no'; } >"$R/resetinflight.log"
+  "$SR" "$R/resetinflight.log" >"$R/resetinflight.txt" 2>&1 || true
+  check "dx12 report: Mullion's allocator resets in flight summed, and its textures line (the last device's)" \
+    eval 'sdx_in "$R/resetinflight.txt" "^  Allocator resets in flight +4 resets, 6 lists handed to the queues \(2 allocators\)$" && sdx_in "$R/resetinflight.txt" "^  Textures \(Mullion\) +compression=metal msaa=off msaaSwitch=auto apple10=no$"'
+  # MULLION-RESET-IN-FLIGHT lines but no RESETINFLIGHT section: Debug Logging off (no
+  # MULLION_STATS), or a session that ended before the next STATS line; the report can't tell
+  grep -v "RESETINFLIGHT resets=" "$R/resetinflight.log" >"$R/resetinflight-nostats.log"
+  check "dx12 report: MULLION-RESET-IN-FLIGHT lines without a RESETINFLIGHT section: the allocators only, no guess why" \
+    eval '"$SR" "$R/resetinflight-nostats.log" >"$R/resetinflight-nostats.txt" 2>&1; sdx_in "$R/resetinflight-nostats.txt" "^  Allocator resets in flight +2 allocators \(no RESETINFLIGHT counts logged\)$" && ! grep -q "Debug Logging off" "$R/resetinflight-nostats.txt"'
+  # the fork's allocator wait is gone (fork #50): its old lines are no row any more
+  { cat "$R/mullion.log"
     echo 'warn:  MULLION-RESET-WAIT at=20:00:12.004 type=direct lists=1 frame=410 allocator=1'
-    echo 'warn:  RESETWAIT waits=3 ms=4.5 longestMs=2.5'
-    echo 'warn:  MULLION-RESET-WAIT at=20:00:20.112 type=compute lists=2 frame=901 allocator=2'
-    echo 'warn:  RESETWAIT waits=1 ms=7.0 longestMs=7.0'
-    echo 'info:  Mullion: textures compression=metal msaa=off msaaSwitch=auto apple10=no'; } >"$R/resetwait.log"
-  "$SR" "$R/resetwait.log" >"$R/resetwait.txt" 2>&1 || true
-  check "dx12 report: Mullion's allocator waits summed, and its textures line (the last device's)" \
-    eval 'sdx_in "$R/resetwait.txt" "^  Allocator resets that waited +4 waits, 12 ms in all, the longest 7\.0 ms \(2 allocators\)$" && sdx_in "$R/resetwait.txt" "^  Textures \(Mullion\) +compression=metal msaa=off msaaSwitch=auto apple10=no$"'
-  # MULLION-RESET-WAIT lines but no RESETWAIT section: Debug Logging off, or (on) a Reset that
-  # never returned or a session that ended before the next STATS line; the report can't tell
-  grep -v "RESETWAIT waits=" "$R/resetwait.log" >"$R/resetwait-nostats.log"
-  check "dx12 report: MULLION-RESET-WAIT lines without a RESETWAIT section: the allocators only, no times, no guess why" \
-    eval '"$SR" "$R/resetwait-nostats.log" >"$R/resetwait-nostats.txt" 2>&1; sdx_in "$R/resetwait-nostats.txt" "^  Allocator resets that waited +2 allocators waited \(no RESETWAIT timing samples logged\)$" && ! grep -q "Debug Logging off" "$R/resetwait-nostats.txt"'
-  check "dx12 report: no allocator wait or textures row without their lines" eval '! grep -E "Allocator resets|Textures \(Mullion\)" "$R/mullion.txt" >/dev/null'
+    echo 'warn:  RESETWAIT waits=3 ms=4.5 longestMs=2.5'; } >"$R/resetwait.log"
+  check "dx12 report: an older build's MULLION-RESET-WAIT and RESETWAIT lines make no row" \
+    eval '! "$SR" "$R/resetwait.log" | grep -E "Allocator resets|waited" >/dev/null'
+  check "dx12 report: no allocator reset or textures row without their lines" eval '! grep -E "Allocator resets|Textures \(Mullion\)" "$R/mullion.txt" >/dev/null'
+
+  # 3d. Mullion's present pacing (fork #51): the last line's interval, the game's, whether
+  # MULLION_SYNC_INTERVAL forced it, the refresh rate and the cap, and how many lines there were
+  { cat "$R/mullion.log"
+    echo 'info:  Mullion: present pacing interval=0 game=0 forced=no refreshHz=120.0 capFps=0 afterMs=0.0 at=20:00:04.100'
+    echo 'info:  Mullion: present pacing interval=1 game=0 forced=1 refreshHz=60.0 capFps=60 afterMs=16.7 at=20:00:30.000 changes=2'; } >"$R/pacing.log"
+  check "dx12 report: Mullion's present pacing, the last line's" \
+    eval '"$SR" "$R/pacing.log" | grep -E "^  Present pacing \(Mullion\) +interval 1 \(the game.s 0, MULLION_SYNC_INTERVAL=1\), 60\.0 Hz, cap 60 fps \(the last of 2 lines\)$" >/dev/null'
+  { cat "$R/mullion.log"
+    echo 'info:  Mullion: present pacing interval=0 game=0 forced=no refreshHz=unknown capFps=0 afterMs=0.0 at=20:00:04.100'; } >"$R/pacing-one.log"
+  check "dx12 report: one pacing line, the game's interval, the rate unknown" \
+    eval '"$SR" "$R/pacing-one.log" | grep -E "^  Present pacing \(Mullion\) +interval 0 \(the game.s 0, not forced\), unknown Hz, no cap$" >/dev/null'
+  check "dx12 report: no present pacing row without its line" eval '! grep -E "Present pacing" "$R/mullion.txt" >/dev/null'
+
+  # 3e. The fork's new lines the report doesn't count (fork #50's store file, #53, #54) and its
+  # new rows' lines change no frame, hitch or failure row
+  { cat "$R/mullion.log"
+    echo 'warn:  MULLION-RESET-IN-FLIGHT at=20:00:12.004 type=direct lists=1 frame=410 allocator=1'
+    echo 'warn:  RESETINFLIGHT resets=3 lists=4'
+    echo 'info:  Mullion: present pacing interval=0 game=0 forced=no refreshHz=unknown capFps=0 afterMs=0.0 at=20:00:04.100 changes=3'
+    echo 'mullion: metal4 parts=reused'
+    echo 'mullion: flight record of a stuck command buffer not written: swtor_RC2.exe.flight has 8 dumps, and takes only a reason not dumped yet now'
+    echo 'info:  Mullion: cacheOpen shaders=mullion/swtor_RC2.exe/shaders_400.v7.db codegen=0123456789ab entries=0 sizeMiB=0 droppedTables=1 droppedShards=0 droppedMiB=700'; } >"$R/newlines.log"
+  "$SR" "$R/newlines.log" >"$R/newlines.txt" 2>&1 || true
+  check "dx12 report: the fork's new lines change no other row" \
+    eval '[ "$(grep -vE "^SWTOR on Mac session report: |^  (Allocator resets in flight|Present pacing \(Mullion\)) " "$R/newlines.txt")" = "$(grep -v "^SWTOR on Mac session report: " "$R/mullion.txt")" ]'
 
   # 4. Mullion without its header (Debug Logging off): the wrapper's line names the build
   sdx_head "$SDX_MULLION" >"$R/plain.log"

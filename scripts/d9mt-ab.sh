@@ -66,9 +66,6 @@
 #   mullion-present-off   MULLION_PRESENT_THREAD=0: a present takes its drawable on the queue's
 #                 commit thread again, as before fork #40, which brings back the ~1.2 s fence
 #                 stall at a switch away from the game's Space (the DirectX 12 crash there)
-#   mullion-reset-waits-off  MULLION_D3D12_RESET_WAITS=0: a command allocator's Reset with
-#                 lists still on the GPU resets at once again, as before fork #44 (fork #17's
-#                 wait off)
 #   mullion-msaa-compress  MULLION_TEX_MSAA_COMPRESSION=1: multisampled textures keep Metal's
 #                 lossless compression before Apple10 (M1 to M4) again, as before fork #44
 #
@@ -152,7 +149,6 @@ for a in "$@"; do
     air-legacy) add "$a"; var 'D9MT_AIR_LEGACY=1'; legacy=1 ;;
     mullion-guard-static) add "$a"; var 'MULLION_D3D12_GUARD_STATIC_RANGES=1' ;;
     mullion-check-ranges) add "$a"; var 'MULLION_D3D12_CHECK_RANGES=1' ;;
-    mullion-reset-waits-off) add "$a"; var 'MULLION_D3D12_RESET_WAITS=0' ;;
     mullion-msaa-compress) add "$a"; var 'MULLION_TEX_MSAA_COMPRESSION=1' ;;
     mullion-present-off) add "$a"; var 'MULLION_PRESENT_THREAD=0' ;;
     *) echo "Unknown switch: $a" >&2; usage ;;
