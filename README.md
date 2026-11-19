@@ -371,8 +371,14 @@ with these patches:
   port stores a thread's msync alert index in the field where Wine 11 keeps the thread's alert
   file descriptor. When a thread that did an alertable wait exits, Wine closes that field as a
   descriptor, which closes an unrelated file, pipe or kqueue. With msync on, the patch leaves it
-  alone, the same guard as athei/wine `12927acab0` on another branch. This build is always
-  installed.
+  alone, the same guard as athei/wine `12927acab0` on another branch.
+- [`patches/ntdll-foreign-thread-faults.patch`](patches/ntdll-foreign-thread-faults.patch). When
+  a thread Wine didn't create faults, such as one of Metal's own threads, Wine's signal handler
+  looks for that thread's Wine data, finds none and faults inside itself. The process then hangs
+  on one busy core, with no crash report and nothing in `wine.log`. The patch gives such a fault
+  its default action, so the process ends with that signal instead of hanging. It is
+  OmniTroid/wine#8, ported to these sources. Wine's own threads take the same path as before.
+  The `ntdll.so` built with both patches is always installed.
 - [`patches/winemac-physical-keys.patch`](patches/winemac-physical-keys.patch) for *Game keys by
   keyboard position*. The game sees each key by its position on a US keyboard, while chat still
   types in your layout.
