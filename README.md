@@ -79,7 +79,7 @@ Uninstall and every Settings pane.
 ## Current version
 
 The current release is [0.1.9](https://github.com/jdrly/swtor-on-mac/releases/tag/v0.1.9),
-published on TO-FILL-DATE. Every release lists its changes on the
+published on 20 November 2026. Every release lists its changes on the
 [releases page](https://github.com/jdrly/swtor-on-mac/releases) and on
 [swonmac.com](https://swonmac.com).
 
