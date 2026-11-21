@@ -129,8 +129,29 @@ fx_session_report_dx12() {
   check "dx12 report: one pacing line, the game's interval, the rate unknown" \
     eval '"$SR" "$R/pacing-one.log" | grep -E "^  Present pacing \(Mullion\) +interval 0 \(the game.s 0, not forced\), unknown Hz, no cap$" >/dev/null'
   check "dx12 report: no present pacing row without its line" eval '! grep -E "Present pacing" "$R/mullion.txt" >/dev/null'
+  # fork #55's fields: the timer cap (MULLION_FPS_CAP, over d3d12.preferredMaxFrameRate), the
+  # path, the deadlines' period and display sync; the first two lines are the fork's own test's
+  # (tests/host/present_wait.cpp at f52b91e)
+  { cat "$R/mullion.log"
+    echo 'info:  Mullion: present pacing interval=1 game=0 forced=1 refreshHz=60.0 capFps=60 afterMs=0.0 timerFps=40 pace=wait periodMs=25.0 displaySync=1 at=09:05:07.042'; } >"$R/pacing-wait.log"
+  check "dx12 report: the wait path under a timer cap of 40: the timer's cap, the preferred one pacing nothing, the deadlines and display sync" \
+    eval '"$SR" "$R/pacing-wait.log" | grep -E "^  Present pacing \(Mullion\) +interval 1 \(the game.s 0, MULLION_SYNC_INTERVAL=1\), 60\.0 Hz, timer cap 40 fps \(MULLION_FPS_CAP; d3d12\.preferredMaxFrameRate=60 paces nothing\), pace wait, deadlines 25\.0 ms apart, display sync on$" >/dev/null'
+  { cat "$R/mullion.log"
+    echo 'info:  Mullion: present pacing interval=1 game=1 forced=no refreshHz=60.0 capFps=0 afterMs=16.7 timerFps=0 pace=duration periodMs=0.0 displaySync=0 at=00:00:00.000'; } >"$R/pacing-duration.log"
+  check "dx12 report: the duration path with nothing set: no cap, the timer off, no frame deadline" \
+    eval '"$SR" "$R/pacing-duration.log" | grep -E "^  Present pacing \(Mullion\) +interval 1 \(the game.s 1, not forced\), 60\.0 Hz, no cap, timer off, pace duration, no frame deadline, display sync off$" >/dev/null'
+  # the checklist's arm 1: d3d12.preferredMaxFrameRate=60 on the duration path, no timer
+  { cat "$R/mullion.log"
+    echo 'info:  Mullion: present pacing interval=1 game=1 forced=no refreshHz=60.0 capFps=60 afterMs=16.7 timerFps=0 pace=duration periodMs=0.0 displaySync=0 at=20:00:04.100'; } >"$R/pacing-preferred.log"
+  check "dx12 report: the preferred cap of 60 on the duration path: that cap, the timer off, no frame deadline" \
+    eval '"$SR" "$R/pacing-preferred.log" | grep -E "^  Present pacing \(Mullion\) +interval 1 \(the game.s 1, not forced\), 60\.0 Hz, cap 60 fps, timer off, pace duration, no frame deadline, display sync off$" >/dev/null'
+  # fork #55's reviewer's case: timerFps=40 with capFps=0 was "no cap"
+  { cat "$R/mullion.log"
+    echo 'info:  Mullion: present pacing interval=1 game=1 forced=no refreshHz=60.0 capFps=0 afterMs=16.7 timerFps=40 pace=duration periodMs=25.0 displaySync=0 at=20:00:04.100'; } >"$R/pacing-timer.log"
+  check "dx12 report: timerFps=40 with capFps=0 is the timer's cap of 40, not no cap" \
+    eval '"$SR" "$R/pacing-timer.log" | grep -E "^  Present pacing \(Mullion\) +interval 1 \(the game.s 1, not forced\), 60\.0 Hz, timer cap 40 fps \(MULLION_FPS_CAP\), pace duration, deadlines 25\.0 ms apart, display sync off$" >/dev/null'
 
-  # 3e. The fork's new lines the report doesn't count (fork #50's store file, #53, #54) and its
+  # 3e. The fork's new lines the report doesn't count (fork #50's store file, #53, #54, #55, #56) and its
   # new rows' lines change no frame, hitch or failure row
   { cat "$R/mullion.log"
     echo 'warn:  MULLION-RESET-IN-FLIGHT at=20:00:12.004 type=direct lists=1 frame=410 allocator=1'
@@ -138,7 +159,13 @@ fx_session_report_dx12() {
     echo 'info:  Mullion: present pacing interval=0 game=0 forced=no refreshHz=unknown capFps=0 afterMs=0.0 at=20:00:04.100 changes=3'
     echo 'mullion: metal4 parts=reused'
     echo 'mullion: flight record of a stuck command buffer not written: swtor_RC2.exe.flight has 8 dumps, and takes only a reason not dumped yet now'
-    echo 'info:  Mullion: cacheOpen shaders=mullion/swtor_RC2.exe/shaders_400.v7.db codegen=0123456789ab entries=0 sizeMiB=0 droppedTables=1 droppedShards=0 droppedMiB=700'; } >"$R/newlines.log"
+    echo 'info:  Mullion: cacheOpen shaders=mullion/swtor_RC2.exe/shaders_400.v7.db codegen=0123456789ab entries=0 sizeMiB=0 droppedTables=1 droppedShards=0 droppedMiB=700'
+    # fork #55's and #56's (batch 4's ARCHIVEDRAW section, which has no row yet)
+    echo 'info:  Mullion: display sync=1'
+    echo 'warn:  Mullion: MULLION_PACE is not duration or wait; presents keep Metal'"'"'s minimum duration'
+    echo 'warn:  Mullion: MULLION_FPS_CAP is not 0 or 20 to 1000; no cap'
+    echo 'warn:  Mullion: MULLION_DISPLAY_SYNC=1 ignored: the present thread is off'
+    echo 'warn:  ARCHIVEDRAW made=12 missed=1 ms=48.3'; } >"$R/newlines.log"
   "$SR" "$R/newlines.log" >"$R/newlines.txt" 2>&1 || true
   check "dx12 report: the fork's new lines change no other row" \
     eval '[ "$(grep -vE "^SWTOR on Mac session report: |^  (Allocator resets in flight|Present pacing \(Mullion\)) " "$R/newlines.txt")" = "$(grep -v "^SWTOR on Mac session report: " "$R/mullion.txt")" ]'

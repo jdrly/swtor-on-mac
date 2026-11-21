@@ -141,7 +141,7 @@ With the setting on:
   process keeps wined3d. A rule that names an exe applies after the `exe=*` rules, whatever the
   line order;
 - with a Mullion driver, the setting downloads my fork's build of Mullion (`MULLION_*` in
-  `som.sh`: commit `1505f87`, 9 MB, checked against its pinned sha256, its `VERSION` against the
+  `som.sh`: commit `f52b91e`, 9 MB, checked against its pinned sha256, its `VERSION` against the
   pinned commit) and installs it over the engine's
   `dxgi/dxmt` tree, the engine's own files kept as `<name>.stock` (see [What it
   changes](how-it-works.md#what-it-changes)). A download or tree that isn't the expected one is
@@ -187,10 +187,21 @@ With the setting on:
   `MULLION-RESET-IN-FLIGHT` line per allocator, and with Debug Logging a `RESETINFLIGHT`
   section after `STATS` in a second with one; the session report counts both;
 - the session report also shows the `Mullion: present pacing` line (fork #51): the interval the
-  game's presents are paced by, the game's own, and whether `MULLION_SYNC_INTERVAL` forced it.
-  The app sets no `MULLION_SYNC_INTERVAL`, so the game's interval stays. Fork #53's
-  `MULLION_METAL4_REUSE_PARTS` is off in the build and only applies to Metal 4; the app leaves it
-  unset;
+  game's presents are paced by, the game's own, and whether `MULLION_SYNC_INTERVAL` forced it;
+  since fork #55 also the cap (`MULLION_FPS_CAP`'s timer, which takes over from
+  `d3d12.preferredMaxFrameRate`, or that one), the path (`pace`), the time between the deadlines
+  the game's thread waits for (`periodMs`) and the layer's display sync. Fork #55's switches are
+  for testing only, and the app sets none of them: `MULLION_FPS_CAP` (a cap by timer, `20` to
+  `1000`), `MULLION_PACE` (`duration`, the default: Metal's minimum duration as before; `wait`:
+  the game's thread waits and Metal presents at once) and `MULLION_DISPLAY_SYNC` (`1`: the
+  layer's display sync, only with the present thread on). The app sets no
+  `MULLION_SYNC_INTERVAL` either, so the game's interval stays. To try them, write them by hand
+  into `d9mt-ab.env`, one `NAME=value` line each, with a `MULLION_CONFIG="…"` line if needed:
+  `env` reads that file after the settings, so its values win. `d9mt-ab.sh` shows them, `reset`
+  removes them, and a call with switches rewrites the file without them. Fork #53's
+  `MULLION_METAL4_REUSE_PARTS` is off in the build and only applies to Metal 4, and fork #56's
+  `MULLION_D3D12_NATIVE_TESSELLATION` (upstream's tessellation through Metal) is off; the app
+  leaves both unset;
 - my fork's present thread is on, as its build has it since fork #40
   (`MULLION_PRESENT_THREAD=1`): the DirectX 12 client's presents take their drawable on a thread
   of their own. At a switch away from the game's Space, macOS holds the drawable for about 1.2 s;
@@ -200,18 +211,24 @@ With the setting on:
   for the frames the thread didn't show, and `mullion: nextDrawable blocked <ms> ms` for each
   drawable macOS held 50 ms or more; the session report counts all three;
 - the first DirectX 12 start after an update to a Mullion build with another codegen id (the
-  `VERSION`'s `codegen:` line) converts the game's shaders again, once. `1505f87`'s is
-  `d30199ca92d3` (airconv 115): fork #50 merges upstream's third batch, whose converter
-  generates other code for the game's shaders, and fork #53 adds a parameter to the bridge's
-  Metal 4 command buffers. Since fork #50 the shader store keeps one converter version's
-  conversions in a file of its own, `shaders_<metal>.v<tag>.db` in Mullion's cache folder, and
-  that first start removes the old `shaders_<metal>.db` whole. `8b3fb93`'s was `ba4acd12d433`
+  `VERSION`'s `codegen:` line) converts the game's shaders again, once. `f52b91e`'s is
+  `4e3ece09bd25` (airconv 123): fork #56 merges upstream's fourth batch, whose converter
+  generates other code for the game's shaders. Since fork #50 the shader store keeps one
+  converter version's conversions in a file of its own, `shaders_<metal>.v<tag>.db` in
+  Mullion's cache folder, and that first start removes the other versions' files, the pipeline
+  archive's too, for the Metal version it runs on (a Metal 3 start leaves Metal 4's files, and
+  the other way round). Since fork #56 a pipeline the archive holds is made at its first draw; with
+  Debug Logging, an `ARCHIVEDRAW` section after `STATS` counts them and the time the draws waited
+  (the session report has no row for it yet). `1505f87`'s was `d30199ca92d3` (airconv 115:
+  fork #50 merged upstream's third batch and made the store one file per converter version,
+  removing the old `shaders_<metal>.db`; fork #53 added a parameter to the bridge's Metal 4
+  command buffers), `8b3fb93`'s `ba4acd12d433`
   (fork #49 reverted #39 and #47: their row of zeros only worked around a report of Metal's
   validation, which fork #48 traced to validation itself), `e26baa3`'s `22a246eb0364`,
   `9ec669c`'s and `fbbf25e`'s `977550d594f2`, `efee691`'s `c47044c8bf4a`;
 - `wine.log`'s header names it: `SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion
-  (dxgi=dxmt), MULLION_SESSION_HEADER=1, MULLION_STATS=1, MULLION_MEMSTATS=1, Mullion (jdrly/mullion 1505f87),
-  v0.5-alpha.3-349-g1505f87, codegen d30199ca92d3 airconv 115` (the Mullion switches and
+  (dxgi=dxmt), MULLION_SESSION_HEADER=1, MULLION_STATS=1, MULLION_MEMSTATS=1, Mullion (jdrly/mullion f52b91e),
+  v0.5-alpha.3-469-gf52b91e, codegen 4e3ece09bd25 airconv 123` (the Mullion switches and
   `MULLION_CONFIG` the client got, the pin, then the `git describe` line and the codegen line of
   the build's `VERSION`), or `driver gptk (dxgi=gptk), D3DMetal 4.0b2 (the
   engine's)`, with `MULLION_D3D12_METAL4=0` or `D3DM_MTL4=0` for a Metal 3 driver. The D3DMetal

@@ -162,7 +162,9 @@ switches cost on DirectX 12 has not been measured.
   recording to the queues (fork #50: the resets and their lists from `STATS`'s `RESETINFLIGHT`
   section, and the allocators from `MULLION-RESET-IN-FLIGHT`), the interval its presents are
   paced by (the last `Mullion: present pacing` line, fork #51: the game's interval, or
-  `MULLION_SYNC_INTERVAL`'s if one is set), and what multisampled textures got (the
+  `MULLION_SYNC_INTERVAL`'s if one is set; since fork #55 also the cap, `MULLION_FPS_CAP`'s
+  timer over `d3d12.preferredMaxFrameRate`, the path, `pace duration` or `pace wait`, the time
+  between the deadlines the game's thread waits for, and display sync), and what multisampled textures got (the
   `Mullion: textures` line);
 - render passes and the attachment traffic d9mt saved, and (0.0.6 and later) the
   render thread's CPU time in that optimization and the clears per frame, to tell its cost

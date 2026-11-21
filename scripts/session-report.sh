@@ -87,7 +87,8 @@
 #             50 ms or more, as at a switch away from the game's Space); its allocator resets
 #             with lists in flight (fork #50: STATS's RESETINFLIGHT section, MULLION-RESET-IN-FLIGHT),
 #             its "Mullion: present pacing" line (fork #51: the interval presents are paced by,
-#             MULLION_SYNC_INTERVAL's or the game's) and its "Mullion: textures" line
+#             MULLION_SYNC_INTERVAL's or the game's; fork #55: MULLION_FPS_CAP's timer cap,
+#             MULLION_PACE's path and MULLION_DISPLAY_SYNC) and its "Mullion: textures" line
 #             (MULLION_TEX_MSAA_COMPRESSION's outcome). My fork's builds
 #             since its window lines (fork #24) write d9mt's MtlPresenter visibility line; older
 #             ones log no visibility (every second counts as shown, no mark); D3DMetal logs no numbers
@@ -342,12 +343,21 @@ analyze() {
     /(^| )RESETINFLIGHT resets=[0-9]/ { rifn += num(field("resets")); riflists += num(field("lists")); next }
     / MULLION-RESET-IN-FLIGHT at=/ { if (num(field("allocator")) > rifalloc) rifalloc = num(field("allocator")); next }
     # the interval a swap chain paces its presents by (fork #51), at its first present and when
-    # it changes: the last line, and how many there were
+    # it changes: the last line, and how many there were. The cap: MULLION_FPS_CAP'"'"'s timer
+    # (timerFps, fork #55), which takes over from d3d12.preferredMaxFrameRate (capFps), or that one.
+    # Since fork #55 also where the pacing happens: pace=duration (Metal'"'"'s minimum duration) or
+    # wait (the game'"'"'s thread waits), periodMs between the deadlines it waits for (0.0: none),
+    # and the layer'"'"'s display sync; an older build'"'"'s line has none of them
     / Mullion: present pacing interval=[0-9]/ {
       npace++
+      tfps = num(field("timerFps")); cfps = num(field("capFps"))
+      if (tfps > 0) pcap = "timer cap " tfps " fps (MULLION_FPS_CAP" (cfps > 0 ? "; d3d12.preferredMaxFrameRate=" cfps " paces nothing" : "") ")"
+      else pcap = (cfps > 0 ? "cap " cfps " fps" : "no cap") (field("timerFps") != "" ? ", timer off" : "")
       pace = sprintf("interval %s (the game'"'"'s %s, %s), %s Hz, %s", field("interval"), field("game"),
-        (field("forced") == "no" ? "not forced" : "MULLION_SYNC_INTERVAL=" field("forced")),
-        field("refreshHz"), (num(field("capFps")) > 0 ? "cap " num(field("capFps")) " fps" : "no cap"))
+        (field("forced") == "no" ? "not forced" : "MULLION_SYNC_INTERVAL=" field("forced")), field("refreshHz"), pcap)
+      if (field("pace") != "")
+        pace = pace ", pace " field("pace") (num(field("periodMs")) > 0 ? ", deadlines " field("periodMs") " ms apart" : ", no frame deadline") \
+          ", display sync " (field("displaySync") == "1" ? "on" : "off")
       next
     }
     # what multisampled textures got (compression, msaa, msaaSwitch, apple10), per device: the last
