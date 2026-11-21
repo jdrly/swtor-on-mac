@@ -185,7 +185,7 @@ fork's SWTOR workflow has a green push run of exactly that commit. The Checks wo
 every pull request. Its exit statuses are the d9mt pin's. At install, `som.sh` also refuses an
 archive whose `VERSION` names another commit than `MULLION_COMMIT`.
 
-`dx12` pins the fork's `1505f87`.
+`dx12` pins the fork's `f52b91e`.
 
 `main` pins d9mt `9b64581`, d9mt main after jdrly/d9mt#206: the driver of 0.1.9. Since `f5439a6`
 it adds:
