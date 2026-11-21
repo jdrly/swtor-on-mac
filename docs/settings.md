@@ -216,7 +216,8 @@ With the setting on:
   generates other code for the game's shaders. Since fork #50 the shader store keeps one
   converter version's conversions in a file of its own, `shaders_<metal>.v<tag>.db` in
   Mullion's cache folder, and that first start removes the other versions' files, the pipeline
-  archive's too. Since fork #56 a pipeline the archive holds is made at its first draw; with
+  archive's too, for the Metal version it runs on (a Metal 3 start leaves Metal 4's files, and
+  the other way round). Since fork #56 a pipeline the archive holds is made at its first draw; with
   Debug Logging, an `ARCHIVEDRAW` section after `STATS` counts them and the time the draws waited
   (the session report has no row for it yet). `1505f87`'s was `d30199ca92d3` (airconv 115:
   fork #50 merged upstream's third batch and made the store one file per converter version,

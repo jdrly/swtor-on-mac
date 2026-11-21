@@ -138,8 +138,13 @@ fx_session_report_dx12() {
     eval '"$SR" "$R/pacing-wait.log" | grep -E "^  Present pacing \(Mullion\) +interval 1 \(the game.s 0, MULLION_SYNC_INTERVAL=1\), 60\.0 Hz, timer cap 40 fps \(MULLION_FPS_CAP; d3d12\.preferredMaxFrameRate=60 paces nothing\), pace wait, deadlines 25\.0 ms apart, display sync on$" >/dev/null'
   { cat "$R/mullion.log"
     echo 'info:  Mullion: present pacing interval=1 game=1 forced=no refreshHz=60.0 capFps=0 afterMs=16.7 timerFps=0 pace=duration periodMs=0.0 displaySync=0 at=00:00:00.000'; } >"$R/pacing-duration.log"
-  check "dx12 report: the duration path with nothing set: no cap, no deadlines" \
-    eval '"$SR" "$R/pacing-duration.log" | grep -E "^  Present pacing \(Mullion\) +interval 1 \(the game.s 1, not forced\), 60\.0 Hz, no cap, pace duration, display sync off$" >/dev/null'
+  check "dx12 report: the duration path with nothing set: no cap, the timer off, no frame deadline" \
+    eval '"$SR" "$R/pacing-duration.log" | grep -E "^  Present pacing \(Mullion\) +interval 1 \(the game.s 1, not forced\), 60\.0 Hz, no cap, timer off, pace duration, no frame deadline, display sync off$" >/dev/null'
+  # the checklist's arm 1: d3d12.preferredMaxFrameRate=60 on the duration path, no timer
+  { cat "$R/mullion.log"
+    echo 'info:  Mullion: present pacing interval=1 game=1 forced=no refreshHz=60.0 capFps=60 afterMs=16.7 timerFps=0 pace=duration periodMs=0.0 displaySync=0 at=20:00:04.100'; } >"$R/pacing-preferred.log"
+  check "dx12 report: the preferred cap of 60 on the duration path: that cap, the timer off, no frame deadline" \
+    eval '"$SR" "$R/pacing-preferred.log" | grep -E "^  Present pacing \(Mullion\) +interval 1 \(the game.s 1, not forced\), 60\.0 Hz, cap 60 fps, timer off, pace duration, no frame deadline, display sync off$" >/dev/null'
   # fork #55's reviewer's case: timerFps=40 with capFps=0 was "no cap"
   { cat "$R/mullion.log"
     echo 'info:  Mullion: present pacing interval=1 game=1 forced=no refreshHz=60.0 capFps=0 afterMs=16.7 timerFps=40 pace=duration periodMs=25.0 displaySync=0 at=20:00:04.100'; } >"$R/pacing-timer.log"

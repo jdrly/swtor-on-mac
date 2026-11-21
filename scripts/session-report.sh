@@ -352,11 +352,11 @@ analyze() {
       npace++
       tfps = num(field("timerFps")); cfps = num(field("capFps"))
       if (tfps > 0) pcap = "timer cap " tfps " fps (MULLION_FPS_CAP" (cfps > 0 ? "; d3d12.preferredMaxFrameRate=" cfps " paces nothing" : "") ")"
-      else pcap = (cfps > 0 ? "cap " cfps " fps" : "no cap")
+      else pcap = (cfps > 0 ? "cap " cfps " fps" : "no cap") (field("timerFps") != "" ? ", timer off" : "")
       pace = sprintf("interval %s (the game'"'"'s %s, %s), %s Hz, %s", field("interval"), field("game"),
         (field("forced") == "no" ? "not forced" : "MULLION_SYNC_INTERVAL=" field("forced")), field("refreshHz"), pcap)
       if (field("pace") != "")
-        pace = pace ", pace " field("pace") (num(field("periodMs")) > 0 ? ", deadlines " field("periodMs") " ms apart" : "") \
+        pace = pace ", pace " field("pace") (num(field("periodMs")) > 0 ? ", deadlines " field("periodMs") " ms apart" : ", no frame deadline") \
           ", display sync " (field("displaySync") == "1" ? "on" : "off")
       next
     }

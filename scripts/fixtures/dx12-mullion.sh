@@ -126,13 +126,16 @@ fx_dx12_mullion_start() {
     eval '[ "$FX_RC" = 0 ] && [ "$(grep -c "^MULLION_CONFIG=" "$FX_DX12_SOM/env")" = 1 ] && [ "$(fx_dx12_seen MULLION_CONFIG)" = "d3d12.preferredMaxFrameRate=45" ] && grep -q "^SWTOR on Mac DirectX 12: swtor_RC2.exe, driver mullion (dxgi=dxmt), MULLION_SESSION_HEADER=1, MULLION_STATS=1, MULLION_MEMSTATS=1, MULLION_CONFIG=d3d12.preferredMaxFrameRate=45, Mullion " "$logs/wine.log"'
   # fork #55's checklist sets its arms by hand in d9mt-ab.env, which env reads after the
   # settings: every variable its arms use, written as it tells Jan to, reaches the game, and its
-  # MULLION_CONFIG wins over the DirectX 12 Frame Rate Limit's
+  # MULLION_CONFIG wins over the DirectX 12 Frame Rate Limit's. Debug Logging off, so the
+  # wrapper sets no MULLION_STATS or MULLION_SESSION_HEADER of its own: those come from the file
+  fx_dx12_som dev set debug off
   printf '%s\n' MTL_HUD_ENABLED=1 MULLION_LOG_LEVEL=info MULLION_STATS=1 MULLION_SESSION_HEADER=1 \
     'MULLION_CONFIG="d3d12.preferredMaxFrameRate=60"' MULLION_SYNC_INTERVAL=1 MULLION_FPS_CAP=40 MULLION_PACE=wait MULLION_DISPLAY_SYNC=1 >"$FX_DX12_SOM/d9mt-ab.env"
   fx_dx12_game "$win"
   check "dx12 mullion: the checklist's d9mt-ab.env: the game gets each variable, its MULLION_CONFIG over Settings' 45, wine.log names that one ($FX_RC)" \
     eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_seen MTL_HUD_ENABLED)/$(fx_dx12_seen MULLION_LOG_LEVEL)/$(fx_dx12_seen MULLION_STATS)/$(fx_dx12_seen MULLION_SESSION_HEADER)/$(fx_dx12_seen MULLION_CONFIG)" = "1/info/1/1/d3d12.preferredMaxFrameRate=60" ] && [ "$(fx_dx12_seen MULLION_SYNC_INTERVAL)/$(fx_dx12_seen MULLION_FPS_CAP)/$(fx_dx12_seen MULLION_PACE)/$(fx_dx12_seen MULLION_DISPLAY_SYNC)" = 1/40/wait/1 ] && grep -q "^SWTOR on Mac DirectX 12: .*, MULLION_CONFIG=d3d12.preferredMaxFrameRate=60, Mullion " "$logs/wine.log" && ! grep -q "preferredMaxFrameRate=45" "$logs/wine.log"'
   rm -f "$FX_DX12_SOM/d9mt-ab.env"
+  fx_dx12_som dev set debug on
   rm -f "$FX_DX12_W/seen"
   "$FX_DX12_W/bin/wine64-preloader" "$FX_DX12_W/bin/wine64" 'C:\windows\system32\reg.exe' query 'HKCU\Software' >/dev/null 2>&1
   check "dx12 mullion: another Wine start gets none of the game's Mullion switches" \
