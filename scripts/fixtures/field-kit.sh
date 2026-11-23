@@ -275,9 +275,10 @@ SC
   # this Mac's own sysctl, without sudo, as the wrapper calls it: every source read (on the
   # Checks runner's macOS), an unknown name among them doesn't stop the ones after it, and the
   # exit status is then 1
-  local real
-  real=$( { LC_ALL=C /usr/sbin/sysctl kern.memorystatus_vm_pressure_level som.no.such.oid kern.memorystatus_level vm.swapusage 2>/dev/null; echo "exit $?"; } | tr '\n' ';')
-  check "wrapper: this Mac's sysctl gives the pressure level, free % and swap past an unknown name, exit 1 ($real)" eval 'printf "%s\n" "$real" | piped -E "^kern\.memorystatus_vm_pressure_level: [124];kern\.memorystatus_level: [0-9]+;vm\.swapusage: total = [0-9.]+[KMG] +used = [0-9.]+[KMG] .*;exit 1;$"'
+  # (its status from the pipeline: pipefail gives sysctl's, tr's is 0)
+  local real rc=0
+  real=$(LC_ALL=C /usr/sbin/sysctl kern.memorystatus_vm_pressure_level som.no.such.oid kern.memorystatus_level vm.swapusage 2>/dev/null | tr '\n' ';') || rc=$?
+  check "wrapper: this Mac's sysctl gives the pressure level, free % and swap past an unknown name, status 1 ($real status $rc)" eval '[ "$rc" = 1 ] && printf "%s\n" "$real" | piped -E "^kern\.memorystatus_vm_pressure_level: [124];kern\.memorystatus_level: [0-9]+;vm\.swapusage: total = [0-9.]+[KMG] +used = [0-9.]+[KMG] "'
   line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" LANG=de_DE.UTF-8 SWTOR_PMSET="$pm" /bin/bash -c '. "$1"; session_conditions' - "$fns" 2>&1)
   check "wrapper: the conditions line from this Mac's sysctl ($line)" eval 'printf "%s\n" "$line" | piped -E ", memory pressure (normal|warning|critical) \([0-9]+ % free\), swap [0-9]+ MB used of [0-9]+ MB$"'
   check "wrapper: the d9mt files' hashes, a missing one named" fk_in "$R/wrapper-lines.txt" "^d3d9\.dll $(printf d9mt | /usr/bin/shasum -a 256 | cut -c1-12), winemetal\.so missing$"
