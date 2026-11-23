@@ -200,6 +200,26 @@ warn:  STATS t=40 /' "$R/b.log" >"$R/b-hidden.log"
     fk_info "screenMaxFps=30 refreshInterval=33.3-33.3"; sed -n '/ STATS t=12 /,$p' "$R/limit30.log"; } >"$R/limit-gap.log"
   "$SR" "$R/limit-gap.log" >"$R/limit-gap.txt" 2>&1 || true
   check "field: a limit not known in between: named, the seconds below 58 fps kept" eval 'fk_in "$R/limit-gap.txt" "^  Display limit +30 fps \(macOS; it changed while the game ran: 30, \?, 30; energy mode low power\)$" && fk_in "$R/limit-gap.txt" "^  Seconds below 58 fps \(%\) +100\.0$"'
+  # a second before macOS gave the limit (AppKit answers later than the first STATS line), and a
+  # cut log (Collect Logs keeps the wrapper's lines and the end): only the seconds after the limit
+  { fk_head 0.1.9 9b64581 "2026-11-02 20:00:00" "" "" "low power"
+    fk_info "screenMaxFps=? refreshInterval=?"; fk_st 1 20.0
+    fk_info "screenMaxFps=30 refreshInterval=33.3-33.3"
+    for t in $(seq 2 20); do fk_st "$t" "$([ "$t" -le 3 ] && echo 20.0 || echo 30.0)" 33.3/34.0/35.0; done
+  } >"$R/limit-late.log"
+  "$SR" "$R/limit-late.log" >"$R/limit-late.txt" 2>&1 || true
+  check "field: a second before the limit is known: left out of its count, named" fk_in "$R/limit-late.txt" '^  Seconds below the display limit \(%\) +10\.5 \(below 28 fps; the first 1 s, before macOS gave the limit, left out\)$'
+  { fk_head 0.1.9 9b64581 "2026-11-02 20:00:00" "" "" "low power"; echo "[SWTOR on Mac: only the last 5 MB of wine.log]"
+    for t in 1 2 3 4 5; do fk_st "$t" 20.0; done
+    fk_info "screenMaxFps=30 refreshInterval=33.3-33.3"
+    for t in $(seq 6 20); do fk_st "$t" 30.0 33.3/34.0/35.0; done
+  } >"$R/limit-cut.log"
+  "$SR" "$R/limit-cut.log" >"$R/limit-cut.txt" 2>&1 || true
+  check "field: a cut log: only the seconds after the limit it kept" fk_in "$R/limit-cut.txt" '^  Seconds below the display limit \(%\) +0\.0 \(below 28 fps; the first 5 s, before macOS gave the limit, left out\)$'
+  # Wine's mode not known any more at the last SCREEN-INFO: not named
+  { cat "$R/limit60.log"; fk_info "screenMaxFps=60 refreshInterval=16.7-16.7"; fk_st 21 30.0; } >"$R/limit-nomode.log"
+  "$SR" "$R/limit-nomode.log" >"$R/limit-nomode.txt" 2>&1 || true
+  check "field: Wine's mode unknown at the end: not named" fk_in "$R/limit-nomode.txt" '^  Display limit +60 fps \(macOS; energy mode automatic\)$'
   tail -n +6 "$R/limit30.log" >"$R/limit-headless.log"
   "$SR" "$R/limit-headless.log" >"$R/limit-headless.txt" 2>&1 || true
   check "field: a log without its start: the limit named, the seconds below 58 fps kept" eval 'fk_in "$R/limit-headless.txt" "^  Display limit +30 fps \(macOS\)$" && fk_in "$R/limit-headless.txt" "^  Seconds below 58 fps \(%\) +100\.0$"'

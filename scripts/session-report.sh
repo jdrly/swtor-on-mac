@@ -81,8 +81,8 @@
 #             SCREEN lines' hz is then d9mt's 60 Hz fallback, so it isn't read). The limit is
 #             printed with the energy mode from the conditions line. When one limit under 60
 #             fps holds from the log's start to its end (a "?" before the first value is the
-#             start, before AppKit answered), the seconds are counted below that limit less 2
-#             instead of below 58
+#             start, before AppKit answered), the seconds after it are counted below that
+#             limit less 2 instead of below 58 (the ones before it named)
 #
 # What the numbers are. Every frame time comes from d9mt's profiling (STATS, PACE, HITCH: Debug
 # Logging on, D9MT_PROFILE), so it is instrumented, not ordinary play's: "Measurement" says
@@ -262,7 +262,7 @@ analyze() {
     / SCREEN-INFO / {
       v = field("screenMaxFps"); if (v !~ /^[1-9][0-9]*$/) v = "?"
       if (v != scr && (v != "?" || scr != "")) { scr = v; nscr++; scrs = scrs (scrs == "" ? "" : ", ") v }
-      v = field("hz"); if (v ~ /^[0-9.]+$/ && num(v) >= 20 && num(v) <= 1000) mhz = num(v)
+      v = field("hz"); mhz = (v ~ /^[0-9.]+$/ && num(v) >= 20 && num(v) <= 1000) ? num(v) : ""
       next
     }
 
@@ -364,6 +364,8 @@ analyze() {
       if (hid[kw]) { hsecs++; hframes += fps }
       else {
         ns++; f[ns] = fps
+        # (a second after macOS gave the display limit: d9mt logs SCREEN-INFO again at each change)
+        if (scr != "" && scr != "?") kf[++nk] = fps
         vframes += fps; ftime += num(ms[1]) * fps
         p99[ns] = num(ms[2]); if (num(ms[3]) > maxft) maxft = num(ms[3])
         s33 += num(field("slow33")); s50 += num(field("slow50"))
@@ -535,11 +537,17 @@ analyze() {
           printf "fps_median=%.1f\n", pct(f, ns, 0.5)
           printf "fps_p1=%.1f\n", pct(f, ns, 0.01)
           # (below 58 fps, or with one display limit under 60 from the log'"'"'s start to its end,
-          # below that limit less 2: 58 fps is out of reach at 30)
-          thr = (nscr == 1 && header && num(scr) >= 10 && num(scr) < 60) ? num(scr) - 2 : 58
-          for (i = 1; i <= ns; i++) if (f[i] < thr) below++
-          if (thr == 58) printf "below58=%.1f\n", 100 * below / ns
-          else printf "below_limit=%.1f (below %d fps)\n", 100 * below / ns, thr
+          # below that limit less 2, 58 fps being out of reach at 30: then only the seconds after
+          # macOS gave the limit, the ones before it named)
+          if (nscr == 1 && header && nk && num(scr) >= 10 && num(scr) < 60) {
+            thr = num(scr) - 2
+            for (i = 1; i <= nk; i++) if (kf[i] < thr) below++
+            printf "below_limit=%.1f (below %d fps%s)\n", 100 * below / nk, thr,
+              (ns > nk ? sprintf("; the first %d s, before macOS gave the limit, left out", ns - nk) : "")
+          } else {
+            for (i = 1; i <= ns; i++) if (f[i] < 58) below++
+            printf "below58=%.1f\n", 100 * below / ns
+          }
           printf "ft_avg=%.2f\n", ftime / (vframes ? vframes : 1)
           printf "ft_p99_median=%.1f\n", pct(p99, ns, 0.5)
           printf "ft_max=%.1f\n", maxft
