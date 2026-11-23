@@ -330,7 +330,7 @@ flowchart TB
 ```
 
 Collect Logs, `src/collect-logs.sh`, gathers these files along with system information such as
-the macOS version, chip and memory. It redacts every file before it goes into the zip:
+the macOS version, chip, memory, memory pressure and swap, and the display limit macOS sets. It redacts every file before it goes into the zip:
 
 ```mermaid
 flowchart LR
