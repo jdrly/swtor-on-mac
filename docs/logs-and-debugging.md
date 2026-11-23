@@ -13,7 +13,11 @@ zip and tag @Pharaphobia, or attach the zip to a
 [GitHub issue](https://github.com/jdrly/swtor-on-mac/issues/new/choose).
 
 The zip holds SWTOR on Mac's logs, `env`, `settings.conf`, `dxvk.conf`,
-`install-manifest.json`, the versions, system information (macOS, chip, memory, displays, the size of macOS's Metal caches for the engine's processes, shared with other CrossOver-based apps, the size of Metal's archive usage index and the MDB_MAP_FULL events of the last 2 hours beside it) and
+`install-manifest.json`, the versions, system information (macOS, chip, memory with macOS's
+memory pressure level, free percentage and swap in use now (`sysctl`), displays with the main
+screen's display limit now (the frames per second macOS lets it show, which can be below its
+refresh rate: `NSScreen`'s `maximumFramesPerSecond` and refresh interval, which the app reads and
+passes; *not known* when the script runs without the app), the size of macOS's Metal caches for the engine's processes, shared with other CrossOver-based apps, the size of Metal's archive usage index and the MDB_MAP_FULL events of the last 2 hours beside it) and
 macOS's crash, hang and spin reports of the last 7 days (from `~/Library/Logs/DiagnosticReports`)
 for the game, Wine, the official launcher and SWTOR on Mac, so you don't have to look for them:
 the newest 20, up to 10 MB together; `system-info.txt` lists which are in the zip and which were
@@ -93,12 +97,21 @@ performance. A setting you choose is kept through updates and Reinstall.
   `system-info.txt` names the engine in place); (0.1.7 and later) when it started, the
   SHA-256 of the d9mt files that ran, the app's settings (Debug Logging, the HUD, Game Mode,
   d9mt's and DXVK's environment, paths left out), and the power source, energy mode and
-  macOS's thermal warnings at the start;
+  macOS's thermal warnings at the start; (after 0.1.9) macOS's memory pressure level, free
+  percentage and swap in use at the start too;
 - **Measurement**: every frame time in the log comes from d9mt's profiling, which Debug
   Logging turns on, so it is *instrumented*, not ordinary play's; with Debug Logging off the
   log has no frame times (the Metal HUD shows them);
 - **Data**: what is left out or lost (a missing start of the log, STATS windows of 2 s or
   more, lines d9mt's limiter suppressed, a second device, a short interval);
+- the display limit, with Debug Logging (d9mt's `SCREEN-INFO` line): the frames per second macOS
+  lets the game window's screen show, beside Wine's display mode (when d9mt knows it) and the
+  energy mode at the start, so a session held at 30 fps says that macOS allowed no more. When one
+  limit under 60 fps holds from the log's start to its end, the seconds are counted below that
+  limit less 2 (*Seconds below the display limit*) instead of below 58 fps, over the seconds after
+  the first recorded limit (the *Display limit* line names how many came before it). A limit that changed
+  or was not known in between (`?`) lists its values and keeps the 58, and so does a log without
+  its start;
 - duration, median fps, the frame rate of the worst 1% of seconds, the seconds below 58 fps.
   `STATS` lines have per-second numbers only (a second's average, 99th percentile and slowest
   frame; at 100 frames a second or fewer the 99th percentile *is* the slowest frame), so the

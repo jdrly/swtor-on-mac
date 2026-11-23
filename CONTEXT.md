@@ -179,6 +179,13 @@ code.
 compile waits, memory, d9mt's pipeline state cache); `--compare` puts 2 to 5 sessions side by
 side, `--mark` counts a fixed interval after the mark (docs/logs-and-debugging.md).
 
+**Display limit**
+The most frames per second macOS lets a screen show now (`NSScreen`'s `maximumFramesPerSecond`),
+which can be below the refresh rate of the screen's mode: 30 on a 60 Hz panel. The session report
+names it from d9mt's `SCREEN-INFO` line, Collect Logs for the main screen at collection
+(docs/logs-and-debugging.md).
+_Avoid_: calling it the Frame Rate Limit, the setting that caps the game itself.
+
 **Instrumented** / **ordinary play**
 Frame times from d9mt's profiling (Debug Logging on, `D9MT_PROFILE`) are *instrumented*; play
 with Debug Logging off is *ordinary play*, whose frame times only the Metal HUD shows. A report

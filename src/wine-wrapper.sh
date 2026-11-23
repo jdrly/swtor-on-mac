@@ -149,11 +149,14 @@ session_settings() {
     printf " %s=%s", n, v }'
   echo
 }
-# session_conditions: the power source, the energy mode (Low Power Mode) and macOS's thermal
-# and performance warnings (pmset -g therm; "none" when it has recorded none). (SWTOR_PMSET: a
-# stand-in for tests.)
+# session_conditions: the power source, the energy mode (Low Power Mode), macOS's thermal
+# and performance warnings (pmset -g therm; "none" when it has recorded none) and memory: one
+# sysctl for the pressure level (kern.memorystatus_vm_pressure_level: 1 normal, 2 warning, 4
+# critical), the free percentage behind it (kern.memorystatus_level, as memory_pressure prints
+# it) and swap in use (vm.swapusage); each "unknown" when sysctl doesn't give it, none needs
+# sudo. (SWTOR_PMSET, SWTOR_SYSCTL: stand-ins for tests.)
 session_conditions() {
-  local pm="${SWTOR_PMSET:-/usr/bin/pmset}" ps em th
+  local pm="${SWTOR_PMSET:-/usr/bin/pmset}" ps em th mem
   ps=$("$pm" -g ps 2>/dev/null | sed -n "1s/.*'\(.*\)'.*/\1/p")
   # (macOS 26: "powermode 0/1/2", automatic, low power, high power; older: "lowpowermode 0/1")
   em=$("$pm" -g 2>/dev/null | awk '$1 == "powermode" { print ($2 == 1 ? "low power" : $2 == 2 ? "high power" : "automatic"); exit }
@@ -162,7 +165,16 @@ session_conditions() {
     /^Note: No .* has been recorded/ { notes++; next }
     /[A-Za-z]/ { gsub(/[^A-Za-z0-9 _=.-]/, ""); gsub(/  +/, " "); w = w (w == "" ? "" : ", ") $0 }
     END { if (w != "") print w; else if (notes) print "none" }')
-  echo "power ${ps:-unknown}, energy mode ${em:-unknown}, thermal warnings ${th:-unknown}"
+  # (the same awk as collect-logs.sh's "Memory now:" line)
+  # (sysctl in the C locale: it prints swap with the locale's decimal separator)
+  mem=$(LC_ALL=C "${SWTOR_SYSCTL:-/usr/sbin/sysctl}" kern.memorystatus_vm_pressure_level kern.memorystatus_level vm.swapusage 2>/dev/null | LC_ALL=C awk '
+    function mb(v,    u) { u = substr(v, length(v)); v += 0; return int((u == "G" ? v * 1024 : (u == "K" ? v / 1024 : v)) + 0.5) }
+    $1 == "kern.memorystatus_vm_pressure_level:" && $2 ~ /^[0-9]+$/ { p = ($2 == 1 ? "normal" : ($2 == 2 ? "warning" : ($2 == 4 ? "critical" : "level " $2))) }
+    $1 == "kern.memorystatus_level:" && $2 ~ /^[0-9]+$/ { f = $2 }
+    $1 == "vm.swapusage:" { for (i = 2; i + 2 <= NF; i++) if ($(i + 1) == "=" && $(i + 2) ~ /^[0-9.]+[KMG]?$/) s[$i] = mb($(i + 2)) }
+    END { printf "pressure %s%s, swap %s\n", (p == "" ? "unknown" : p), (f == "" ? "" : " (" f " % free)"),
+      (("used" in s) && ("total" in s) ? s["used"] " MB used of " s["total"] " MB" : "unknown") }')
+  echo "power ${ps:-unknown}, energy mode ${em:-unknown}, thermal warnings ${th:-unknown}, memory ${mem:-pressure unknown, swap unknown}"
 }
 # d9mt_files: the first 12 hex digits of the SHA-256 of d9mt's d3d9.dll in the prefix and its
 # bridge in the engine (what ran, whatever the version label says)
@@ -178,7 +190,7 @@ d9mt_files() {
 # session_diag: session_conditions and d9mt_files, each in a process group of its own, both
 # bounded by one deadline of SWTOR_DIAG_TIMEOUT s (default 2; they take about 70 ms): what isn't
 # done by then is "unknown", its group is ended (TERM, KILL 0.2 s later) and waited for, so a
-# stalled pmset or file read never holds the game's start longer, and nothing of it stays.
+# stalled pmset, sysctl or file read never holds the game's start longer, and nothing of it stays.
 # Sets diag_conditions and diag_files.
 session_diag() {
   local d pc pf i=0 n

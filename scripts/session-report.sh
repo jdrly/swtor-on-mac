@@ -72,8 +72,17 @@
 #             driver's
 #   the wrapper's "settings:", "conditions:" and "d9mt files:" lines (0.1.7 and later): the
 #             app's settings the game started with (Debug Logging, HUD, Game Mode, d9mt's and
-#             DXVK's environment, paths left out), the power source, Low Power Mode and
-#             macOS's thermal warning at the start, and the d9mt files' SHA-256
+#             DXVK's environment, paths left out), the power source, Low Power Mode,
+#             macOS's thermal warning and (wrappers after 0.1.9) memory pressure and swap at
+#             the start, and the d9mt files' SHA-256
+#   SCREEN-INFO (d9mt 9b64581 and later, Debug Logging only) the game window's screen: the
+#             frames per second macOS lets it show (NSScreen's maximumFramesPerSecond, the
+#             display limit; "?" or 0 not known) and Wine's display mode (hz, 0.0 not known: the
+#             SCREEN lines' hz is then d9mt's 60 Hz fallback, so it isn't read). The limit is
+#             printed with the energy mode from the conditions line. When one limit under 60
+#             fps holds from the log's start to its end (a "?" before the first value is the
+#             start, before AppKit answered), the seconds after it are counted below that
+#             limit less 2 instead of below 58 (the line names the ones before it)
 #
 # What the numbers are. Every frame time comes from d9mt's profiling (STATS, PACE, HITCH: Debug
 # Logging on, D9MT_PROFILE), so it is instrumented, not ordinary play's: "Measurement" says
@@ -248,6 +257,14 @@ analyze() {
     /^SWTOR on Mac settings: / { settings = $0; sub(/^SWTOR on Mac settings: /, "", settings) }
     /^SWTOR on Mac conditions: / { conds = $0; sub(/^SWTOR on Mac conditions: /, "", conds) }
     /^SWTOR on Mac d9mt files: / { dfiles = $0; sub(/^SWTOR on Mac d9mt files: /, "", dfiles) }
+    # the display limit (each value it changed to, in order: "?" for not known, which before the
+    # first value is the start) and Wine'"'"'s display mode
+    / SCREEN-INFO / {
+      v = field("screenMaxFps"); if (v !~ /^[1-9][0-9]*$/) v = "?"
+      if (v != scr && (v != "?" || scr != "")) { scr = v; nscr++; scrs = scrs (scrs == "" ? "" : ", ") v }
+      v = field("hz"); mhz = (v ~ /^[0-9.]+$/ && num(v) >= 20 && num(v) <= 1000) ? num(v) : ""
+      next
+    }
 
     /D9MT: pipeline wait budget/ { budget = $0; sub(/.*budget /, "", budget); sub(/ per frame.*/, "", budget) }
     /D9MT: attachment load\/store optimization off/ { attoff = 1 }
@@ -347,8 +364,9 @@ analyze() {
       if (hid[kw]) { hsecs++; hframes += fps }
       else {
         ns++; f[ns] = fps
+        # (a second after macOS gave the display limit: d9mt logs SCREEN-INFO again at each change)
+        if (scr != "" && scr != "?") lkf[++nlk] = fps
         vframes += fps; ftime += num(ms[1]) * fps
-        if (fps < 58) below58++
         p99[ns] = num(ms[2]); if (num(ms[3]) > maxft) maxft = num(ms[3])
         s33 += num(field("slow33")); s50 += num(field("slow50"))
       }
@@ -501,6 +519,17 @@ analyze() {
       if (settings != "") print "settings=" settings
       if (conds != "") print "conditions=" conds
       if (dfiles != "") print "d9mt_files=" dfiles
+      # (one display limit under 60 from the log'"'"'s start to its end, and seconds read under it:
+      # those are counted below the limit less 2, 58 fps being out of reach at 30)
+      capped = nscr == 1 && header && nlk && num(scr) >= 10 && num(scr) < 60
+      if (nscr) {
+        em = conds; if (!sub(/.*energy mode /, "", em)) em = ""; sub(/,.*/, "", em)
+        # (no "session:" in it: the Collect Logs redaction takes what follows that for a secret)
+        printf "display_limit=%s (macOS%s%s%s%s)\n", (scr == "?" ? "not known at the end" : scr " fps"),
+          (nscr > 1 ? "; it changed while the game ran: " scrs : ""),
+          (mhz != "" ? sprintf("; Wine'"'"'s display mode %g Hz", mhz) : ""), (em != "" ? "; energy mode " em : ""),
+          (capped && ns > nlk ? sprintf("; %d shown STATS seconds before the first recorded limit not counted below it", ns - nlk) : "")
+      }
       if (nall) {
         printf "duration=%d\n", nall
         if (hsecs) printf "hidden=%d s, not counted below (%.1f fps)\n", hsecs, hframes / hsecs
@@ -511,7 +540,16 @@ analyze() {
           if (hsecs) printf "fps_avg_all=%.1f\n", frames / nall
           printf "fps_median=%.1f\n", pct(f, ns, 0.5)
           printf "fps_p1=%.1f\n", pct(f, ns, 0.01)
-          printf "below58=%.1f\n", 100 * below58 / ns
+          # (below 58 fps, or capped: below the limit less 2, over the seconds read under it; the
+          # ones before the first recorded limit named in display_limit)
+          if (capped) {
+            thr = num(scr) - 2
+            for (i = 1; i <= nlk; i++) if (lkf[i] < thr) below++
+            printf "below_limit=%.1f (below %d fps)\n", 100 * below / nlk, thr
+          } else {
+            for (i = 1; i <= ns; i++) if (f[i] < 58) below++
+            printf "below58=%.1f\n", 100 * below / ns
+          }
           printf "ft_avg=%.2f\n", ftime / (vframes ? vframes : 1)
           printf "ft_p99_median=%.1f\n", pct(p99, ns, 0.5)
           printf "ft_max=%.1f\n", maxft
@@ -720,6 +758,7 @@ report() {
   row "FPS: worst 1% of seconds" fps_p1
   row "FPS: 1% low (slowest 1% of frames)" fps_low1
   row "Seconds below 58 fps (%)" below58
+  row "Seconds below the display limit (%)" below_limit
   row "Frame time: average (ms)" ft_avg
   row "Frame time: median second's p99 (ms)" ft_p99_median
   row "Frame time: the session's p99" ft_p99_session
@@ -803,7 +842,8 @@ SWTOR on Mac, Wine engine, d9mt|build
 Game start|started
 d9mt files (SHA-256)|d9mt_files
 Settings at the start|settings
-Power, thermal at the start|conditions
+Power, thermal, memory at the start|conditions
+Display limit|display_limit
 Measurement|mode
 Interval|interval
 Data|data
