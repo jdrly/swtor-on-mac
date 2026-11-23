@@ -208,14 +208,18 @@ warn:  STATS t=40 /' "$R/b.log" >"$R/b-hidden.log"
     for t in $(seq 2 20); do fk_st "$t" "$([ "$t" -le 3 ] && echo 20.0 || echo 30.0)" 33.3/34.0/35.0; done
   } >"$R/limit-late.log"
   "$SR" "$R/limit-late.log" >"$R/limit-late.txt" 2>&1 || true
-  check "field: a second before the limit is known: left out of its count, named" fk_in "$R/limit-late.txt" '^  Seconds below the display limit \(%\) +10\.5 \(below 28 fps; the first 1 s, before macOS gave the limit, left out\)$'
+  check "field: a second before the limit is known: left out of its count, named with the limit" eval 'fk_in "$R/limit-late.txt" "^  Seconds below the display limit \(%\) +10\.5 \(below 28 fps\)$" && fk_in "$R/limit-late.txt" "^  Display limit +30 fps \(macOS; energy mode low power; 1 shown STATS seconds before the first recorded limit not counted below it\)$"'
+  # (with an SM3 hazard line among them, whose parser has counters of its own)
+  { cat "$R/limit-late.log"; echo "warn:  D3D9 SM3 hazard: ps_0123 PS crs-partial-mask:r2.yz packed-io:v1 swizzle:x"; } >"$R/limit-sm3.log"
+  "$SR" "$R/limit-sm3.log" >"$R/limit-sm3.txt" 2>&1 || true
+  check "field: an SM3 hazard line doesn't change the count below the limit" eval 'fk_in "$R/limit-sm3.txt" "^  Seconds below the display limit \(%\) +10\.5 \(below 28 fps\)$" && fk_in "$R/limit-sm3.txt" "^  SM3 shaders"'
   { fk_head 0.1.9 9b64581 "2026-11-02 20:00:00" "" "" "low power"; echo "[SWTOR on Mac: only the last 5 MB of wine.log]"
     for t in 1 2 3 4 5; do fk_st "$t" 20.0; done
     fk_info "screenMaxFps=30 refreshInterval=33.3-33.3"
     for t in $(seq 6 20); do fk_st "$t" 30.0 33.3/34.0/35.0; done
   } >"$R/limit-cut.log"
   "$SR" "$R/limit-cut.log" >"$R/limit-cut.txt" 2>&1 || true
-  check "field: a cut log: only the seconds after the limit it kept" fk_in "$R/limit-cut.txt" '^  Seconds below the display limit \(%\) +0\.0 \(below 28 fps; the first 5 s, before macOS gave the limit, left out\)$'
+  check "field: a cut log: only the seconds after the limit it kept" eval 'fk_in "$R/limit-cut.txt" "^  Seconds below the display limit \(%\) +0\.0 \(below 28 fps\)$" && fk_in "$R/limit-cut.txt" "^  Display limit +30 fps \(macOS; energy mode low power; 5 shown STATS seconds before the first recorded limit not counted below it\)$"'
   # Wine's mode not known any more at the last SCREEN-INFO: not named
   { cat "$R/limit60.log"; fk_info "screenMaxFps=60 refreshInterval=16.7-16.7"; fk_st 21 30.0; } >"$R/limit-nomode.log"
   "$SR" "$R/limit-nomode.log" >"$R/limit-nomode.txt" 2>&1 || true

@@ -109,7 +109,7 @@ performance. A setting you choose is kept through updates and Reinstall.
   energy mode at the start, so a session held at 30 fps says that macOS allowed no more. When one
   limit under 60 fps holds from the log's start to its end, the seconds are counted below that
   limit less 2 (*Seconds below the display limit*) instead of below 58 fps, over the seconds after
-  macOS gave the limit (the ones before it are named). A limit that changed
+  the first recorded limit (the *Display limit* line names how many came before it). A limit that changed
   or was not known in between (`?`) lists its values and keeps the 58, and so does a log without
   its start;
 - duration, median fps, the frame rate of the worst 1% of seconds, the seconds below 58 fps.
