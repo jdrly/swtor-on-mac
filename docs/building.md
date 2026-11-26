@@ -161,6 +161,12 @@ Development builds (`APP_VERSION` `X.Y.Z-dev.N`, on the `dev` branch):
 creates the GitHub pre-release `v<version>` with the DMG and `release-notes/<version>.md`, and
 no feed. The other modes refuse dev versions.
 
+DirectX 12 development builds come from the `dx12` branch, numbered with the next release of the
+DirectX 9 line (0.1.10 while 0.1.9 is the latest release), and stay on my Mac:
+`SWTOR_ON_MAC_VERSION=0.1.10-dev.909 ./build.sh --install`, then *Update to 0.1.10-dev.909* in the
+app. No `scripts/release.sh`. Its CFBundleVersion, 0.1.9.1909, sorts above every 0.1.9-dev build
+(0.1.8.1908 for 0.1.9-dev.908) and below 0.1.10.
+
 `./build.sh && scripts/release.sh` also does everything in one go (sign, notarize, feed, a draft
 release with the DMG, the deltas and the feed), without the gates above.
 
