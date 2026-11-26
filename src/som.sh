@@ -171,8 +171,9 @@ if [ -n "$ROOT" ]; then LAUNCHCTL="${SWTOR_ON_MAC_LAUNCHCTL:-}"; else LAUNCHCTL=
 # What SWTOR on Mac keeps in $SOM (removed by uninstall; backup/ stays). frameworks: the old
 # engine's libraries (0.0.x installs, until an install upgrades them); upgrade-backup: what an
 # upgrade from 0.0.x keeps until it has gone through (begin_upgrade); d9mt-ab.env: development
-# builds' d9mt A/B switches (Resources/d9mt-ab.sh, see write_env)
-APP_FILES="engine prefix gamemode dxvk.conf env settings.conf agent last-update-check update-available dev-defaults frameworks upgrade-backup d9mt-ab.env"
+# builds' d9mt A/B switches (Resources/d9mt-ab.sh, see write_env); dx12-window-fit: the screens
+# the app's Play wrote for the next DirectX 12 start (the wrapper's dx12_fit_window)
+APP_FILES="engine prefix gamemode dxvk.conf env settings.conf agent last-update-check update-available dev-defaults frameworks upgrade-backup d9mt-ab.env dx12-window-fit"
 LOGFILE=/dev/null
 
 # The engine (one at a time) and the file every Wine process of it runs from: its loader
@@ -439,16 +440,20 @@ status() {
 #               where macOS has it) or gptk-mtl3 (D3DMetal on Metal 3, D3DM_MTL4=0)
 #   dx12fps     "DirectX 12 Frame Rate Limit", development builds only: off or one of FPS_LIMITS;
 #               with a Mullion driver, Mullion's d3d12.preferredMaxFrameRate in env's MULLION_CONFIG
+#   dx12fit     "Fit the game window to the screen at each start", development builds only, on
+#               by default: env's SWTOR_DX12_FIT (Wine's pixels per point: 2 with Retina mode), and
+#               the wrapper gives swtor_RC2.exe's saved window the screen at a start from Play
+#               (dx12_fit_window in wine-wrapper.sh)
 # With physkeys, rawmouse or nativefs on, the engine's Mac driver is the app's patched build
 # (Resources/wine/), else the engine's own (install_winemac).
-SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery flushcap nativefs dx12 dx12driver dx12fps"
+SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery flushcap nativefs dx12 dx12driver dx12fps dx12fit"
 MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
 HUD_POSITIONS="topleft topcenter topright centerleft centered centerright bottomleft bottomcenter bottomright"
 FPS_LIMITS="off 30 40 45 60"
 DX12_DRIVERS="mullion mullion-mtl3 gptk gptk-mtl3"
 setting_default() {
   case "$1" in
-    retina|gamemode|vsync|updates|rawmouse) echo on ;;
+    retina|gamemode|vsync|updates|rawmouse|dx12fit) echo on ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     hud|physkeys|fpslimit|fpsbattery|flushcap|nativefs|dx12|dx12fps) echo off ;;
     dx12driver) echo mullion ;;
@@ -465,7 +470,7 @@ setting_valid() { # <key> <value>
     retina:on|retina:off|hud:on|hud:off|gamemode:on|gamemode:off|vsync:on|vsync:off) return 0 ;;
     debug:on|debug:off|updates:on|updates:off|physkeys:on|physkeys:off) return 0 ;;
     rawmouse:on|rawmouse:off|fpsbattery:on|fpsbattery:off|flushcap:on|flushcap:off|dx12:on|dx12:off) return 0 ;;
-    nativefs:on|nativefs:off) return 0 ;;
+    nativefs:on|nativefs:off|dx12fit:on|dx12fit:off) return 0 ;;
     memory:auto|memory:low|memory:medium|memory:high|memory:ultra|memory:unlimited) return 0 ;;
     mousespeed:*) in_list "$2" "$MOUSE_SPEEDS" && return 0 ;;
     hudpos:*) in_list "$2" "$HUD_POSITIONS" && return 0 ;;
@@ -477,7 +482,8 @@ setting_valid() { # <key> <value>
 # Settings per renderer (development builds): DirectX 9 and DirectX 12 each keep a set of their
 # own, and the dx12 switch picks the one in effect; turning it on or off swaps the whole set.
 #   global       the same for both: Debug Logging, the update check, and the DirectX 12
-#                settings themselves (only the DirectX 12 set reads its driver and frame limit)
+#                settings themselves (only the DirectX 12 set reads its driver, frame limit and
+#                window fit)
 #   DX9 only     d9mt's settings, and the ones that don't work with the DirectX 12 client (Jan's
 #                list, 2026-11-26): off in the DirectX 12 set, which doesn't keep them, and
 #                greyed out in Settings while it is in effect
@@ -486,7 +492,7 @@ setting_valid() { # <key> <value>
 # settings.conf keeps the DirectX 9 set as before (key=value, which a release build reads as
 # its own) and the DirectX 12 set's as dx12.<key>=value. A DirectX 12 set not written yet starts
 # as the DirectX 9 set (a file of an earlier version), its DX9-only settings off.
-SETTINGS_GLOBAL="debug updates retina dx12 dx12driver dx12fps"
+SETTINGS_GLOBAL="debug updates retina dx12 dx12driver dx12fps dx12fit"
 SETTINGS_DX9_ONLY="gamemode vsync memory physkeys rawmouse mousespeed fpslimit fpsbattery flushcap nativefs"
 # load_settings: settings.conf read once, into SETTINGS_TEXT, which every setting this command
 # reads comes from; status 1 if it is there but the read failed. settings.conf is written only
@@ -686,7 +692,7 @@ on_set_exit() {
 cmd_set() {
   local key="${1:-}" value="${2:-}"
   setting_valid "$key" "$value" || { echo "@error Unknown setting: $key=$value"; exit 2; }
-  case "$key" in dx12|dx12driver|dx12fps) [ "$CHANNEL" = dev ] || die "DirectX 12 is in development builds only." ;; esac
+  case "$key" in dx12|dx12driver|dx12fps|dx12fit) [ "$CHANNEL" = dev ] || die "DirectX 12 is in development builds only." ;; esac
   [ -f "$MANIFEST" ] || die "SWTOR on Mac is not installed."
   # an install from 0.0.x runs on its own engine until Reinstall upgrades it: settings written
   # for this version's engine would break it
@@ -1612,6 +1618,10 @@ SWTOR_DX12_DRIVER=$(setting dx12driver)$drv
 # which swtor.exe gets, also when DirectX 12 falls back to it)
 SWTOR_DX12_HUD=$([ "$(set_value dx12 hud)" = on ] && echo 1 || echo 0)
 SWTOR_DX12_HUD_POS=$(set_value dx12 hudpos)"
+    # (Settings: Fit the game window to the screen at each start; Wine's pixels per point, as
+    # its Mac driver counts them: 2 with Retina mode)
+    [ "$(setting dx12fit)" != on ] || dx12_env="$dx12_env
+SWTOR_DX12_FIT=$([ "$(setting retina)" = on ] && echo 2 || echo 1)"
     # (the driver's build, which wine.log names)
     [ "$tree" != dxmt ] || dx12_env="$dx12_env
 SWTOR_DX12_DRIVER_VERSION=\"$(mullion_version)\""

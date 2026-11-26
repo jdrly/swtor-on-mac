@@ -365,6 +365,13 @@ struct SettingsView: View {
         }
         .disabled(settings.values["dx12"] != "on"
                   || !(settings.values["dx12driver"] ?? "mullion").hasPrefix("mullion"))
+        Toggle(isOn: settings.toggle("dx12fit")) {
+          Text("Fit the game window to the screen at each start")
+          Text("The DirectX 12 client opens where it last was, and keeps a window macOS once made smaller. "
+               + "On: each start from Play SWTOR gives it the whole screen it was on, below the menu bar. "
+               + "Off: it keeps the size you gave it.")
+        }
+        .disabled(settings.values["dx12"] != "on")
       }
       .disabled(settings.running)
       #endif
