@@ -69,7 +69,15 @@ x86_64 probe started behind dead exception ports faults once, through the packag
 `hold-launcher`'s x86_64 slice it gets past the fault with no Rosetta error, and an unhandled
 fault still ends it by `SIGSEGV`; the control, the probe itself in `hold-launcher`'s place, must
 fail with Rosetta's `failed to send exception`; needs clang and Rosetta, skipped without them),
-development builds' Mullion for DirectX 12 (group `dx12-mullion`: `som.sh set` on a
+the settings kept per renderer in development builds (group `settings-sets`: on a planted
+install, an earlier version's `settings.conf` seeding both sets; DirectX 12 on and off swapping
+the values shown, each set keeping its own, Retina one value for both, `swtor_RC2.exe`'s and
+`env`'s DirectX 12 lines DirectX 12's; a DirectX 9-only setting refused while DirectX 12's set is
+in effect; a change failing half way put back, a switch off Mullion leaving no `env` that starts
+it, a failed copy leaving no lock; the hook check writing only `settings.conf`, and an earlier
+version's install refusing DirectX 12's set until Update; a reader of 0.1.9 getting the DirectX 9
+set; the set in the session report. Settings greying out the DirectX 9-only rows is checked on
+the Mac, by hand), development builds' Mullion for DirectX 12 (group `dx12-mullion`: `som.sh set` on a
 planted install with the engine's real `dxmt` tree, downloaded once into `.cache/`, and
 stand-in archives in the layout of my fork's builds, pinned in the test's `som.sh` and served by
 `scripts/fetch-test-server.py`: Mullion installed, `env` naming the build from its `VERSION`, the
@@ -77,8 +85,9 @@ engine's files kept as `.stock` and put back byte for byte, d9mt's bridge behind
 `winemetal.so` link untouched, a tree left by Mullion v0.5-alpha.3 switched to the fork's build
 or put back with its NVIDIA shims gone, a changed download, an archive whose `VERSION` names
 another commit or another engine's tree refused with nothing changed, `env` without
-DirectX 12 while Mullion isn't in place, and Native fullscreen reaching `swtor_RC2.exe` (its
-`NativeFullscreen` with either setting changed, with a control without it that fails)), the Mullion pin check (group `mullion-pin`:
+DirectX 12 while Mullion isn't in place, and Native fullscreen kept from `swtor_RC2.exe`
+(DirectX 9 only: refused while DirectX 12 is on, `swtor.exe`'s `NativeFullscreen` its own and
+`swtor_RC2.exe`'s off, with a control giving it the DirectX 9 value that fails)), the Mullion pin check (group `mullion-pin`:
 `scripts/check-mullion-pin.sh` with a stand-in `gh` and planted answers, a commit without a green
 push run failing), development builds' D3DMetal import (group
 `dx12-gptk`: `som.sh dx12-gptk` on made-up Game Porting Toolkit images, real disk images made

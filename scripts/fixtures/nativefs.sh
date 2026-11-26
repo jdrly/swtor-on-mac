@@ -94,7 +94,7 @@ fx_nativefs() {
   out=$(fx_nf_wrap "" "")
   check "nativefs: wrapper, an env without the setting (0.1.8's): off, no channel ($out)" eval '[ "$out" = "|off|debug-logging=off hud=off game-mode=off native-fullscreen=off" ]'
   check "nativefs: wrapper: the game only, after Debug Logging's channels" \
-    eval '[ "$(grep -c "^ *native_fullscreen$" "$wrapper")" = 1 ] && grep -B2 "^ *native_fullscreen$" "$wrapper" | piped -F "export WINEDEBUG=\"\$SWTOR_GAME_WINEDEBUG\""'
+    eval '[ "$(grep -c "^ *native_fullscreen$" "$wrapper")" = 1 ] && grep -B6 "^ *native_fullscreen$" "$wrapper" | piped -F "export WINEDEBUG=\"\$SWTOR_GAME_WINEDEBUG\""'
   check "nativefs: wrapper: wine.log names the setting, on or off" grep -qF 'echo "SWTOR on Mac native fullscreen: $nf_note" >&2' "$wrapper"
 
   # 3. The session report

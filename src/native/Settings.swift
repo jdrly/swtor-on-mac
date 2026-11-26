@@ -60,10 +60,23 @@ final class GameSettings {
   var loaded: Bool { !values.isEmpty }
   var installed: Bool { values["installed"] == "yes" }
   var running: Bool { values["running"] == "yes" }
+  // DirectX 12's set of settings in effect (development builds keep one per renderer, som.sh
+  // settings_set), and whether a setting is one that doesn't work with DirectX 12 (dx9_only),
+  // greyed out while that set is in effect
+  var dx12Set: Bool { values["settings_set"] == "dx12" }
+  func dx9Only(_ key: String) -> Bool {
+    dx12Set && (values["dx9_only"] ?? "").split(separator: " ").contains { $0 == key }
+  }
+  static let dx9OnlyNote = "Doesn't work with DirectX 12. Turn DirectX 12 off to change it: it keeps its value for DirectX 9."
 
   func reload() {
+    Task { await load() }
+  }
+
+  // som.sh settings, into values (the set chosen; a change waits for it, see set)
+  private func load() async {
     nonDigitLayout = NumberRow.nonDigitLayout()
-    Task {
+    do {
       let output = await Installer.capture(script: script, arguments: ["settings"])
       var parsed: [String: String] = [:]
       for line in output.split(separator: "\n") {
@@ -140,14 +153,16 @@ final class GameSettings {
     let script = script
     Task {
       let output = await Installer.capture(script: script, arguments: ["set", key, value])
-      saving = false
       if !output.contains("@done ") {
         values[key] = previous
         if key == "updates" { updates?.automaticChecks = previous != "off" }
         error = output.split(separator: "\n").first { $0.hasPrefix("@error ") }.map { String($0.dropFirst(7)) }
           ?? "The setting could not be saved."
       }
-      reload()
+      // (the window takes the next change only once it shows what som.sh saved: after the
+      // DirectX 12 switch, the other set)
+      await load()
+      saving = false
     }
   }
 }
@@ -218,6 +233,9 @@ struct SettingsView: View {
     } detail: {
       Form {
         sections(for: selectedPane)
+          // (one change at a time, and the next only once the window shows the set it left:
+          // DirectX 12 on or off switches every value)
+          .disabled(settings.saving)
           .disabled(!settings.loaded || !settings.installed)
         notes(for: selectedPane)
       }
@@ -277,6 +295,7 @@ struct SettingsView: View {
           Text("Waits for the display between frames: no tearing in borderless windowed mode, frame "
                + "rate capped at the display's refresh rate.")
         }
+        .dx9Only(settings.dx9Only("vsync"))
       }
       Section {
         Picker(selection: settings.fpsLimit) {
@@ -289,11 +308,13 @@ struct SettingsView: View {
                + "45 keep the load even but show frames unevenly on a 60 Hz display; 40 is even on "
                + "a 120 Hz ProMotion display. 60 limits only with Vsync off or on a faster display.")
         }
+        .dx9Only(settings.dx9Only("fpslimit"))
         Toggle(isOn: settings.toggle("fpsbattery")) {
           Text("Only on battery")
           Text("Limits the frame rate only if your Mac runs on battery when the game starts.")
         }
         .disabled((settings.values["fpslimit"] ?? "off") == "off")
+        .dx9Only(settings.dx9Only("fpsbattery"))
       }
       Section {
         Picker(selection: settings.memory) {
@@ -305,6 +326,7 @@ struct SettingsView: View {
                + "headroom and want sharper textures in busy places; lower it if macOS runs short "
                + "of memory. Unlimited is for comparisons.")
         }
+        .dx9Only(settings.dx9Only("memory"))
       }
       Section {
         // d9mt's flush cap, D9MT_FLUSH_CAP=1 for the game (som.sh flushcap)
@@ -314,6 +336,7 @@ struct SettingsView: View {
                + "memory. Recommended for lower-end MacBooks and MacBook Airs. Turn it off if the "
                + "game stutters more.")
         }
+        .dx9Only(settings.dx9Only("flushcap"))
       }
       #if SWTOR_DEV
       // development builds only: Broadsword's DirectX 12 client instead of swtor.exe (som.sh dx12)
@@ -322,7 +345,10 @@ struct SettingsView: View {
           Text("DirectX 12 (experimental)")
           Text(settings.running
                ? gameRunningNote
-               : "Starts Broadsword's DirectX 12 client (swtor_RC2.exe) instead of the DirectX 9 one.")
+               : "Starts Broadsword's DirectX 12 client (swtor_RC2.exe) instead of the DirectX 9 one. "
+                 + "DirectX 12 and DirectX 9 each keep their own settings: turning this on or off "
+                 + "switches to the other set. The ones that don't work with DirectX 12 are greyed out "
+                 + "while it is on.")
         }
         Picker(selection: settings.dx12Driver) {
           ForEach(GameSettings.dx12Drivers, id: \.0) { value, title in Text(title).tag(value) }
@@ -350,6 +376,7 @@ struct SettingsView: View {
           Text("While the game is in full screen, macOS gives it priority on the CPU and GPU and "
                + "lowers the latency of Bluetooth controllers and headphones.")
         }
+        .dx9Only(settings.dx9Only("gamemode"))
         // Native fullscreen (som.sh nativefs): shown only in development builds until the
         // maintainer's play test, and in any build while it is on, so a release can still turn
         // off what a development build turned on. To show it to everyone, remove this `if` line
@@ -365,6 +392,7 @@ struct SettingsView: View {
                    + "effect at the next game start.")
           }
           .disabled(settings.running)
+          .dx9Only(settings.dx9Only("nativefs"))
         }
         Toggle(isOn: settings.toggle("hud")) {
           Text("Show Metal HUD")
@@ -393,8 +421,9 @@ struct SettingsView: View {
                  + "in chat still uses your layout.")
         }
         .disabled(settings.running)
+        .dx9Only(settings.dx9Only("physkeys"))
       } footer: {
-        if let layout = settings.nonDigitLayout, settings.values["physkeys"] != "on" {
+        if let layout = settings.nonDigitLayout, settings.values["physkeys"] != "on", !settings.dx9Only("physkeys") {
           Label("Your keyboard layout (\(layout.name)) types \(layout.keys) on the number row: "
                 + "turn this on to have 1–0 in the game.", systemImage: "keyboard")
             .font(.callout)
@@ -415,6 +444,7 @@ struct SettingsView: View {
                  + "behavior.")
         }
         .disabled(settings.running)
+        .dx9Only(settings.dx9Only("rawmouse"))
         Picker(selection: settings.mouseSpeed) {
           ForEach(GameSettings.mouseSpeeds, id: \.self) { speed in
             Text(speed == "1" ? "1× (as fast as the pointer)" : "\(speed)×").tag(speed)
@@ -427,6 +457,7 @@ struct SettingsView: View {
                  + "in System Settings. The game's own mouse sensitivity applies on top.")
         }
         .disabled(settings.running || settings.values["rawmouse"] != "on")
+        .dx9Only(settings.dx9Only("mousespeed"))
       }
 
     case .playButton:
@@ -507,5 +538,13 @@ struct SidebarBrand: View {
     }
     .padding(.horizontal, 18)
     .padding(.bottom, 14)
+  }
+}
+
+extension View {
+  // A setting that doesn't work with DirectX 12, while DirectX 12's set is in effect: greyed out,
+  // with the reason as its tooltip (GameSettings.dx9Only)
+  func dx9Only(_ off: Bool) -> some View {
+    disabled(off).help(off ? GameSettings.dx9OnlyNote : "")
   }
 }

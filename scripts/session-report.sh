@@ -279,6 +279,7 @@ analyze() {
       if (index($0, ", d9mt ")) { d9id = $0; sub(/.*, d9mt /, "", d9id); sub(/, started .*/, "", d9id) }
     }
     /^SWTOR on Mac settings: / { settings = $0; sub(/^SWTOR on Mac settings: /, "", settings) }
+    /^SWTOR on Mac settings set: / { sset = $0; sub(/^SWTOR on Mac settings set: /, "", sset) }
     /^SWTOR on Mac conditions: / { conds = $0; sub(/^SWTOR on Mac conditions: /, "", conds) }
     /^SWTOR on Mac d9mt files: / { dfiles = $0; sub(/^SWTOR on Mac d9mt files: /, "", dfiles) }
     /^SWTOR on Mac driver files: / { drfiles = $0; sub(/^SWTOR on Mac driver files: /, "", drfiles) }
@@ -656,6 +657,7 @@ analyze() {
       if (marklen > 0) print "interval_ok=" ((marked && !ivshort && !ivempty && !ivdev && ivcov == marklen && !ivgap && !ivsettlegap && !hsecs && nall == ke - ks + 1) ? "yes" : "no")
       print "data=" (d == "" ? "nothing left out or lost" : substr(d, 3))
       if (settings != "") print "settings=" settings
+      if (sset != "") print "settings_set=" sset
       if (conds != "") print "conditions=" conds
       if (dfiles != "") print "d9mt_files=" dfiles
       if (drfiles != "") print "driver_files=" drfiles
@@ -1007,6 +1009,7 @@ Game start|started
 d9mt files (SHA-256)|d9mt_files
 Driver files (SHA-256)|driver_files
 Settings at the start|settings
+Settings set|settings_set
 Power, thermal at the start|conditions
 Measurement|mode
 Interval|interval

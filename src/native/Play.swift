@@ -46,6 +46,12 @@ extension Installer {
   nonisolated static func playAction(status: [String: String], working: Bool, launcher: Bool, game: Bool) -> PlayAction {
     if working { return .unavailable("Wait until SWTOR on Mac has finished.") }
     guard !status.isEmpty else { return .unavailable("Checking this Mac…") }
+    // settings.conf som.sh can't read: every som.sh command refuses, so only Show goes on
+    if let error = status["settings_error"] {
+      let busy = status["busy"] ?? ""
+      if game || launcher || busy == "launcher" || busy == "game" { return .show(game: game || busy == "game") }
+      return .unavailable(error)
+    }
     guard let url = officialAppURL(status) else {
       return .unavailable("The official SWTOR app was not found. Install it from swtor.com.")
     }
@@ -58,7 +64,21 @@ extension Installer {
     let busy = status["busy"] ?? ""
     if game { return .show(game: true) }
     if launcher || busy == "launcher" || busy == "game" { return .show(game: busy == "game") }
+    if let reason = launchBlocked(status) { return .unavailable(reason) }
     return .launch(url)
+  }
+
+  // Why a new game start must wait, if it must: the installed env starts DirectX 12 on an earlier
+  // build's wrapper and files, which don't have DirectX 12's settings (Update or Reinstall writes
+  // them; som.sh status's dx12 and settings_sets). Showing a running launcher or game still works.
+  // A settings.conf som.sh can't read blocks it too (som.sh refuses every command then).
+  nonisolated static func launchBlocked(_ status: [String: String]) -> String? {
+    if let error = status["settings_error"] { return error }
+    guard status["dx12"] == "on", status["settings_sets"] != "yes" else { return nil }
+    let installed = status["installed_version"] ?? ""
+    return installed != status["version"]
+      ? "DirectX 12 is on, and SWTOR on Mac \(installed) is installed. Click Update first."
+      : "DirectX 12 is on, and the installed SWTOR on Mac is an earlier build. Click Reinstall first."
   }
 
   // The sandbox's root (SWTOR_ON_MAC_ROOT; som.sh reports its real path), or nil.
@@ -211,6 +231,8 @@ extension Installer {
     return action
   }
 
+  nonisolated static let busyMessage =
+    "SWTOR on Mac is changing its settings or its install right now. Press Play SWTOR again in a moment."
   nonisolated static let changingMessage =
     "SWTOR's launcher is changing its Wine right now. Wait until it has finished, then press Play SWTOR again."
 
@@ -220,6 +242,11 @@ extension Installer {
                                         launcher: Bool, game: Bool) -> PlayAction {
     let action = playAction(status: status, working: working, launcher: launcher, game: game)
     if answer == "@notice changing", case .unavailable = action { return .unavailable(changingMessage) }
+    // (an install, uninstall or settings change runs, a switch of DirectX 12 among them: the game
+    // waits for its files)
+    if answer == "@notice busy" { return .unavailable(busyMessage) }
+    // (settings.conf became unreadable since the last status: som.sh refused the check)
+    if answer.hasPrefix("@error Settings can't be read"), case .launch = action { return .unavailable(String(answer.dropFirst(7))) }
     return action
   }
 
@@ -284,6 +311,8 @@ extension Installer {
   private func showSWTOR(then: @escaping (String?) -> Void) {
     let running = Installer.runningSWTOR(status)
     guard let app = running.game ?? running.launcher else {
+      // (it ended meanwhile: a new start, which waits as Play's does)
+      if let reason = Installer.launchBlocked(status) { then(reason); return }
       if let url = Installer.officialAppURL(status) { launch(url, then: then) } else { refresh() }
       return
     }

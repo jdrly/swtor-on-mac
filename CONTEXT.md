@@ -201,6 +201,12 @@ compile waits, memory, the GPU's failures, d9mt's pipeline state cache), for d9m
 `--compare` puts 2 to 5 sessions side by side, `--mark` counts a fixed interval after the mark
 (docs/logs-and-debugging.md).
 
+**Settings set**
+Development builds keep a set of settings for each renderer, DirectX 9's and DirectX 12's, and
+*DirectX 12 (experimental)* picks the one in effect. Some settings are global, and the DirectX 9
+only ones are off and greyed out in DirectX 12's set (docs/settings.md, *DirectX 12*; `src/som.sh`,
+`SETTINGS_GLOBAL`, `SETTINGS_DX9_ONLY`).
+
 **Renderer**
 What a session drew with, as the session report names it: DirectX 9 on d9mt, or the DirectX 12
 client on Mullion or on D3DMetal (the wrapper's `SWTOR on Mac DirectX 12:` line in `wine.log`,

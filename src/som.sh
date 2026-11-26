@@ -378,6 +378,11 @@ status() {
   if [ -f "$MANIFEST" ]; then
     echo "installed=yes"
     echo "installed_version=$(json_get "$MANIFEST" version)"
+    # whether Install wrote the files of the settings sets, and whether the installed env starts
+    # DirectX 12 (development builds): Play waits for Update or Reinstall while that env runs on
+    # files without the sets (sets_installed)
+    echo "settings_sets=$(sets_installed && echo yes || echo no)"
+    echo "dx12=$([ "$CHANNEL" = dev ] && grep -qx 'SWTOR_DX12=1' "$SOM/env" 2>/dev/null && echo on || echo off)"
     echo "installed_d9mt=$(json_get "$MANIFEST" d9mt)"
     # the engine in place (an install from 0.0.x: CrossOver 24.0.7 until Reinstall upgrades it)
     echo "installed_engine=$(json_get "$MANIFEST" engine)"
@@ -469,11 +474,69 @@ setting_valid() { # <key> <value>
   esac
   return 1
 }
-setting() { # <key>: its value, or the default
-  local v
-  v=$(sed -n "s/^$1=//p" "$SETTINGS" 2>/dev/null | tail -1)
-  if setting_valid "$1" "$v"; then echo "$v"; else setting_default "$1"; fi
+# Settings per renderer (development builds): DirectX 9 and DirectX 12 each keep a set of their
+# own, and the dx12 switch picks the one in effect; turning it on or off swaps the whole set.
+#   global       the same for both: Debug Logging, the update check, and the DirectX 12
+#                settings themselves (only the DirectX 12 set reads its driver and frame limit)
+#   DX9 only     d9mt's settings, and the ones that don't work with the DirectX 12 client (Jan's
+#                list, 2026-11-26): off in the DirectX 12 set, which doesn't keep them, and
+#                greyed out in Settings while it is in effect
+#   the rest     per renderer: hud, hudpos (Retina mode is global: Wine's Mac driver reads it
+#                for the whole prefix, not per program)
+# settings.conf keeps the DirectX 9 set as before (key=value, which a release build reads as
+# its own) and the DirectX 12 set's as dx12.<key>=value. A DirectX 12 set not written yet starts
+# as the DirectX 9 set (a file of an earlier version), its DX9-only settings off.
+SETTINGS_GLOBAL="debug updates retina dx12 dx12driver dx12fps"
+SETTINGS_DX9_ONLY="gamemode vsync memory physkeys rawmouse mousespeed fpslimit fpsbattery flushcap nativefs"
+# load_settings: settings.conf read once, into SETTINGS_TEXT, which every setting this command
+# reads comes from; status 1 if it is there but the read failed. settings.conf is written only
+# from a read that succeeded (at som.sh's start, and again under the lock before a change), so a
+# read error never turns into defaults written over it.
+load_settings() {
+  SETTINGS_TEXT=""
+  [ -e "$SETTINGS" ] || return 0
+  SETTINGS_TEXT=$(cat "$SETTINGS" 2>/dev/null) || return 1
 }
+SETTINGS_ERROR="Settings can't be read: $SETTINGS. Fix its permissions, then try again."
+# has_two_sets: settings.conf (as read) has the DirectX 12 set's lines
+has_two_sets() { printf '%s\n' "$SETTINGS_TEXT" | grep -q '^dx12\.'; }
+# stored <name>: the value settings.conf has for <key> or dx12.<key>, if it is a valid one
+stored() {
+  local v
+  # (the name compared as it is: no pattern; the last line of it counts)
+  v=$(printf '%s\n' "$SETTINGS_TEXT" | awk -v k="$1" 'index($0, k "=") == 1 { v = substr($0, length(k) + 2) } END { print v }')
+  if setting_valid "${1#dx12.}" "$v"; then echo "$v"; fi
+}
+# off_value <key>: a DX9-only setting's value in the DirectX 12 set (what does nothing)
+off_value() {
+  case "$1" in memory) echo auto ;; mousespeed) echo 1 ;; *) echo off ;; esac
+}
+# set_value <dx9|dx12> <key>: that set's value: the DirectX 12 set's own (a global setting's,
+# or a DX9-only one's off value), else the DirectX 9 set's, else the default
+set_value() {
+  local v=""
+  if [ "$1" = dx12 ] && ! in_list "$2" "$SETTINGS_GLOBAL"; then
+    if in_list "$2" "$SETTINGS_DX9_ONLY"; then off_value "$2"; return; fi
+    v=$(stored "dx12.$2")
+  fi
+  [ -n "$v" ] || v=$(stored "$2")
+  [ -n "$v" ] || v=$(setting_default "$2")
+  echo "$v"
+}
+# sets_installed: Install (or Update) of a build with the settings sets wrote the wrapper, env and
+# the prefix's values (the manifest's settings_sets); before, they are an earlier build's, which
+# start swtor_RC2.exe with the DirectX 9 set's values whatever the window shows
+sets_installed() { [ "$(json_get "$MANIFEST" settings_sets)" = yes ]; }
+# settings_set: the set chosen in Settings, dx12 with DirectX 12 on (development builds), else dx9
+settings_set() { if [ "$CHANNEL" = dev ] && [ "$(set_value dx9 dx12)" = on ]; then echo dx12; else echo dx9; fi; }
+# The files made from the settings hold both sets where they differ: env's game settings,
+# dxvk.conf and the prefix's values for every program and for swtor.exe are the DirectX 9 set's;
+# swtor_RC2.exe's values (dx12_reg) and env's DirectX 12 lines are the DirectX 12 set's. So the
+# wrapper runs the set of the client that actually starts: swtor.exe, also when DirectX 12 falls
+# back to it (no swtor_RC2.exe, no driver), with the DirectX 9 set.
+setting() { set_value dx9 "$1"; }   # <key>: the DirectX 9 set's value (a global one's too)
+# shown <key>: its value in the set chosen in Settings (what the window shows and set changes)
+shown() { if in_list "$1" "$SETTINGS_GLOBAL"; then set_value dx9 "$1"; else set_value "$(settings_set)" "$1"; fi; }
 
 # Is DirectX 12 in effect? Only in a development build: a release build never writes or applies
 # anything of it, whatever settings.conf says (a stale dx12=on there does nothing).
@@ -487,16 +550,31 @@ dx12_driver_ok() {
   esac
 }
 
-write_settings() { # [<key> <value>]: settings.conf with every key, one of them changed
-  local k v
-  for k in $SETTING_KEYS; do
-    v=$(setting "$k")
-    if [ "$k" = "${1:-}" ]; then v=$2; fi
-    echo "$k=$v"
-  done | {
+# write_settings [<key> <value>]: settings.conf with every key of both sets, one of them changed
+# in the set in effect (a global one in the DirectX 9 set's lines, which hold them)
+write_settings() {
+  local k v in=dx9 text
+  if [ -n "${1:-}" ] && ! in_list "$1" "$SETTINGS_GLOBAL"; then in=$(settings_set); fi
+  text=$({
     echo "# SWTOR on Mac settings (change them in the app: SWTOR on Mac > Settings…)"
-    cat
-  } | put "$SETTINGS" 644
+    for k in $SETTING_KEYS; do
+      v=$(set_value dx9 "$k")
+      if [ "$k" = "${1:-}" ] && [ "$in" = dx9 ]; then v=$2; fi
+      echo "$k=$v"
+    done
+    if [ "$CHANNEL" = dev ]; then
+      echo "# the DirectX 12 set (development builds): its own values of the settings above that"
+      echo "# aren't global or DX9 only, in effect while dx12=on"
+      for k in $SETTING_KEYS; do
+        in_list "$k" "$SETTINGS_GLOBAL $SETTINGS_DX9_ONLY" && continue
+        v=$(set_value dx12 "$k")
+        if [ "$k" = "${1:-}" ] && [ "$in" = dx12 ]; then v=$2; fi
+        echo "dx12.$k=$v"
+      done
+    fi
+  })
+  printf '%s\n' "$text" | put "$SETTINGS" 644 || return 1
+  SETTINGS_TEXT=$text
 }
 
 # A development build's first install (and Reinstall) turns Debug Logging on once per dev
@@ -517,7 +595,11 @@ settings() {
   local k
   echo "installed=$([ -f "$MANIFEST" ] && echo yes || echo no)"
   if running_now; then echo "running=yes"; else echo "running=no"; fi
-  for k in $SETTING_KEYS; do echo "$k=$(setting "$k")"; done
+  for k in $SETTING_KEYS; do echo "$k=$(shown "$k")"; done
+  # the set chosen (dx9, or dx12: DirectX 12 on), and the settings that don't work with
+  # DirectX 12 (Settings greys them out while its set is chosen)
+  echo "settings_set=$(settings_set)"
+  echo "dx9_only=$SETTINGS_DX9_ONLY"
 }
 
 # set_reg <key> <name> <value>: a REG_SZ value in HKCU, written straight into the prefix's
@@ -549,9 +631,9 @@ set_reg() {
 }
 
 # DirectX 12's per-program Wine settings, straight in the prefix's user.reg (no Wine may run, as
-# for set_reg). With dx12_on, swtor_RC2.exe gets the values swtor.exe has (the mouse-look fix,
-# game keys by position, raw mouse-look and its speed, native fullscreen, ThreadCpuStats) and
-# Wine's builtin d3d9, so d9mt and its Metal bridge stay out of the Direct3D 12 process.
+# for set_reg). With dx12_on, swtor_RC2.exe gets the DirectX 12 set's values (the mouse-look
+# fix, game keys by position, raw mouse-look and its speed and native fullscreen: DX9 only, so
+# off; ThreadCpuStats) and Wine's builtin d3d9, so d9mt and its Metal bridge stay out of the Direct3D 12 process.
 # Otherwise every AppDefaults\swtor_RC2.exe key goes. (The DllOverrides value only counts without a d3d9 entry in
 # WINEDLLOVERRIDES, which Wine asks first: env has d3d9=n,b for every process, so the wrapper
 # also sets WINEDLLOVERRIDES=d3d9=b for swtor_RC2.exe. That one is what keeps d9mt out.)
@@ -560,10 +642,10 @@ dx12_reg() {
   if [ -n "$DRY" ]; then echo "[dry-run] DirectX 12's Wine settings for swtor_RC2.exe: $(dx12_on && echo written || echo removed) in $reg"; return; fi
   if dx12_on; then
     set_reg "$k\\\\X11 Driver" GrabPointer n
-    set_reg "$k\\\\Mac Driver" PhysicalKeyboard "$([ "$(setting physkeys)" = on ] && echo y || echo n)"
-    set_reg "$k\\\\Mac Driver" RawMouseWhenCursorHidden "$([ "$(setting rawmouse)" = on ] && echo y || echo n)"
-    set_reg "$k\\\\Mac Driver" RawMouseGameControllerScale "$(setting mousespeed)"
-    set_reg "$k\\\\Mac Driver" NativeFullscreen "$([ "$(setting nativefs)" = on ] && echo y || echo n)"
+    set_reg "$k\\\\Mac Driver" PhysicalKeyboard "$([ "$(set_value dx12 physkeys)" = on ] && echo y || echo n)"
+    set_reg "$k\\\\Mac Driver" RawMouseWhenCursorHidden "$([ "$(set_value dx12 rawmouse)" = on ] && echo y || echo n)"
+    set_reg "$k\\\\Mac Driver" RawMouseGameControllerScale "$(set_value dx12 mousespeed)"
+    set_reg "$k\\\\Mac Driver" NativeFullscreen "$([ "$(set_value dx12 nativefs)" = on ] && echo y || echo n)"
     set_reg "$k\\\\Mac Driver" ThreadCpuStats y
     set_reg "$k\\\\DllOverrides" d3d9 builtin
   elif [ -f "$reg" ] && grep -qiF "[$k" "$reg"; then
@@ -580,6 +662,25 @@ dx12_reg() {
       END { printf "%s", blank }' "$reg" >"$reg.new.$$"
     mv -f "$reg.new.$$" "$reg"
   fi
+}
+
+# The end of a settings change: if it failed after its copy was made, settings.conf,
+# dxvk.conf and user.reg as they were, and env made again from them, for the drivers the engine
+# has now (a failed switch may have removed Mullion already: env then doesn't start it)
+on_set_exit() {
+  local st=$? f
+  set +e
+  [ -z "$DRY" ] || return $st
+  if [ $st -ne 0 ] && [ -n "${SET_COPIED:-}" ]; then
+    for f in settings.conf dxvk.conf prefix/user.reg; do
+      [ ! -f "$SET_KEPT/${f##*/}" ] || mv -f "$SET_KEPT/${f##*/}" "$SOM/$f"
+    done
+    # (from the settings put back, read again; unread, env stays as it is)
+    load_settings && ( set -e; write_env >/dev/null )
+    log "set failed (status $st): settings.conf, dxvk.conf and user.reg as they were, env made from them"
+  fi
+  rm -rf "$SET_KEPT"
+  rmdir "$SOM/.lock" 2>/dev/null || true
 }
 
 cmd_set() {
@@ -599,7 +700,40 @@ cmd_set() {
       ! running_now || die "Quit the SWTOR launcher and the game to change $([ "$key" = retina ] && echo "Retina mode" || echo "this setting")." ;;
   esac
   lock
-  trap 'rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
+  SET_KEPT="$SOM/set-before.new"
+  trap on_set_exit EXIT
+  # (read again with the lock: a change that finished since som.sh started is kept)
+  load_settings || die "$SETTINGS_ERROR"
+  # (with the lock: the DirectX 12 switch can't change meanwhile)
+  if [ "$(settings_set)" = dx12 ] && in_list "$key" "$SETTINGS_DX9_ONLY"; then
+    die "This setting doesn't work with DirectX 12. Turn DirectX 12 off to change it (it keeps its value for DirectX 9)."
+  fi
+  # an earlier build's install runs its own wrapper and files, which don't know the DirectX 12
+  # set (sets_installed)
+  if ! sets_installed && { [ "$key" = dx12 ] || { [ "$(settings_set)" = dx12 ] && ! in_list "$key" "$SETTINGS_GLOBAL"; }; }; then
+    if [ "$(json_get "$MANIFEST" version)" != "$VERSION" ]; then
+      die "SWTOR on Mac $(json_get "$MANIFEST" version) is installed. Click Update to $VERSION first, then change DirectX 12's settings."
+    fi
+    die "The installed SWTOR on Mac is an earlier build of $VERSION. Click Reinstall first, then change DirectX 12's settings."
+  fi
+  # a copy of the files a change rewrites (settings.conf, dxvk.conf, the prefix's user.reg), put
+  # back if it fails half way: the window, the next game start and the registry
+  # never disagree about the set (on_set_exit)
+  if [ -z "$DRY" ]; then
+    rm -rf "$SET_KEPT"
+    mkdir "$SET_KEPT" || die "Could not keep a copy of the settings in $SET_KEPT."
+    for f in settings.conf dxvk.conf prefix/user.reg; do
+      [ ! -f "$SOM/$f" ] || cp -p "$SOM/$f" "$SET_KEPT/${f##*/}" || die "Could not keep a copy of $SOM/$f."
+    done
+    SET_COPIED=1
+  fi
+  # (a setting of the DirectX 12 set changes only its lines and env's DirectX 12 ones)
+  if [ "$(settings_set)" = dx12 ] && ! in_list "$key" "$SETTINGS_GLOBAL"; then
+    write_settings "$key" "$value"
+    write_env >/dev/null
+    echo "@done $key=$value (DirectX 12). It takes effect the next time the game starts."
+    return 0
+  fi
   case "$key" in
     retina) set_reg 'Software\\Wine\\Mac Driver' RetinaMode "$([ "$value" = on ] && echo y || echo n)" ;;
     physkeys)
@@ -615,7 +749,7 @@ cmd_set() {
     dx12|dx12driver) install_mullion "$(mullion_wanted "$key" "$value")" ;;
   esac
   write_settings "$key" "$value"
-  # (swtor_RC2.exe's values follow swtor.exe's, from the settings just written)
+  # (swtor_RC2.exe's values: the DirectX 12 set's, from the settings just written)
   case "$key" in physkeys|rawmouse|mousespeed|nativefs|dx12) dx12_reg ;; esac
   write_env >/dev/null
   write_dxvk_conf
@@ -906,7 +1040,10 @@ install_ntdll() {
 # of their options; <key> about to be set to <value>), else off
 winemac_wanted() {
   local pk rm nf
-  pk=$(setting physkeys) rm=$(setting rawmouse) nf=$(setting nativefs)
+  # (the DirectX 9 set's: these are DX9-only settings, off in the DirectX 12 set, and the app's
+  # driver with its options off in the prefix does what the engine's own does, so switching
+  # renderers leaves the driver as it is)
+  pk=$(set_value dx9 physkeys) rm=$(set_value dx9 rawmouse) nf=$(set_value dx9 nativefs)
   case "${1:-}" in physkeys) pk=$2 ;; rawmouse) rm=$2 ;; nativefs) nf=$2 ;; esac
   if [ "$pk" = on ] || [ "$rm" = on ] || [ "$nf" = on ]; then echo on; else echo off; fi
 }
@@ -1470,7 +1607,11 @@ name=swtor-dx12;exe=swtor_RC2.exe;dxgi=$tree"
 # DirectX 12 (experimental, Settings): the wrapper starts swtor_RC2.exe instead of swtor.exe,
 # on this driver (compatdb's swtor-dx12 rule above names its DXGI tree)
 SWTOR_DX12=1
-SWTOR_DX12_DRIVER=$(setting dx12driver)$drv"
+SWTOR_DX12_DRIVER=$(setting dx12driver)$drv
+# the DirectX 12 set's Metal HUD for swtor_RC2.exe (the lines above are the DirectX 9 set's,
+# which swtor.exe gets, also when DirectX 12 falls back to it)
+SWTOR_DX12_HUD=$([ "$(set_value dx12 hud)" = on ] && echo 1 || echo 0)
+SWTOR_DX12_HUD_POS=$(set_value dx12 hudpos)"
     # (the driver's build, which wine.log names)
     [ "$tree" != dxmt ] || dx12_env="$dx12_env
 SWTOR_DX12_DRIVER_VERSION=\"$(mullion_version)\""
@@ -1533,6 +1674,9 @@ SWTOR_ON_MAC_VERSION=$VERSION
 SWTOR_APP_DIR="$SOM"
 SWTOR_UPDATE_FEED="$FEED_URL"
 SWTOR_UPDATE_CHECK=$upd
+# the settings set chosen (development builds keep one per renderer: dx9, dx12); the wrapper
+# names in wine.log the one the game ran with
+SWTOR_SETTINGS_SET=$(settings_set)
 
 # When the Wine session's start had to end leftover Wine processes: did macOS end the last
 # session because the launcher is not allowed in the background? (this app's som.sh btm-check;
@@ -1648,6 +1792,7 @@ write_manifest() {
   "previous_wrapper": "$WRAPPER_STATE",
   "bin_real_created": $([ "$BIN_REAL_EXISTED" = false ] && echo true || echo false),
   "settings_user": "$user",
+  "settings_sets": "yes",
   "original_preloaders_sha256": {$pre
   },
   "helpers": ["setsid-exec", "hold-launcher"],
@@ -1803,12 +1948,32 @@ rehook_leave() {
 }
 
 cmd_rehook() {
-  local b h leave
+  local b h leave rc=0
   SETTLE="${SWTOR_ON_MAC_SETTLE:-20}"
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/rehook.log"; fi
   log "---- rehook $VERSION"
   [ -f "$MANIFEST" ] || { log "SWTOR on Mac is not installed; nothing to do"; echo "@done not installed"; return 0; }
   [ ! -d "$SOM/.lock" ] || { log "an install, uninstall or settings change is running; leaving it alone"; echo "@notice busy"; return 0; }
+  # settings.conf of one set (an earlier version's, or a release build's rewrite): both sets, the
+  # DirectX 12 one seeded from it. Only settings.conf: Update writes env, the prefix and the
+  # wrapper for this version (an earlier version's install can't change DirectX 12's set before).
+  # (A write that fails leaves the file as it was, and the next check tries again.)
+  # (the lock released whatever fails; taken meanwhile by a change: busy, as above)
+  # (read again with the lock, and written only from that read)
+  if [ -z "$DRY" ] && [ "$CHANNEL" = dev ] && [ -f "$SETTINGS" ] && ! has_two_sets; then
+    # (SWTOR_ON_MAC_TEST_MIGRATE: in a sandbox, a test's command run right here, to stage a
+    # change of the file or the lock since the read above)
+    if [ -n "$ROOT" ] && [ -n "${SWTOR_ON_MAC_TEST_MIGRATE:-}" ]; then eval "$SWTOR_ON_MAC_TEST_MIGRATE"; fi
+    mkdir "$SOM/.lock" 2>/dev/null || { log "a settings change just started; leaving it alone"; echo "@notice busy"; return 0; }
+    # (a read that fails: the lock released, then the check stops there, the hook untouched)
+    ( load_settings || exit 3
+      if ! has_two_sets; then
+        log "settings: a set for each renderer from now on (DirectX 12's from the settings there were)"
+        write_settings || log "settings: could not write both sets now (the next check tries again)"
+      fi ) >/dev/null 2>&1 || rc=$?
+    rmdir "$SOM/.lock" 2>/dev/null || true
+    [ "$rc" != 3 ] || die "$SETTINGS_ERROR"
+  fi
   rehook_inspect
   if [ -z "$REDO$NEED$OTHER$ODD" ]; then log "state:$STATES; the wrapper is in place"; echo "@done in place"; return 0; fi
   leave=$(rehook_leave "before the lock")
@@ -1945,13 +2110,14 @@ cmd_btm_check() {
 # files and the Wine options in it stay), then rebuilds the Game Mode bundle, env and wrapper as
 # every install does. What it replaces waits in $SOM/upgrade-backup until the install has gone
 # through, and goes back if it fails: 0.0.x's engine (moved), its env, dxvk.conf, settings.conf,
-# dev-defaults and Game Mode bundle (copies), and the prefix as it was, an APFS clone (no extra disk space)
+# dev-defaults, Game Mode bundle and manifest (copies: what it says, settings_sets among it,
+# stays what is installed), and the prefix as it was, an APFS clone (no extra disk space)
 # made only while the prefix is small: it holds Wine's own files, the game settings and d9mt's
 # folder, not the game, which lives in Broadsword's folder (else the prefix stays as it is; 0.0.x
 # can take a prefix back from Wine 11, tested). After success the old engine and its libraries
 # go.
 UPGRADE_PREFIX_MAX_KB=1048576
-UPGRADE_FILES="env dxvk.conf settings.conf dev-defaults gamemode"
+UPGRADE_FILES="env dxvk.conf settings.conf dev-defaults gamemode install-manifest.json"
 begin_upgrade() {
   local kb f
   UPGRADE=""
@@ -2065,6 +2231,8 @@ cmd_install() {
   avail=$(df -k "$H" | awk 'NR == 2 { print $4 }')
   [ "${avail:-0}" -gt 2000000 ] || die "Not enough free disk space (SWTOR on Mac needs about 2 GB)."
   lock
+  # (read again with the lock, before the exit trap that removes what a first install made)
+  load_settings || { [ -n "$DRY" ] || rmdir "$SOM/.lock" 2>/dev/null || true; die "$SETTINGS_ERROR"; }
   trap on_install_exit EXIT
   trap 'exit 143' TERM INT HUP   # Cancel in the app: roll back through the EXIT trap
   # an older version's launchd job: stopped before anything changes (dies if it can't be)
@@ -2185,6 +2353,13 @@ cmd_uninstall() {
   log "uninstall complete"
   echo "@done SWTOR on Mac is removed. The official SWTOR app runs as it came from Broadsword. Logs stay in $LOGS."
 }
+
+# A settings.conf that is there but can't be read: every command refuses before it changes or
+# guesses anything from it, so nothing writes defaults over it. Status says so first (its other
+# lines don't read settings.conf), and the window shows it in place of Play.
+if ! load_settings; then
+  if [ "${1:-}" = status ]; then echo "settings_error=$SETTINGS_ERROR"; else echo "@error $SETTINGS_ERROR"; exit 1; fi
+fi
 
 case "${1:-}" in
   status) status ;;

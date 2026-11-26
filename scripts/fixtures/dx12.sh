@@ -56,7 +56,7 @@ fx_dx12() {
   sha=$(sed -n 's/^ENGINE_SHA256=//p' "$d/dev/som.sh")
   mkdir -p "$FX_DX12_SOM/engine/bin" "$FX_DX12_SOM/prefix/dosdevices" "$FX_DX12_SOM/prefix/drive_c/swtor/retailclient" \
     "$d/unix/retailclient" "$FX_DX12_W/bin" "$FX_DX12_W/bin-real"
-  echo '{}' >"$FX_DX12_SOM/install-manifest.json"
+  echo '{"version": "0.0.0-fx.1", "settings_sets": "yes"}' >"$FX_DX12_SOM/install-manifest.json"
   echo "$sha" >"$FX_DX12_SOM/engine/.som-source"
   ln -s ../drive_c "$FX_DX12_SOM/prefix/dosdevices/c:"
   touch "$FX_DX12_SOM/prefix/drive_c/swtor/retailclient/swtor.exe" "$FX_DX12_SOM/prefix/drive_c/swtor/retailclient/swtor_RC2.exe" \
@@ -73,6 +73,7 @@ WINE REGISTRY Version 2
 
 [Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver] 1763000000
 #time=1dc54a1b2c3d4e5
+"NativeFullscreen"="n"
 "PhysicalKeyboard"="n"
 "RawMouseGameControllerScale"="1"
 "RawMouseWhenCursorHidden"="y"
@@ -108,6 +109,9 @@ STUB
     eval '[ "$FX_RC" = 0 ] && grep -qx dx12=off "$FX_DX12_SOM/settings.conf" && grep -qx dx12driver=mullion "$FX_DX12_SOM/settings.conf"'
   # (the checks below are D3DMetal's, from the engine; Mullion's are in dx12-mullion.sh)
   fx_dx12_som dev set dx12driver gptk
+  # (the DirectX 9 set: d9mt's 60 fps cap and the Metal HUD, which a fallback to swtor.exe keeps)
+  fx_dx12_som dev set fpslimit 60
+  fx_dx12_som dev set hud on
   check "dx12: off: no swtor-dx12 rule, no SWTOR_DX12 lines in env" \
     eval '! grep -q -e swtor-dx12 -e SWTOR_DX12 "$FX_DX12_SOM/env"'
   cp "$FX_DX12_SOM/env" "$d/env.off"; cp "$FX_DX12_SOM/prefix/user.reg" "$d/user.reg.off"
@@ -123,8 +127,10 @@ STUB
     eval '[ "$(fx_dx12_env WINE_COMPATDB)" = "$(printf "v=5\nname=swtor-on-mac;exe=*;dxgi=wined3d\nname=swtor-dx12;exe=swtor_RC2.exe;dxgi=gptk")" ]'
   check "dx12: on: SWTOR_DX12=1 and SWTOR_DX12_DRIVER=gptk for the wrapper" \
     eval '[ "$(fx_dx12_env SWTOR_DX12)/$(fx_dx12_env SWTOR_DX12_DRIVER)" = 1/gptk ]'
-  check "dx12: on: swtor_RC2.exe gets swtor.exe's Mac driver values (NativeFullscreen n, as nativefs is off) and GrabPointer" \
-    eval 'fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"NativeFullscreen\"=\"n\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"n\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"RawMouseWhenCursorHidden\"=\"y\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"RawMouseGameControllerScale\"=\"1\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"ThreadCpuStats\"=\"y\"" && fx_dx12_reg "swtor_RC2.exe\\\\X11 Driver" "\"GrabPointer\"=\"n\""'
+  # (swtor_RC2.exe gets the DirectX 12 set's: raw mouse-look and the other DX9-only settings
+  # off; swtor.exe keeps the DirectX 9 set's; fixture group settings-sets checks the sets)
+  check "dx12: on: swtor_RC2.exe gets the DirectX 12 set's Mac driver values (its DX9-only ones off) and GrabPointer" \
+    eval 'fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"NativeFullscreen\"=\"n\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"n\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"RawMouseWhenCursorHidden\"=\"n\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"RawMouseGameControllerScale\"=\"1\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"ThreadCpuStats\"=\"y\"" && fx_dx12_reg "swtor_RC2.exe\\\\X11 Driver" "\"GrabPointer\"=\"n\"" && fx_dx12_reg "swtor.exe\\\\Mac Driver" "\"RawMouseWhenCursorHidden\"=\"y\""'
   check "dx12: on: swtor_RC2.exe gets Wine's builtin d3d9, swtor.exe keeps d9mt's native,builtin" \
     eval 'fx_dx12_reg "swtor_RC2.exe\\\\DllOverrides" "\"d3d9\"=\"builtin\"" && fx_dx12_reg "swtor.exe\\\\DllOverrides" "\"d3d9\"=\"native,builtin\""'
 
@@ -137,6 +143,15 @@ STUB
   check "dx12: on: wine.log names the client, the driver, its tree and the engine's D3DMetal (no Info.plist planted: unknown)" \
     grep -qx "SWTOR on Mac DirectX 12: swtor_RC2.exe, driver gptk (dxgi=gptk), D3DMetal unknown (the engine's)" "$logs/wine.log"
   check "dx12: on: effective-env.txt has the game's d3d9=b" grep -qx WINEDLLOVERRIDES=d3d9=b "$logs/effective-env.txt"
+  # (the DirectX 12 set's HUD: off, as the DirectX 9 set had it at the file's first write; the
+  # DirectX 9 set's hud=on since is its own)
+  check "dx12: on: wine.log names the DirectX 12 set, no d9mt frame rate limit (a DirectX 9 setting), the DirectX 12 set's HUD (off)" \
+    eval 'grep -qx "SWTOR on Mac settings set: DirectX 12'"'"'s" "$logs/wine.log" && ! grep -q "SWTOR on Mac frame rate limit" "$logs/wine.log" && [ "$(fx_dx12_seen MTL_HUD_ENABLED)" = "<unset>" ]'
+  fx_dx12_som dev set hud on
+  fx_dx12_game "$win"
+  check "dx12: on, the DirectX 12 set's HUD on: swtor_RC2.exe gets it, both sets keep their own lines ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_seen MTL_HUD_ENABLED)" = 1 ] && grep -qx hud=on "$FX_DX12_SOM/settings.conf" && grep -qx dx12.hud=on "$FX_DX12_SOM/settings.conf"'
+  fx_dx12_som dev set hud off
   fx_dx12_game "$unix"
   check "dx12: on: a Unix path to swtor.exe works the same" \
     eval '[ "$(sed -n 1p "$FX_DX12_W/args")" = "$d/unix/retailclient/swtor_RC2.exe" ] && [ "$(fx_dx12_seen WINEDLLOVERRIDES)" = d3d9=b ]'
@@ -180,6 +195,8 @@ STUB
   fx_dx12_game "$win"
   check "dx12: no swtor_RC2.exe: swtor.exe's command byte for byte, d3d9=n,b" \
     eval 'cmp -s "$FX_DX12_W/args" "$d/args.off" && [ "$(fx_dx12_seen WINEDLLOVERRIDES)" = d3d9=n,b ]'
+  check "dx12: no swtor_RC2.exe: swtor.exe with the DirectX 9 set (its 60 fps cap and HUD), wine.log says it fell back" \
+    eval 'grep -qx "SWTOR on Mac settings set: DirectX 9'"'"'s (DirectX 12 is on, but swtor.exe runs: fell back)" "$logs/wine.log" && grep -qx "SWTOR on Mac frame rate limit: 60 fps" "$logs/wine.log" && [ "$(fx_dx12_seen MTL_HUD_ENABLED)" = 1 ]'
   check "dx12: no swtor_RC2.exe: said in wine.log and hold.log" \
     eval 'grep -qx "SWTOR on Mac DirectX 12: swtor_RC2.exe not found next to swtor.exe: starting swtor.exe" "$logs/wine.log" && grep -q "DirectX 12: swtor_RC2.exe not found next to swtor.exe: starting swtor.exe$" "$logs/hold.log"'
   touch "$FX_DX12_SOM/prefix/drive_c/swtor/retailclient/swtor_RC2.exe"
@@ -198,10 +215,10 @@ STUB
   check "dx12: release build: set dx12 refused, settings.conf unchanged ($FX_RC)" \
     eval '[ "$FX_RC" = 1 ] && grep -q "^@error DirectX 12 is in development builds only" "$d/out.txt" && grep -qx dx12=off "$FX_DX12_SOM/settings.conf"'
   # (a change of swtor.exe's values moves them in user.reg: after the byte-for-byte checks)
-  fx_dx12_som dev set dx12 on
   fx_dx12_som dev set mousespeed 1.5
-  check "dx12: on: Mouse-Look Speed 1.5 for swtor.exe and swtor_RC2.exe ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && fx_dx12_reg "swtor.exe\\\\Mac Driver" "\"RawMouseGameControllerScale\"=\"1.5\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"RawMouseGameControllerScale\"=\"1.5\""'
+  fx_dx12_som dev set dx12 on
+  check "dx12: Mouse-Look Speed 1.5 in the DirectX 9 set: swtor.exe gets it, swtor_RC2.exe the DirectX 12 set's 1 ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && grep -qx mousespeed=1.5 "$FX_DX12_SOM/settings.conf" && fx_dx12_reg "swtor.exe\\\\Mac Driver" "\"RawMouseGameControllerScale\"=\"1.5\"" && fx_dx12_reg "swtor_RC2.exe\\\\Mac Driver" "\"RawMouseGameControllerScale\"=\"1\""'
   # a release build installed over it, dx12=on still in settings.conf
   fx_dx12_som release set mousespeed 1
   check "dx12: release build with a stale dx12=on: env without DirectX 12 ($FX_RC)" \
