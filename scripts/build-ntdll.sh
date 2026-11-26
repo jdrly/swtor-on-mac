@@ -1,13 +1,19 @@
 #!/bin/bash
 # Builds the Wine ntdll.so the app ships into prebuilt/ntdll/ from the sources of the app's Wine
 # engine (athei's wine-build cx-26.3.0-8, CrossOver 26.3 / Wine 11.0: athei/wine at the commit
-# its release notes name), with this patch:
+# its release notes name), with these patches, in this order:
 #   ntdll-msync-alert-fd.patch  CodeWeavers' msync port keeps a thread's msync alert index in
 #                               alert_fd, which pthread_exit_wrapper then close()s as if it were
 #                               a file descriptor: every thread that did an alertable wait closes
 #                               an unrelated fd when it exits (a file, another thread's wineserver
 #                               pipe, a kqueue). With msync it leaves it alone (as athei's
 #                               12927acab0 on another branch)
+#   ntdll-foreign-thread-faults.patch
+#                               a fault on a thread Wine didn't create (no TEB: a dispatch
+#                               worker, Metal's completion queue) faulted again inside the signal
+#                               handler, and the process hung with the fault lost. The handlers
+#                               now give such a fault its default action and send it again, so
+#                               it ends the process (OmniTroid/wine#8, ported)
 #   ntdll.so                    the unix side of ntdll (x86_64), ad-hoc signed
 #   COPYING.LIB, LICENSE        Wine's license texts (LGPL-2.1-or-later), from the same sources
 #   VERSION                     what it was built from
@@ -20,9 +26,10 @@
 # does not use), except that gnutls, SDL and freetype are left out (x86_64 Homebrew libraries
 # athei's CI has; ntdll uses none of them). It builds the unpatched ntdll.so too, and
 # scripts/ntdll-compare.py checks that it is the engine's in exports, imports, libraries and
-# the code of every function (the toolchain is right), and that the patch changes only
-# pthread_exit_wrapper. The files are not byte for byte the engine's: athei linked with Xcode
-# 26's ld, which lays out a section and the stubs differently from the ld here.
+# the code of every function (the toolchain is right), and that the patches change only
+# pthread_exit_wrapper and the three fault handlers (with the guard's own function). The
+# files are not byte for byte the engine's: athei linked with Xcode 26's ld, which lays out a
+# section and the stubs differently from the ld here.
 #
 # The sources: .cache/ (sha256-checked), else $WINE_SRC_CACHE (default the copy in
 # ~/Library/Application Support/swtor-mac-proper/source-cache: the commit is on no branch of
@@ -36,7 +43,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 OUT="$ROOT/prebuilt/ntdll"
-PATCH=ntdll-msync-alert-fd
+PATCHES="ntdll-msync-alert-fd ntdll-foreign-thread-faults"
 W="${NTDLL_WORK:-/tmp/swtor-on-mac-ntdll}"
 case "$W" in *" "*) echo "NTDLL_WORK must not contain spaces (Wine's makefiles break on them)" >&2; exit 1 ;; esac
 SDK=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
@@ -101,7 +108,9 @@ fi
 for v in stock patched; do
   rm -rf "$W/src-$v" && cp -c -R "$W/src-pristine" "$W/src-$v"
 done
-patch -d "$W/src-patched" -p1 --quiet --posix <"patches/$PATCH.patch"
+for p in $PATCHES; do
+  patch -d "$W/src-patched" -p1 --quiet --posix <"patches/$p.patch"
+done
 
 export MACOSX_DEPLOYMENT_TARGET=26.0 SDKROOT="$SDK"
 export ZERO_AR_DATE=1 SOURCE_DATE_EPOCH=0
@@ -137,7 +146,7 @@ for v in stock patched; do
   install -m 755 "$W/build-$v/dlls/ntdll/ntdll.so" "$W/ntdll-$v.so"
 done
 
-# Toolchain check (stock rebuild vs the engine's file) and the patch's footprint (patched vs stock)
+# Toolchain check (stock rebuild vs the engine's file) and the patches' footprint (patched vs stock)
 python3 -I scripts/ntdll-compare.py "$E" "$W/ntdll-stock.so" "$W/ntdll-patched.so"
 
 rm -rf "$OUT" && mkdir -p "$OUT"
@@ -150,8 +159,8 @@ cat >"$OUT/VERSION" <<EOF
 ntdll.so: Wine's ntdll (x86_64 unix side) for the $ENGINE_NAME engine
 sources: athei/wine $WINE_COMMIT (codeload tar.gz sha256 $WINE_SRC_SHA256)
 configured as the engine (athei/wine-build build-wine.sh), macOS 26.5 SDK, unsigned sha256 $(shasum -a 256 "$W/ntdll-patched.so" | cut -d' ' -f1)
-patch:
-  patches/$PATCH.patch sha256 $(shasum -a 256 "patches/$PATCH.patch" | cut -d' ' -f1)
+patches, in this order:
+$(for p in $PATCHES; do echo "  patches/$p.patch sha256 $(shasum -a 256 "patches/$p.patch" | cut -d' ' -f1)"; done)
 EOF
 echo "[ntdll] prebuilt/ntdll: $(cd "$OUT" && find . -type f | sed 's|^\./||' | sort | tr '\n' ' ')"
 echo "[ntdll] ntdll.so sha256 $(shasum -a 256 "$OUT/ntdll.so" | cut -d' ' -f1) (unsigned $(shasum -a 256 "$W/ntdll-patched.so" | cut -d' ' -f1)), LC_UUID $(dwarfdump -u "$OUT/ntdll.so" | awk '{ print $2 }')"

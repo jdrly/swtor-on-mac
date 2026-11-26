@@ -41,7 +41,7 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 
 # SWTOR_ON_MAC_VERSION overrides the version for test builds.
-APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.8}
+APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.9}
 
 # Development builds: a version with a prerelease suffix, X.Y.Z-dev.N. They are published only
 # as GitHub pre-releases, never in the appcast. CFBundleShortVersionString is the version as is;
@@ -112,12 +112,15 @@ for p in $WINEMAC_PATCHES; do
 done
 WINEMAC_COMMIT="$(sed -n 's/^WINE_COMMIT=//p' scripts/build-winemac.sh)"
 NT=prebuilt/ntdll
-NTDLL_PATCH="$(sed -n 's/^PATCH=//p' scripts/build-ntdll.sh)"
+NTDLL_PATCHES="$(sed -n 's/^PATCHES="\(.*\)"$/\1/p' scripts/build-ntdll.sh)"
+[ -n "$NTDLL_PATCHES" ] || { echo "scripts/build-ntdll.sh names no PATCHES" >&2; exit 1; }
 for f in ntdll.so VERSION COPYING.LIB LICENSE; do
   [ -f "$NT/$f" ] || { echo "Missing $NT/$f; run scripts/build-ntdll.sh" >&2; exit 1; }
 done
-grep -q "patches/$NTDLL_PATCH.patch sha256 $(shasum -a 256 "patches/$NTDLL_PATCH.patch" | cut -d' ' -f1)" "$NT/VERSION" ||
-  { echo "$NT was not built from patches/$NTDLL_PATCH.patch as it is now; run scripts/build-ntdll.sh" >&2; exit 1; }
+for p in $NTDLL_PATCHES; do
+  grep -q "patches/$p.patch sha256 $(shasum -a 256 "patches/$p.patch" | cut -d' ' -f1)" "$NT/VERSION" ||
+    { echo "$NT was not built from patches/$p.patch as it is now; run scripts/build-ntdll.sh" >&2; exit 1; }
+done
 
 # Sparkle (app updates, as in SWGL on Mac): the framework goes into the app, its tools
 # (generate_appcast, BinaryDelta, generate_keys) are used from here by scripts/release.sh.
@@ -214,7 +217,8 @@ for p in $WINEMAC_PATCHES; do cp "patches/$p.patch" "$L/winemac/"; done
 mkdir -p "$L/fonts"
 cp src/fonts/Unbounded-OFL.txt src/fonts/JetBrainsMono-OFL.txt "$L/fonts/"
 mkdir -p "$L/ntdll"
-cp "$NT/COPYING.LIB" "$NT/LICENSE" "$NT/VERSION" "patches/$NTDLL_PATCH.patch" "$L/ntdll/"
+cp "$NT/COPYING.LIB" "$NT/LICENSE" "$NT/VERSION" "$L/ntdll/"
+for p in $NTDLL_PATCHES; do cp "patches/$p.patch" "$L/ntdll/"; done
 cat >"$L/README.txt" <<EOF
 SWTOR on Mac $APP_VERSION - licenses
 
@@ -243,8 +247,11 @@ patches in winemac/, applied in this order: $(echo $WINEMAC_PATCHES | sed 's/\([
 Mac's two mouse-look patches, https://github.com/jdrly/swgl-on-mac; SWTOR on Mac's changes
 to them, "Raw mouse-look"): LGPL-2.1-or-later, see winemac/COPYING.LIB and winemac/LICENSE.
 wine/ntdll.so: Wine's ntdll (dlls/ntdll, the x86_64 unix side) from the same sources, with
-ntdll/$NTDLL_PATCH.patch (a thread's exit no longer closes an unrelated file descriptor
-under msync): LGPL-2.1-or-later, see ntdll/COPYING.LIB and ntdll/LICENSE; build script:
+the patches in ntdll/, applied in this order: $(echo $NTDLL_PATCHES | sed 's/\([^ ]*\)/\1.patch/g; s/ /, /g')
+(a thread's exit no longer closes an unrelated file descriptor under msync; a fault on a
+thread Wine didn't create ends the process instead of hanging it; the second after
+OmniTroid/wine#8, https://github.com/OmniTroid/wine/pull/8): LGPL-2.1-or-later, see
+ntdll/COPYING.LIB and ntdll/LICENSE; build script:
 $REPO_URL/blob/v$APP_VERSION/scripts/build-ntdll.sh.
 The patches are also in $REPO_URL/tree/v$APP_VERSION/patches; the
 sources they apply to: https://github.com/athei/wine/tree/$WINEMAC_COMMIT, also as an archive
@@ -275,7 +282,7 @@ fi
 printf 'app %s\nd9mt %s\nengine %s\nwinemac %s\nntdll %s\nsparkle %s\nsdk %s\nsource %s\n' "$APP_VERSION" "$(cat "$D9/VERSION")" \
   "$(sed -n 's/^ENGINE_NAME=//p' src/som.sh)" \
   "$(for p in $WINEMAC_PATCHES; do printf '%s %s ' "${p#winemac-}" "$(shasum -a 256 "patches/$p.patch" | cut -c1-12)"; done | sed 's/ $//')" \
-  "${NTDLL_PATCH#ntdll-} $(shasum -a 256 "patches/$NTDLL_PATCH.patch" | cut -c1-12)" \
+  "$(for p in $NTDLL_PATCHES; do printf '%s %s ' "${p#ntdll-}" "$(shasum -a 256 "patches/$p.patch" | cut -c1-12)"; done | sed 's/ $//')" \
   "$SPARKLE_VERSION" "$sdk" "$SOURCE" >"$R/VERSIONS"
 
 # The Liquid Glass icon from Icon Composer's document (Assets.car, CFBundleIconName), plus the

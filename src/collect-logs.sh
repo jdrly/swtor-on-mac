@@ -9,7 +9,8 @@
 # install-manifest.json and d9mt-ab.env (a development build's A/B switches, if set), the app's VERSIONS, session-report.txt (the last game session in
 # short, scripts/session-report.sh), sessions-compared.txt (the kept game starts side by side:
 # a before/after test's arms), a fresh system-info.txt (macOS, chip, thermal warnings,
-# memory, displays, versions, the state of the install, which crash reports are in the zip, when
+# memory with its pressure and swap now, displays and the main screen's display limit now (the
+# app passes it, SWTOR_SCREEN_LIMIT), versions, the state of the install, which crash reports are in the zip, when
 # macOS ended the launcher's leftovers in the last 7 days because it is not allowed in the
 # background, the GPU error count), gpu-errors.txt (the GPU errors of the game and Wine in macOS's unified log of
 # the last 2 hours, see gpu_errors), system-reports/ (extracts of macOS's own reports in
@@ -925,6 +926,15 @@ esac
   if [ "$(sed -n 's/^channel=//p' "$RES/app.properties" 2>/dev/null)" = dev ]; then
     echo "Settings set chosen now (the next game start; each wine.log names its own): $([ -f "$SOM/settings.conf" ] && awk -F= '$1 == "dx12" { v = $2 } END { print (v == "on" ? "DirectX 12'"'"'s" : "DirectX 9'"'"'s") }' "$SOM/settings.conf" 2>/dev/null || echo unknown)"
   fi
+  # (now; each game start's own is in its wine.log's conditions line, from the same awk as the
+  # wrapper's session_conditions, sysctl in the C locale as there. SWTOR_SYSCTL: a stand-in for tests)
+  echo "Memory now (sysctl): $(LC_ALL=C "${SWTOR_SYSCTL:-/usr/sbin/sysctl}" kern.memorystatus_vm_pressure_level kern.memorystatus_level vm.swapusage 2>/dev/null | LC_ALL=C awk '
+    function mb(v,    u) { u = substr(v, length(v)); v += 0; return int((u == "G" ? v * 1024 : (u == "K" ? v / 1024 : v)) + 0.5) }
+    $1 == "kern.memorystatus_vm_pressure_level:" && $2 ~ /^[0-9]+$/ { p = ($2 == 1 ? "normal" : ($2 == 2 ? "warning" : ($2 == 4 ? "critical" : "level " $2))) }
+    $1 == "kern.memorystatus_level:" && $2 ~ /^[0-9]+$/ { f = $2 }
+    $1 == "vm.swapusage:" { for (i = 2; i + 2 <= NF; i++) if ($(i + 1) == "=" && $(i + 2) ~ /^[0-9.]+[KMG]?$/) s[$i] = mb($(i + 2)) }
+    END { printf "pressure %s%s, swap %s\n", (p == "" ? "unknown" : p), (f == "" ? "" : " (" f " % free)"),
+      (("used" in s) && ("total" in s) ? s["used"] " MB used of " s["total"] " MB" : "unknown") }')"
   echo "Rosetta: $([ -e /Library/Apple/usr/libexec/oah/libRosettaRuntime ] && echo installed || echo "not installed")"
   echo "Power: $(pmset -g ps 2>/dev/null | sed -n "1s/.*'\(.*\)'.*/\1/p")$(pmset -g 2>/dev/null | awk '($1 == "lowpowermode" || $1 == "powermode") && $2 == 1 { print ", Low Power Mode" } $1 == "powermode" && $2 == 2 { print ", High Power Mode" }')"
   # (now; each game start's own is in its wine.log, "SWTOR on Mac conditions:")
@@ -948,6 +958,17 @@ esac
     d && sub(/^UI Looks like: /, "", line) { ui = line }
     d && line == "Main Display: Yes" { main = 1 }
     END { out() }'
+  # the frames per second macOS lets the main screen show now, which can be below its refresh
+  # rate: NSScreen's, so the app reads it and passes it as SWTOR_SCREEN_LIMIT ("<fps> <min> <max>",
+  # the refresh interval in ms); anything of another form is not used
+  if [ -z "${SWTOR_SCREEN_LIMIT:-}" ]; then
+    echo "Display limit now: not known (Collect Logs ran without the app, which reads it)"
+  else
+    # (one line of three fields, nothing else)
+    printf '%s\n' "$SWTOR_SCREEN_LIMIT" | LC_ALL=C awk 'NR == 1 && NF == 3 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+\.[0-9]$/ && $3 ~ /^[0-9]+\.[0-9]$/ { ok = 1; f = $1; lo = $2; hi = $3 }
+      END { if (ok && NR == 1) printf "Display limit now (macOS, the main screen): %d fps, refresh interval %s-%s ms\n", f, lo, hi
+        else print "Display limit now: not known (not in the form the app passes)" }'
+  fi
   # the game's settings a visual bug report needs first, as the file has them (missing: not in
   # it): quality preset, shader set, shadows, bloom, SSAO, anti-aliasing, resolution, fullscreen
   if [ -f "$work/renderer" ]; then

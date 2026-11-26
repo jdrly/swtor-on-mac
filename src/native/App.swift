@@ -620,7 +620,10 @@ enum AppActions {
 // Collect Logs…: Resources/collect-logs.sh zips the logs for a bug report (10-30 s, most of it
 // reading GPU errors from macOS's unified log: off the main thread, the menu item says
 // "Collecting Logs…" meanwhile) and prints the zip's path; then say where it is and show it in
-// Finder.
+// Finder. The script can't ask AppKit, so the app passes the display limit of the main screen
+// (the one with the menu bar, system_profiler's "Main Display") as SWTOR_SCREEN_LIMIT:
+// NSScreen's maximumFramesPerSecond and its minimum-maximum refresh interval in ms, read when
+// the menu item is chosen.
 @MainActor @Observable
 final class LogCollector {
   var busy = false
@@ -629,10 +632,16 @@ final class LogCollector {
     guard !busy else { return }
     busy = true
     let script = Bundle.main.resourceURL!.appendingPathComponent("collect-logs.sh")
-    DispatchQueue.global(qos: .userInitiated).async {
+    var environment = ProcessInfo.processInfo.environment
+    if let screen = NSScreen.screens.first {
+      environment["SWTOR_SCREEN_LIMIT"] = "\(screen.maximumFramesPerSecond) "
+        + String(format: "%.1f %.1f", screen.minimumRefreshInterval * 1000, screen.maximumRefreshInterval * 1000)
+    }
+    DispatchQueue.global(qos: .userInitiated).async { [environment] in
       let process = Process()
       process.executableURL = URL(fileURLWithPath: "/bin/bash")
       process.arguments = [script.path]
+      process.environment = environment
       process.standardInput = FileHandle.nullDevice
       let output = Pipe(), errors = Pipe()
       process.standardOutput = output

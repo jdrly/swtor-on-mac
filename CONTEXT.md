@@ -213,6 +213,13 @@ client on Mullion or on D3DMetal (the wrapper's `SWTOR on Mac DirectX 12:` line 
 and Mullion's session header). Sessions on different renderers compare side by side, never as an
 A/B/A (docs/logs-and-debugging.md).
 
+**Display limit**
+The most frames per second macOS lets a screen show now (`NSScreen`'s `maximumFramesPerSecond`),
+which can be below the refresh rate of the screen's mode: 30 on a 60 Hz panel. The session report
+names it from d9mt's `SCREEN-INFO` line, Collect Logs for the main screen at collection
+(docs/logs-and-debugging.md).
+_Avoid_: calling it the Frame Rate Limit, the setting that caps the game itself.
+
 **Instrumented** / **ordinary play**
 Frame times from d9mt's profiling (Debug Logging on, `D9MT_PROFILE`) or Mullion's `MULLION_STATS`
 (Debug Logging on) are *instrumented*; play with Debug Logging off is *ordinary play*, whose frame

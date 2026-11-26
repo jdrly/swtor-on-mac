@@ -18,7 +18,7 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
 - `~/Library/Application Support/SWTOR on Mac/`
   - `engine/` – the Wine engine (self-contained: its libraries are inside it), with d9mt's
     winemetal bridge, SWTOR on Mac's build of its `ntdll.so` (`lib/wine/x86_64-unix`: the msync
-    fix, see [Building](building.md); the engine's own kept as `ntdll.so.stock`) (and, while *Game keys by keyboard position*, *Raw mouse-look* or *Native fullscreen* is on,
+    fix and the fault on a thread Wine didn't create, see [Building](building.md); the engine's own kept as `ntdll.so.stock`) (and, while *Game keys by keyboard position*, *Raw mouse-look* or *Native fullscreen* is on,
     SWTOR on Mac's build of its Mac driver, `winemac.so` and the PE sides
     `x86_64-windows/winemac.drv`, `i386-windows/winemac.drv`; the engine's own files are kept
     as `<name>.stock`) (and, in a development build with DirectX 12 on a Mullion driver,
