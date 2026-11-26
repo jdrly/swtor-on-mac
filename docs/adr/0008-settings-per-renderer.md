@@ -38,8 +38,11 @@ renderer (Jan, 2026-11-26).
   doesn't replace them), which record `settings_sets` in the manifest. Meanwhile DirectX 12's set
   and the switch can't change, and while its `env` starts DirectX 12, Play asks for Update or
   Reinstall first (the dispatcher's decision, 2026-11-26).
-- A `settings.conf` that can't be read stops every command at `som.sh`'s entry, so nothing writes
-  defaults over it (the dispatcher's decision, 2026-11-26).
+- `settings.conf` is written only from a read that succeeded: `som.sh` reads it once at its start,
+  and again under the lock before a change, the migration or Install. A file that can't be read
+  stops every command at the start (status says so, and the window shows it); a read that fails
+  later stops that command without writing (the dispatcher's decisions, 2026-11-26). An upgrade's
+  rollback puts the manifest back with the runtime, so `settings_sets` names what is installed.
 
 ## Consequences
 

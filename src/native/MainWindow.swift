@@ -673,6 +673,16 @@ struct PrimaryAction: View {
       VStack(alignment: .leading, spacing: 10) {
         if installer.isBusy {
           working
+        } else if let error = installer.status["settings_error"] {
+          // (som.sh refuses every command until settings.conf can be read: no Install, Repair or
+          // Play; Show for a launcher or game that runs)
+          if case .show = installer.playAction {
+            PlayButton(installer: installer, action: actions.play, prominent: true)
+          }
+          Label(error, systemImage: "exclamationmark.circle.fill")
+            .font(.callout)
+            .foregroundStyle(Brand.warning)
+            .fixedSize(horizontal: false, vertical: true)
         } else if installer.installed {
           installed
         } else {

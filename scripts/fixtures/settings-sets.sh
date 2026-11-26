@@ -194,6 +194,16 @@ REG
   fx_ss_som status
   check "settings-sets: an earlier install whose env starts DirectX 12: status says dx12=on, settings_sets=no (Play waits for Update), no settings_error" \
     eval 'piped -qx dx12=on "$d/out.txt" && piped -qx settings_sets=no "$d/out.txt" && piped -qx installed_version=0.0.0-fx.0 "$d/out.txt" && ! piped -q settings_error "$d/out.txt"'
+  # (the file turned unreadable, or the lock taken, after som.sh read it and before the
+  # migration's lock: nothing written, busy for a change that holds the lock)
+  SWTOR_ON_MAC_TEST_MIGRATE='chmod 000 "$SETTINGS"' fx_ss_som rehook
+  chmod 644 "$FX_SS_SOM/settings.conf"
+  check "settings-sets: settings.conf unreadable by the migration's read under the lock: its bytes kept, no lock left ($FX_RC)" \
+    eval 'cmp -s "$d/settings.before" "$FX_SS_SOM/settings.conf" && [ ! -e "$FX_SS_SOM/.lock" ]'
+  SWTOR_ON_MAC_TEST_MIGRATE='mkdir "$SOM/.lock"' fx_ss_som rehook
+  check "settings-sets: a change takes the lock before the migration: busy, its bytes kept ($FX_RC)" \
+    eval 'piped -qx "@notice busy" "$d/out.txt" && cmp -s "$d/settings.before" "$FX_SS_SOM/settings.conf"'
+  rmdir "$FX_SS_SOM/.lock"
   fx_ss_som rehook
   check "settings-sets: an earlier install with DirectX 12 on: the hook check writes both sets into settings.conf, the DirectX 9 set's lines as they were" \
     eval 'fx_ss_conf dx12.hud=on && fx_ss_conf dx12.hudpos=topleft && diff <(grep -v -e "^#" -e "^dx12\\." "$d/settings.old" | sed "s/^dx12=off$/dx12=on/") <(grep -v -e "^#" -e "^dx12\\." "$FX_SS_SOM/settings.conf") >/dev/null'

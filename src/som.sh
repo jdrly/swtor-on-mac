@@ -488,11 +488,23 @@ setting_valid() { # <key> <value>
 # as the DirectX 9 set (a file of an earlier version), its DX9-only settings off.
 SETTINGS_GLOBAL="debug updates retina dx12 dx12driver dx12fps"
 SETTINGS_DX9_ONLY="gamemode vsync memory physkeys rawmouse mousespeed fpslimit fpsbattery flushcap nativefs"
+# load_settings: settings.conf read once, into SETTINGS_TEXT, which every setting this command
+# reads comes from; status 1 if it is there but the read failed. settings.conf is written only
+# from a read that succeeded (at som.sh's start, and again under the lock before a change), so a
+# read error never turns into defaults written over it.
+load_settings() {
+  SETTINGS_TEXT=""
+  [ -e "$SETTINGS" ] || return 0
+  SETTINGS_TEXT=$(cat "$SETTINGS" 2>/dev/null) || return 1
+}
+SETTINGS_ERROR="Settings can't be read: $SETTINGS. Fix its permissions, then try again."
+# has_two_sets: settings.conf (as read) has the DirectX 12 set's lines
+has_two_sets() { printf '%s\n' "$SETTINGS_TEXT" | grep -q '^dx12\.'; }
 # stored <name>: the value settings.conf has for <key> or dx12.<key>, if it is a valid one
 stored() {
   local v
   # (the name compared as it is: no pattern; the last line of it counts)
-  v=$(awk -v k="$1" 'index($0, k "=") == 1 { v = substr($0, length(k) + 2) } END { print v }' "$SETTINGS" 2>/dev/null || true)
+  v=$(printf '%s\n' "$SETTINGS_TEXT" | awk -v k="$1" 'index($0, k "=") == 1 { v = substr($0, length(k) + 2) } END { print v }')
   if setting_valid "${1#dx12.}" "$v"; then echo "$v"; fi
 }
 # off_value <key>: a DX9-only setting's value in the DirectX 12 set (what does nothing)
@@ -541,9 +553,9 @@ dx12_driver_ok() {
 # write_settings [<key> <value>]: settings.conf with every key of both sets, one of them changed
 # in the set in effect (a global one in the DirectX 9 set's lines, which hold them)
 write_settings() {
-  local k v in=dx9
+  local k v in=dx9 text
   if [ -n "${1:-}" ] && ! in_list "$1" "$SETTINGS_GLOBAL"; then in=$(settings_set); fi
-  {
+  text=$({
     echo "# SWTOR on Mac settings (change them in the app: SWTOR on Mac > Settings…)"
     for k in $SETTING_KEYS; do
       v=$(set_value dx9 "$k")
@@ -560,7 +572,9 @@ write_settings() {
         echo "dx12.$k=$v"
       done
     fi
-  } | put "$SETTINGS" 644
+  })
+  printf '%s\n' "$text" | put "$SETTINGS" 644 || return 1
+  SETTINGS_TEXT=$text
 }
 
 # A development build's first install (and Reinstall) turns Debug Logging on once per dev
@@ -661,7 +675,8 @@ on_set_exit() {
     for f in settings.conf dxvk.conf prefix/user.reg; do
       [ ! -f "$SET_KEPT/${f##*/}" ] || mv -f "$SET_KEPT/${f##*/}" "$SOM/$f"
     done
-    ( set -e; write_env >/dev/null )
+    # (from the settings put back, read again; unread, env stays as it is)
+    load_settings && ( set -e; write_env >/dev/null )
     log "set failed (status $st): settings.conf, dxvk.conf and user.reg as they were, env made from them"
   fi
   rm -rf "$SET_KEPT"
@@ -687,6 +702,8 @@ cmd_set() {
   lock
   SET_KEPT="$SOM/set-before.new"
   trap on_set_exit EXIT
+  # (read again with the lock: a change that finished since som.sh started is kept)
+  load_settings || die "$SETTINGS_ERROR"
   # (with the lock: the DirectX 12 switch can't change meanwhile)
   if [ "$(settings_set)" = dx12 ] && in_list "$key" "$SETTINGS_DX9_ONLY"; then
     die "This setting doesn't work with DirectX 12. Turn DirectX 12 off to change it (it keeps its value for DirectX 9)."
@@ -1942,10 +1959,17 @@ cmd_rehook() {
   # wrapper for this version (an earlier version's install can't change DirectX 12's set before).
   # (A write that fails leaves the file as it was, and the next check tries again.)
   # (the lock released whatever fails; taken meanwhile by a change: busy, as above)
-  if [ -z "$DRY" ] && [ "$CHANNEL" = dev ] && [ -f "$SETTINGS" ] && ! grep -q '^dx12\.' "$SETTINGS"; then
+  # (read again with the lock, and written only from that read)
+  if [ -z "$DRY" ] && [ "$CHANNEL" = dev ] && [ -f "$SETTINGS" ] && ! has_two_sets; then
+    # (SWTOR_ON_MAC_TEST_MIGRATE: in a sandbox, a test's command run right here, to stage a
+    # change of the file or the lock since the read above)
+    if [ -n "$ROOT" ] && [ -n "${SWTOR_ON_MAC_TEST_MIGRATE:-}" ]; then eval "$SWTOR_ON_MAC_TEST_MIGRATE"; fi
     mkdir "$SOM/.lock" 2>/dev/null || { log "a settings change just started; leaving it alone"; echo "@notice busy"; return 0; }
-    ( log "settings: a set for each renderer from now on (DirectX 12's from the settings there were)"
-      write_settings || log "settings: could not write both sets now (the next check tries again)" ) >/dev/null 2>&1 || true
+    ( if ! load_settings; then log "settings: $SETTINGS_ERROR (the next check tries again)"
+      elif ! has_two_sets; then
+        log "settings: a set for each renderer from now on (DirectX 12's from the settings there were)"
+        write_settings || log "settings: could not write both sets now (the next check tries again)"
+      fi ) >/dev/null 2>&1 || true
     rmdir "$SOM/.lock" 2>/dev/null || true
   fi
   rehook_inspect
@@ -2084,13 +2108,14 @@ cmd_btm_check() {
 # files and the Wine options in it stay), then rebuilds the Game Mode bundle, env and wrapper as
 # every install does. What it replaces waits in $SOM/upgrade-backup until the install has gone
 # through, and goes back if it fails: 0.0.x's engine (moved), its env, dxvk.conf, settings.conf,
-# dev-defaults and Game Mode bundle (copies), and the prefix as it was, an APFS clone (no extra disk space)
+# dev-defaults, Game Mode bundle and manifest (copies: what it says, settings_sets among it,
+# stays what is installed), and the prefix as it was, an APFS clone (no extra disk space)
 # made only while the prefix is small: it holds Wine's own files, the game settings and d9mt's
 # folder, not the game, which lives in Broadsword's folder (else the prefix stays as it is; 0.0.x
 # can take a prefix back from Wine 11, tested). After success the old engine and its libraries
 # go.
 UPGRADE_PREFIX_MAX_KB=1048576
-UPGRADE_FILES="env dxvk.conf settings.conf dev-defaults gamemode"
+UPGRADE_FILES="env dxvk.conf settings.conf dev-defaults gamemode install-manifest.json"
 begin_upgrade() {
   local kb f
   UPGRADE=""
@@ -2204,6 +2229,8 @@ cmd_install() {
   avail=$(df -k "$H" | awk 'NR == 2 { print $4 }')
   [ "${avail:-0}" -gt 2000000 ] || die "Not enough free disk space (SWTOR on Mac needs about 2 GB)."
   lock
+  # (read again with the lock, before the exit trap that removes what a first install made)
+  load_settings || { [ -n "$DRY" ] || rmdir "$SOM/.lock" 2>/dev/null || true; die "$SETTINGS_ERROR"; }
   trap on_install_exit EXIT
   trap 'exit 143' TERM INT HUP   # Cancel in the app: roll back through the EXIT trap
   # an older version's launchd job: stopped before anything changes (dies if it can't be)
@@ -2328,8 +2355,7 @@ cmd_uninstall() {
 # A settings.conf that is there but can't be read: every command refuses before it changes or
 # guesses anything from it, so nothing writes defaults over it. Status says so first (its other
 # lines don't read settings.conf), and the window shows it in place of Play.
-if [ -e "$SETTINGS" ] && [ ! -r "$SETTINGS" ]; then
-  SETTINGS_ERROR="Settings can't be read: $SETTINGS. Fix its permissions, then try again."
+if ! load_settings; then
   if [ "${1:-}" = status ]; then echo "settings_error=$SETTINGS_ERROR"; else echo "@error $SETTINGS_ERROR"; exit 1; fi
 fi
 

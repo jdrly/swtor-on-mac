@@ -46,6 +46,12 @@ extension Installer {
   nonisolated static func playAction(status: [String: String], working: Bool, launcher: Bool, game: Bool) -> PlayAction {
     if working { return .unavailable("Wait until SWTOR on Mac has finished.") }
     guard !status.isEmpty else { return .unavailable("Checking this Mac…") }
+    // settings.conf som.sh can't read: every som.sh command refuses, so only Show goes on
+    if let error = status["settings_error"] {
+      let busy = status["busy"] ?? ""
+      if game || launcher || busy == "launcher" || busy == "game" { return .show(game: game || busy == "game") }
+      return .unavailable(error)
+    }
     guard let url = officialAppURL(status) else {
       return .unavailable("The official SWTOR app was not found. Install it from swtor.com.")
     }

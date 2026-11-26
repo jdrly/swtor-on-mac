@@ -151,7 +151,8 @@ records `settings_sets` in the install manifest. Until then the earlier install 
 DirectX 12's set and the switch can't change, and while its `env` starts DirectX 12, *Play SWTOR*
 asks for Update or Reinstall first (*Show* still works). A `settings.conf` that is there but can't
 be read stops every `som.sh` command with one line, before it changes anything, and the window
-shows that line in place of Play. A release build that changes
+shows that line in place of its actions (Show still works for a launcher or game that runs).
+`settings.conf` is only ever written from a read of it that succeeded. A release build that changes
 a setting writes its own keys only, and DirectX 12's set then starts again from the DirectX 9 one.
 The files made from the settings hold both sets: `swtor.exe`'s values in the prefix, Retina mode,
 `env`'s game settings and `dxvk.conf` are DirectX 9's; `swtor_RC2.exe`'s values and `env`'s
