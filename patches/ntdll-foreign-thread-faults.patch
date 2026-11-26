@@ -1,0 +1,88 @@
+Foreign-thread faults: a fault on a thread Wine didn't create hangs the process instead of ending it.
+For ntdll of the CrossOver 26.3 engine SWTOR on Mac uses (athei's wine-build cx-26.3.0-8, Wine
+11.0, dlls/ntdll/unix). Part of SWTOR on Mac, https://github.com/jdrly/swtor-on-mac.
+
+segv_handler, trap_handler and fpe_handler (signal_x86_64.c) read the thread's TEB before
+anything else: save_context reads the debug registers through amd64_thread_data(), and
+trap_handler's handle_syscall_trap reads the syscall frame. On macOS Wine keeps each of its
+threads' TEB at %gs:0x30. A thread Wine didn't create, such as a dispatch worker of a system
+framework or Metal's com.Metal4.CompletionQueue, has 0 there, so the handler faults inside
+itself and never returns. That thread spins on one core, whatever waits for it hangs, and the
+fault is lost: no crash report, nothing in wine.log. Seen in this engine under Metal shader
+validation on Metal 4, where Metal's validator faults on its completion queue (dttdrv/mullion
+#165).
+
+The guard runs in the three handlers before anything reads the TEB. Without a TEB it sets
+the signal's default action, sends the signal to its own thread again (raise) and returns.
+The signal stays blocked until the handler returns, then ends the process with that signal.
+That also covers what wouldn't fault again on return: a breakpoint (the trap returns past its
+int3) and a signal sent with kill(). Without the raise, such a thread would go on with the
+default action left set for the whole process, and Wine's next SIGSEGV would end it. On a
+thread with a TEB the guard reads %gs:0x30 and goes on as before, and a thread without one
+never got past the first read of the TEB, so no path that worked changes. This is
+OmniTroid/wine#8 (OmniTroid, https://github.com/OmniTroid/wine/pull/8, the fix in another
+Wine), ported to these sources, with the raise added.
+
+This patch changes Wine's ntdll, which is licensed under the GNU Lesser General Public License
+2.1 or later (see the copyright headers of the files it changes); the patch and the ntdll.so
+built with it are under the same license. Changed by Jan Drlý, 2026-11. Applies to the sources
+that engine is built from (CodeWeavers' CrossOver 26.3 with athei's patches), after
+ntdll-msync-alert-fd.patch:
+  https://github.com/athei/wine/tree/d23b39774528237cafe49f9a073286f854b779c0
+  (athei/wine@cx-26-patched, named in the release notes of athei/wine-build cx-26.3.0-8)
+Built by scripts/build-ntdll.sh.
+
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -2490,6 +2490,24 @@
+ }
+ 
+ 
++/***********************************************************************
++ *           is_foreign_thread_fault
++ *
++ * A thread Wine did not create (a system framework's dispatch worker, Metal's completion
++ * queue) has no TEB, and the handlers below fault inside themselves without one. Set the
++ * signal's default action and send the signal to this thread again: it stays blocked until
++ * the handler returns, and then ends the process, also where the instruction would not fault
++ * again (a breakpoint returns past its int3, a signal from kill() has no instruction).
++ */
++static BOOL is_foreign_thread_fault( int sig )
++{
++    if (NtCurrentTeb()) return FALSE;
++    signal( sig, SIG_DFL );
++    raise( sig );
++    return TRUE;
++}
++
++
+ /**********************************************************************
+  *		segv_handler
+  *
+@@ -2501,6 +2519,8 @@
+     EXCEPTION_RECORD rec = { 0 };
+     struct xcontext context;
+ 
++    if (is_foreign_thread_fault( signal )) return;
++
+     rec.ExceptionAddress = (void *)RIP_sig(ucontext);
+     save_context( &context, ucontext );
+ 
+@@ -2597,6 +2617,8 @@
+     EXCEPTION_RECORD rec = { 0 };
+     struct xcontext context;
+ 
++    if (is_foreign_thread_fault( signal )) return;
++
+     if (handle_syscall_trap( ucontext, siginfo )) return;
+ 
+     rec.ExceptionAddress = (void *)RIP_sig(ucontext);
+@@ -2631,6 +2653,8 @@
+     EXCEPTION_RECORD rec = { .ExceptionAddress = (void *)RIP_sig(ucontext) };
+     struct xcontext context;
+ 
++    if (is_foreign_thread_fault( signal )) return;
++
+     save_context( &context, sigcontext );
+ 
+     switch (siginfo->si_code)

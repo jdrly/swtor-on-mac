@@ -3,31 +3,34 @@
 # session-report.sh on made-up logs: frame times over 200 ms, the session's p99 and true 1% low
 # reported as missing, the measurement (instrumented or ordinary play), the interval after the
 # mark (--mark), gaps and suppressed lines, a log without its start, 3 to 5 sessions side by
-# side and the A/B/A over the last three; the wrapper's settings, conditions and d9mt files lines
-# on stand-ins; Collect Logs on planted logs: one zip with every kept game start side by side,
+# side and the A/B/A over the last three, the display limit from d9mt's SCREEN-INFO lines; the
+# wrapper's settings, conditions (memory too) and d9mt files lines on stand-ins, and its memory
+# read on this Mac's own sysctl; Collect Logs on planted logs: one zip with every kept game start side by side,
 # each start's first lines kept when its log is cut, and no account name, home folder or path in
 # what this adds; the game's graphics settings, only client_settings.ini's [Renderer] section,
 # and one line when there is no section or no file; the same of the DirectX 12 client's
-# client_settings_DX12.ini. Needs neither the official app nor Wine.
+# client_settings_DX12.ini; the display limit the app passes and memory now, each with its line
+# when it is missing. Needs neither the official app nor Wine.
 # Sourced; check, piped and the counters come from lib.sh.
 #
 #   fx_field_kit <app> <wine-wrapper.sh> <folder>
 
 # fk_st <t> <fps> [<ms avg/p99/max> <slow33> <slow50>]: a STATS line; fk_vis <from> <to> [at]: a
-# visibility change; fk_hitch <ms>: a HITCH line; fk_head <version> <d9mt> <started> [settings]:
-# the wrapper's lines at the start
+# visibility change; fk_hitch <ms>: a HITCH line; fk_head <version> <d9mt> <started> [settings]
+# [d3d9.dll hash] [energy mode]: the wrapper's lines at the start; fk_scr <t> <hz>: a SCREEN line
 fk_st() {
   printf 'warn:  STATS t=%s fps=%s ms=%s slow33=%s slow50=%s | rp=1.0 skip=0.0 cb=1.0 draws=1500 | ld=0.0 clr=0.0 ldDc=0.0 st=0.0 stDc=0.0 rsv=0.0 restore=0.0 savedMiB=0.0 attMs=0.1 clrFold=0.0 clrPass=0.0 | sh=0 pso=0 wait=0/0.0ms | allocMiB=100 att=on\n' \
     "$1" "$2" "${3:-16.7/17.0/17.5}" "${4:-0}" "${5:-0}"
 }
 fk_vis() { printf 'warn:  MtlPresenter: %s visibility 0x%s -> 0x%s (visible=0 activeSpace=0 miniaturized=0)%s\n' "${3:-20:00:00.000}" "$1" "$2" "${4:-}"; }
 fk_hitch() { printf 'warn:  HITCH frame=1 dtMs=%s inD9mtMs=1.0 (1%%) texMiB created=0.0 uploaded=0.0 csBehind=0 | texCreate=1/1.0ms/0.0MiB | cs: renderWait=0/0.0ms shaders=0/0.0ms psos=0/0.0ms\n' "$1"; }
+fk_scr() { printf 'warn:  SCREEN t=%s shown=30 dropped=0 pend=2 lost=0 onscreen=33.3/0.20/34.0 refreshes=0/29/0 late=0 req=33.3 lat=30.1/32.0 hz=%s\n' "$1" "$2"; }
 fk_pace() { printf 'warn:  PACE t=%s n=60 present=15.2/16.7/18.4 sd=0.61 | d9mt=4.1/5.0/7.9 wait=1.2 game=9.0/11.7/13.0 | cpu=%s d9mtBusy=230 gameCpu=582\n' "$1" "$2"; }
 fk_head() {
   echo "SWTOR on Mac $1: engine cx26 cx-26.3.0-8, d9mt $2, started $3"
   echo "SWTOR on Mac game language: lang=en-us torsets=main,en-us, LANG=en_US.UTF-8"
   echo "SWTOR on Mac settings: ${4:-debug-logging=on hud=on game-mode=on D9MT_PROFILE=1 MTL_HUD_ENABLED=1}"
-  echo "SWTOR on Mac conditions: power AC Power, energy mode automatic, thermal warnings none"
+  echo "SWTOR on Mac conditions: power AC Power, energy mode ${6:-automatic}, thermal warnings none, memory pressure normal (40 % free), swap 0 MB used of 0 MB"
   echo "SWTOR on Mac d9mt files: d3d9.dll ${5:-0123456789ab}, winemetal.so ba9876543210"
 }
 # fk_arm <fps after the mark> [cpu]: a session of 85 s: 3 s of loading with 250 ms frames, a
@@ -56,7 +59,7 @@ fx_field_kit() {
   check "field: the true 1% low is missing" fk_in "$R/a.txt" '^  FPS: 1% low \(slowest 1% of frames\) +missing \(see below\)$'
   check "field: the per-second numbers named as such" eval 'fk_in "$R/a.txt" "^  FPS: worst 1% of seconds +4\.0$" && fk_in "$R/a.txt" "^  Frame time: median second.s p99 \(ms\) +17\.0$" && fk_in "$R/a.txt" "the session.s p99 and true 1% low are not in the log"'
   check "field: profiled numbers labelled instrumented" fk_in "$R/a.txt" '^  Measurement +instrumented: Debug Logging on'
-  check "field: the start's build, settings, conditions and files" eval 'fk_in "$R/a.txt" "^  Game start +2026-11-01 20:00:00$" && fk_in "$R/a.txt" "^  Settings at the start +debug-logging=on hud=on game-mode=on D9MT_PROFILE=1" && fk_in "$R/a.txt" "^  Power, thermal at the start +power AC Power, energy mode automatic, thermal warnings none$" && fk_in "$R/a.txt" "^  d9mt files \(SHA-256\) +d3d9\.dll 0123456789ab, winemetal\.so ba9876543210$"'
+  check "field: the start's build, settings, conditions and files" eval 'fk_in "$R/a.txt" "^  Game start +2026-11-01 20:00:00$" && fk_in "$R/a.txt" "^  Settings at the start +debug-logging=on hud=on game-mode=on D9MT_PROFILE=1" && fk_in "$R/a.txt" "^  Power, thermal, memory at the start +power AC Power, energy mode automatic, thermal warnings none, memory pressure normal \(40 % free\), swap 0 MB used of 0 MB$" && fk_in "$R/a.txt" "^  d9mt files \(SHA-256\) +d3d9\.dll 0123456789ab, winemetal\.so ba9876543210$"'
   check "field: no mark asked, the whole session, nothing lost" eval 'fk_in "$R/a.txt" "^  Interval +the whole session$" && fk_in "$R/a.txt" "^  Data +nothing left out or lost$"'
 
   # 2. --mark: 60 s from 5 s after the return (in second 11, the one STATS t=11 closes): seconds
@@ -172,8 +175,65 @@ warn:  STATS t=40 /' "$R/b.log" >"$R/b-hidden.log"
   "$SR" "$R/long.log" >"$R/long.txt" 2>&1 || true
   check "field: a 2.5-hour steady session" eval 'fk_in "$R/long.txt" "^  FPS: median second +60\.0$" && ! grep -q "Segmentation\|awk:" "$R/long.txt"'
 
+  # 5b. The display limit (d9mt's SCREEN-INFO, Debug Logging only): "?" until AppKit answered,
+  # then 30 fps, in Low Power Mode, Wine's display mode not known (hz=0.0: the SCREEN lines' 60
+  # is d9mt's fallback, not read). The FPS read against 28, not 58: 3 of 20 seconds below it. A
+  # limit of 60 keeps the 58, with Wine's mode when SCREEN-INFO has it; one that changes, also to
+  # "?" or 0 and back, says so and keeps it too, and so does a log without its start. No
+  # SCREEN-INFO (an older d9mt): no display limit.
+  fk_info() { printf 'warn:  SCREEN-INFO displaySync=1 drawables=3 interval=1 cap=off hz=%s %s nsFullscreen=0 d3dWindowed=0 forceComposited=0\n' "${2:-0.0}" "$1"; }
+  { fk_head 0.1.9 9b64581 "2026-11-02 20:00:00" "" "" "low power"
+    fk_info "screenMaxFps=? refreshInterval=?"; fk_scr 1 60
+    fk_info "screenMaxFps=30 refreshInterval=33.3-33.3"
+    for t in $(seq 1 20); do fk_st "$t" "$([ "$t" -le 3 ] && echo 20.0 || echo 30.0)" 33.3/34.0/35.0; fk_scr "$t" 60; done
+  } >"$R/limit30.log"
+  "$SR" "$R/limit30.log" >"$R/limit30.txt" 2>&1 || true
+  check "field: the display limit and the energy mode side by side, no mode from d9mt's fallback" fk_in "$R/limit30.txt" "^  Display limit +30 fps \(macOS; energy mode low power\)$"
+  check "field: at a limit of 30 the seconds below 28 fps, not 58" eval 'fk_in "$R/limit30.txt" "^  Seconds below the display limit \(%\) +15\.0 \(below 28 fps\)$" && ! fk_in "$R/limit30.txt" "below 58 fps"'
+  sed 's/hz=0\.0 screenMaxFps=30 refreshInterval=33\.3-33\.3/hz=60.0 screenMaxFps=60 refreshInterval=16.7-16.7/; s/energy mode low power/energy mode automatic/' "$R/limit30.log" >"$R/limit60.log"
+  "$SR" "$R/limit60.log" >"$R/limit60.txt" 2>&1 || true
+  check "field: a limit of 60: named with Wine's mode, the seconds below 58 fps kept" eval 'fk_in "$R/limit60.txt" "^  Display limit +60 fps \(macOS; Wine.s display mode 60 Hz; energy mode automatic\)$" && fk_in "$R/limit60.txt" "^  Seconds below 58 fps \(%\) +100\.0$" && ! fk_in "$R/limit60.txt" "below the display limit"'
+  sed 's/screenMaxFps=? refreshInterval=?/screenMaxFps=60 refreshInterval=16.7-16.7/' "$R/limit30.log" >"$R/limit-changed.log"
+  "$SR" "$R/limit-changed.log" >"$R/limit-changed.txt" 2>&1 || true
+  check "field: a limit that changed: both values, the seconds below 58 fps kept" eval 'fk_in "$R/limit-changed.txt" "^  Display limit +30 fps \(macOS; it changed while the game ran: 60, 30; energy mode low power\)$" && fk_in "$R/limit-changed.txt" "^  Seconds below 58 fps \(%\) +100\.0$"'
+  # 30, not known (0: a window without a screen), 30 again: not one limit all through
+  { sed -n '1,/ STATS t=10 /p' "$R/limit30.log"; fk_info "screenMaxFps=0 refreshInterval=0.0-0.0"; fk_st 11 20.0
+    fk_info "screenMaxFps=30 refreshInterval=33.3-33.3"; sed -n '/ STATS t=12 /,$p' "$R/limit30.log"; } >"$R/limit-gap.log"
+  "$SR" "$R/limit-gap.log" >"$R/limit-gap.txt" 2>&1 || true
+  check "field: a limit not known in between: named, the seconds below 58 fps kept" eval 'fk_in "$R/limit-gap.txt" "^  Display limit +30 fps \(macOS; it changed while the game ran: 30, \?, 30; energy mode low power\)$" && fk_in "$R/limit-gap.txt" "^  Seconds below 58 fps \(%\) +100\.0$"'
+  # a second before macOS gave the limit (AppKit answers later than the first STATS line), and a
+  # cut log (Collect Logs keeps the wrapper's lines and the end): only the seconds after the limit
+  { fk_head 0.1.9 9b64581 "2026-11-02 20:00:00" "" "" "low power"
+    fk_info "screenMaxFps=? refreshInterval=?"; fk_st 1 20.0
+    fk_info "screenMaxFps=30 refreshInterval=33.3-33.3"
+    for t in $(seq 2 20); do fk_st "$t" "$([ "$t" -le 3 ] && echo 20.0 || echo 30.0)" 33.3/34.0/35.0; done
+  } >"$R/limit-late.log"
+  "$SR" "$R/limit-late.log" >"$R/limit-late.txt" 2>&1 || true
+  check "field: a second before the limit is known: left out of its count, named with the limit" eval 'fk_in "$R/limit-late.txt" "^  Seconds below the display limit \(%\) +10\.5 \(below 28 fps\)$" && fk_in "$R/limit-late.txt" "^  Display limit +30 fps \(macOS; energy mode low power; 1 shown STATS seconds before the first recorded limit not counted below it\)$"'
+  # (with an SM3 hazard line among them, whose parser has counters of its own)
+  { cat "$R/limit-late.log"; echo "warn:  D3D9 SM3 hazard: ps_0123 PS crs-partial-mask:r2.yz packed-io:v1 swizzle:x"; } >"$R/limit-sm3.log"
+  "$SR" "$R/limit-sm3.log" >"$R/limit-sm3.txt" 2>&1 || true
+  check "field: an SM3 hazard line doesn't change the count below the limit" eval 'fk_in "$R/limit-sm3.txt" "^  Seconds below the display limit \(%\) +10\.5 \(below 28 fps\)$" && fk_in "$R/limit-sm3.txt" "^  SM3 shaders"'
+  { fk_head 0.1.9 9b64581 "2026-11-02 20:00:00" "" "" "low power"; echo "[SWTOR on Mac: only the last 5 MB of wine.log]"
+    for t in 1 2 3 4 5; do fk_st "$t" 20.0; done
+    fk_info "screenMaxFps=30 refreshInterval=33.3-33.3"
+    for t in $(seq 6 20); do fk_st "$t" 30.0 33.3/34.0/35.0; done
+  } >"$R/limit-cut.log"
+  "$SR" "$R/limit-cut.log" >"$R/limit-cut.txt" 2>&1 || true
+  check "field: a cut log: only the seconds after the limit it kept" eval 'fk_in "$R/limit-cut.txt" "^  Seconds below the display limit \(%\) +0\.0 \(below 28 fps\)$" && fk_in "$R/limit-cut.txt" "^  Display limit +30 fps \(macOS; energy mode low power; 5 shown STATS seconds before the first recorded limit not counted below it\)$"'
+  # Wine's mode not known any more at the last SCREEN-INFO: not named
+  { cat "$R/limit60.log"; fk_info "screenMaxFps=60 refreshInterval=16.7-16.7"; fk_st 21 30.0; } >"$R/limit-nomode.log"
+  "$SR" "$R/limit-nomode.log" >"$R/limit-nomode.txt" 2>&1 || true
+  check "field: Wine's mode unknown at the end: not named" fk_in "$R/limit-nomode.txt" '^  Display limit +60 fps \(macOS; energy mode automatic\)$'
+  tail -n +6 "$R/limit30.log" >"$R/limit-headless.log"
+  "$SR" "$R/limit-headless.log" >"$R/limit-headless.txt" 2>&1 || true
+  check "field: a log without its start: the limit named, the seconds below 58 fps kept" eval 'fk_in "$R/limit-headless.txt" "^  Display limit +30 fps \(macOS\)$" && fk_in "$R/limit-headless.txt" "^  Seconds below 58 fps \(%\) +100\.0$"'
+  check "field: no SCREEN-INFO: no display limit rows" eval '! fk_in "$R/a.txt" "Display limit|below the display limit"'
+  "$SR" --compare "$R/a.log" "$R/limit30.log" >"$R/limit-compare.txt" 2>&1 || true
+  check "field: compared with an unlimited session: the limit in its arm's block, each its own row of seconds" eval 'fk_in "$R/limit-compare.txt" "^    Display limit +30 fps \(macOS; energy mode low power\)$" && [ "$(grep -c "Display limit" "$R/limit-compare.txt")" = 1 ] && fk_in "$R/limit-compare.txt" "^  Seconds below 58 fps \(%\) +[0-9.]+ +n/a$" && fk_in "$R/limit-compare.txt" "^  Seconds below the display limit \(%\) +n/a +15\.0 \(below 28 fps\)$"'
+
   # 6. The wrapper's lines, its functions on stand-ins: no path, no home folder
-  local fns="$R/wrapper-fns.sh" pm="$R/pmset" pfx="$R/prefix" eng="$R/engine" line
+  local fns="$R/wrapper-fns.sh" pm="$R/pmset" sc="$R/sysctl" pfx="$R/prefix" eng="$R/engine" line
   sed -n '/^session_settings() {/,/^}/p; /^session_conditions() {/,/^}/p; /^file_hashes() {/,/^}/p; /^d9mt_files() {/p; /^session_diag() {/,/^}/p' "$wrapper" >"$fns"
   cat >"$pm" <<'PM'
 #!/bin/bash
@@ -183,15 +243,45 @@ case "$*" in
   "-g") printf 'Currently in use:\n powermode            1\n' ;;
 esac
 PM
-  chmod 755 "$pm"
+  # (a sysctl stand-in that has every source, and one on a Mac without the pressure level and
+  # free percentage: macOS's sysctl names an unknown one on stderr, goes on with the next and
+  # exits 1; it prints swap with the locale's decimal separator)
+  cat >"$sc" <<'SC'
+#!/bin/bash
+rc=0 d=.
+[ "${LC_ALL:-}" = C ] || d=,
+for o in "$@"; do
+  case "$o:${FK_SYSCTL_MISSING:-}" in
+    kern.memorystatus_vm_pressure_level:) echo "$o: 2" ;;
+    kern.memorystatus_level:) echo "$o: 23" ;;
+    vm.swapusage:*) echo "$o: total = 3072${d}00M  used = 1536${d}25M  free = 1535${d}75M  (encrypted)" ;;
+    *) echo "sysctl: unknown oid '$o'" >&2; rc=1 ;;
+  esac
+done
+exit $rc
+SC
+  chmod 755 "$pm" "$sc"
   mkdir -p "$pfx/drive_c/windows/system32" "$eng/lib/wine/x86_64-unix"
   printf 'd9mt' >"$pfx/drive_c/windows/system32/d3d9.dll"
   line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" D9MT_PROFILE=1 MTL_HUD_ENABLED=1 SWTOR_GAMEMODE_APP="$HOME/x/SWTOR.app" \
     D9MT_AIR_CACHE="$HOME/Library/Caches/x" D9MT_DEBUG_FILE='C:\d9mt\flags.txt' DXVK_CONFIG='d3d9.presentInterval=0;d3d9.x=1' \
-    SWTOR_PMSET="$pm" SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" /bin/bash -c '. "$1"; session_settings; session_conditions; d9mt_files' - "$fns" 2>&1)
+    LANG=de_DE.UTF-8 SWTOR_PMSET="$pm" SWTOR_SYSCTL="$sc" SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" /bin/bash -c '. "$1"; session_settings; session_conditions; d9mt_files' - "$fns" 2>&1)
   printf '%s\n' "$line" >"$R/wrapper-lines.txt"
   check "wrapper: the settings line, paths left out" eval 'fk_in "$R/wrapper-lines.txt" "^debug-logging=on hud=on game-mode=on native-fullscreen=off D9MT_AIR_CACHE=\(a path\) D9MT_DEBUG_FILE=\(a path\) D9MT_PROFILE=1 DXVK_CONFIG=d3d9\.presentInterval=0;d3d9\.x=1 MTL_HUD_ENABLED=1$" && ! grep -qF "$HOME" "$R/wrapper-lines.txt"'
-  check "wrapper: the conditions line" fk_in "$R/wrapper-lines.txt" '^power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80$'
+  check "wrapper: the conditions line (swap read in the C locale under a German one)" fk_in "$R/wrapper-lines.txt" '^power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80, memory pressure warning \(23 % free\), swap 1536 MB used of 3072 MB$'
+  line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" FK_SYSCTL_MISSING=1 SWTOR_PMSET="$pm" SWTOR_SYSCTL="$sc" /bin/bash -c '. "$1"; session_conditions' - "$fns" 2>&1)
+  check "wrapper: a Mac without the pressure level: unknown, swap still read ($line)" eval '[ "$line" = "power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80, memory pressure unknown, swap 1536 MB used of 3072 MB" ]'
+  line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$pm" SWTOR_SYSCTL="$R/no-sysctl" /bin/bash -c '. "$1"; session_conditions' - "$fns" 2>&1)
+  check "wrapper: no sysctl: memory unknown, the rest of the line kept ($line)" eval '[ "$line" = "power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80, memory pressure unknown, swap unknown" ]'
+  # this Mac's own sysctl, without sudo, as the wrapper calls it: every source read (on the
+  # Checks runner's macOS), an unknown name among them doesn't stop the ones after it, and the
+  # exit status is then 1
+  # (its status from the pipeline: pipefail gives sysctl's, tr's is 0)
+  local real rc=0
+  real=$(LC_ALL=C /usr/sbin/sysctl kern.memorystatus_vm_pressure_level som.no.such.oid kern.memorystatus_level vm.swapusage 2>/dev/null | tr '\n' ';') || rc=$?
+  check "wrapper: this Mac's sysctl gives the pressure level, free % and swap past an unknown name, status 1 ($real status $rc)" eval '[ "$rc" = 1 ] && printf "%s\n" "$real" | piped -E "^kern\.memorystatus_vm_pressure_level: [124];kern\.memorystatus_level: [0-9]+;vm\.swapusage: total = [0-9.]+[KMG] +used = [0-9.]+[KMG] "'
+  line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" LANG=de_DE.UTF-8 SWTOR_PMSET="$pm" /bin/bash -c '. "$1"; session_conditions' - "$fns" 2>&1)
+  check "wrapper: the conditions line from this Mac's sysctl ($line)" eval 'printf "%s\n" "$line" | piped -E ", memory pressure (normal|warning|critical) \([0-9]+ % free\), swap [0-9]+ MB used of [0-9]+ MB$"'
   check "wrapper: the d9mt files' hashes, a missing one named" fk_in "$R/wrapper-lines.txt" "^d3d9\.dll $(printf d9mt | /usr/bin/shasum -a 256 | cut -c1-12), winemetal\.so missing$"
   check "wrapper: the lines go into wine.log after the language" eval 'grep -A4 "SWTOR on Mac game language:" "$wrapper" | piped "SWTOR on Mac settings: \$(session_settings)" && grep -A5 "SWTOR on Mac game language:" "$wrapper" | piped "SWTOR on Mac \${files%_files} files: \$diag_files"'
   check "wrapper: the bounded probes run before wine.log takes stderr" eval 'grep -B3 "rotate_wine_log\$" "$wrapper" | piped "session_diag \"\$files\" 2>/dev/null"'
@@ -211,7 +301,7 @@ PM
   chmod 755 "$R/slow-pmset"; "$R/slow-pmset" --warm; rm -f "$R/slow.pids"
   local t0 t1 left=""
   t0=$(date +%s)
-  line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$R/slow-pmset" SWTOR_DIAG_TIMEOUT=1 SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
+  line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$R/slow-pmset" SWTOR_SYSCTL="$sc" SWTOR_DIAG_TIMEOUT=1 SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
     /bin/bash -c '. "$1"; session_diag d9mt_files 2>/dev/null; echo "$diag_conditions|$diag_files"' - "$fns" 2>&1)
   t1=$(date +%s)
   sleep 0.3
@@ -235,7 +325,7 @@ exec /bin/sleep "$@"
 SL
   chmod 755 "$R/sleep-log-bin/sleep"; rm -f "$R/slow.pids" "$R/sleeps.txt"
   local asked
-  env -i PATH="$R/sleep-log-bin:/usr/bin:/bin" FK_SLEEP_LOG="$R/sleeps.txt" HOME="$HOME" SWTOR_PMSET="$R/slow-pmset" SWTOR_DIAG_TIMEOUT=1 SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
+  env -i PATH="$R/sleep-log-bin:/usr/bin:/bin" FK_SLEEP_LOG="$R/sleeps.txt" HOME="$HOME" SWTOR_PMSET="$R/slow-pmset" SWTOR_SYSCTL="$sc" SWTOR_DIAG_TIMEOUT=1 SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
     /bin/bash -c '. "$1"; session_diag d9mt_files 2>/dev/null' - "$fns" >/dev/null 2>&1
   sleep 0.3
   for p in $(cat "$R/slow.pids" 2>/dev/null); do kill -0 "$p" 2>/dev/null && kill -KILL "$p" 2>/dev/null; done
@@ -244,9 +334,17 @@ SL
   # shellcheck disable=SC2034 # (used in the check's eval string)
   in_budget=$(awk -v s="${asked:-0}" 'BEGIN { print (s >= 1.1 && s <= 1.3) ? "yes" : "no" }')
   check "wrapper: a hanging pmset: the waits asked for add up to the deadline (${asked:-none} s for 1 s + 0.2 s)" eval '[ -s "$R/sleeps.txt" ] && [ "$in_budget" = yes ]'
-  line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$pm" SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
+  line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$pm" SWTOR_SYSCTL="$sc" SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
     /bin/bash -c '. "$1"; session_diag d9mt_files 2>/dev/null; echo "$diag_conditions|$diag_files"' - "$fns" 2>&1)
-  check "wrapper: the probes within the deadline give their lines" eval '[ "$line" = "power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80|d3d9.dll $(printf d9mt | /usr/bin/shasum -a 256 | cut -c1-12), winemetal.so missing" ]'
+  check "wrapper: the probes within the deadline give their lines" eval '[ "$line" = "power Battery Power, energy mode low power, thermal warnings CPU_Speed_Limit = 80, memory pressure warning (23 % free), swap 1536 MB used of 3072 MB|d3d9.dll $(printf d9mt | /usr/bin/shasum -a 256 | cut -c1-12), winemetal.so missing" ]'
+  # a sysctl that hangs (the slow stand-in in its place): the same deadline
+  rm -f "$R/slow.pids"; t0=$(date +%s)
+  line=$(env -i PATH=/usr/bin:/bin HOME="$HOME" SWTOR_PMSET="$pm" SWTOR_SYSCTL="$R/slow-pmset" SWTOR_DIAG_TIMEOUT=1 SWTOR_PREFIX="$pfx" SWTOR_ENGINE="$eng" \
+    /bin/bash -c '. "$1"; session_diag d9mt_files 2>/dev/null; echo "$diag_conditions|$diag_files"' - "$fns" 2>&1)
+  t1=$(date +%s); sleep 0.3; left=""
+  for p in $(cat "$R/slow.pids" 2>/dev/null); do kill -0 "$p" 2>/dev/null && left="$left $p"; done
+  [ -z "$left" ] || kill -KILL $left 2>/dev/null
+  check "wrapper: a hanging sysctl: unknown within the deadline ($((t1 - t0)) s, limit 10 s), nothing of it left${left:+ (left:$left)}" eval 'printf "%s\n" "$line" | piped -E "^unknown\|d3d9\.dll [0-9a-f]{12}, winemetal\.so missing$" && [ $((t1 - t0)) -le 10 ] && [ -s "$R/slow.pids" ] && [ -z "$left" ]'
 
   # 7. Collect Logs: three arms and an older start in one zip; the old start cut, its first
   # lines kept; an account name in a log line replaced; no home folder
@@ -276,7 +374,7 @@ SL
   { fk_head 0.1.7-dev.2 1111111 "2026-11-01 19:00:00"
     LC_ALL=C awk 'BEGIN { for (t = 1; t <= 9000; t++) printf "warn:  STATS t=%d fps=60.0 ms=16.7/17.0/17.5 slow33=0 slow50=0 | rp=1.0 skip=0.0 cb=1.0 draws=1500 | ld=0.0 clr=0.0 ldDc=0.0 st=0.0 stDc=0.0 rsv=0.0 restore=0.0 savedMiB=0.0 attMs=0.1 clrFold=0.0 clrPass=0.0 | sh=0 pso=0 wait=0/0.0ms | allocMiB=100 att=on%400s\n", t, "" }'
   } >"$L/wine.log.3"
-  z=$(SWTOR_ON_MAC_GPU_TIMEOUT=5 SWTOR_ON_MAC_BTM_TIMEOUT=5 "$app/Contents/Resources/collect-logs.sh" "$R/zip" 2>"$R/collect.err" || true)
+  z=$(SWTOR_SCREEN_LIMIT="30 33.3 33.3" SWTOR_SYSCTL="$sc" SWTOR_ON_MAC_GPU_TIMEOUT=5 SWTOR_ON_MAC_BTM_TIMEOUT=5 "$app/Contents/Resources/collect-logs.sh" "$R/zip" 2>"$R/collect.err" || true)
   zd="$R/unzipped"; rm -rf "$zd"; mkdir -p "$zd"
   [ -f "$z" ] && (cd "$zd" && unzip -q "$z")
   zd=$(ls -d "$zd"/SWTOR-on-Mac-logs-* 2>/dev/null | head -1 || true)
@@ -289,6 +387,8 @@ SL
   check "collect: the account name replaced in the logs and the comparison" eval '! grep -rqF "$acct" "$zd" && grep -q "something about ACCOUNT" "$zd/logs/wine.log.1"'
   check "collect: no home folder, nothing left out" eval '! grep -rqF "$HOME/" "$zd" && ! grep -rqF "$H/" "$zd" && [ ! -e "$zd/left-out.txt" ]'
   check "collect: the thermal warnings now" fk_in "$zd/system-info.txt" '^Thermal and performance warnings now \(pmset -g therm\): '
+  check "collect: memory now, after the Mac" eval 'grep -A1 "^Mac: " "$zd/system-info.txt" | piped -x "Memory now (sysctl): pressure warning (23 % free), swap 1536 MB used of 3072 MB"'
+  check "collect: the display limit the app passed, after the displays" eval 'grep -B1 "^Display limit now" "$zd/system-info.txt" | sed -n 1p | piped -E "^(Display: |Free space: )" && fk_in "$zd/system-info.txt" "^Display limit now \(macOS, the main screen\): 30 fps, refresh interval 33\.3-33\.3 ms$"'
   check "collect: the game's graphics settings: [Renderer] alone, redacted, the line of another form counted" eval '[ "$(cat "$zd/game-graphics-settings.txt")" = "$(printf "%s\n" "[Renderer]" "GraphicsQuality = 3" "ShaderSet = 2" "doShadows = true" "EnableBloom = false" "EnableSSAO = true" "AntiAliasingLevel = 4" "Width = 1728" "Height = 1117" "FullScreen = true" "InfoGraphicsVendor = Apple ACCOUNT" "(1 lines of another form left out)")" ]'
   check "collect: nothing else of the settings folder: no [Game], no other file or its name" eval '! LC_ALL=C grep -r -q -e FkOddSentinel -e FkMoviesSentinel -e FkRegKeySentinel -e MoviesFolder -e SwtorRegKey -e "\[Game\]" -e Fkcharsentinel -e FkGuiSentinel -e PlayerGUIState "$zd" && [ "$(cd "$zd" && find . -name "*.ini" -o -name "*.xml" -o -name GUIProfiles)" = "" ]'
   check "collect: system info names the main graphics settings, a missing one as missing" fk_in "$zd/system-info.txt" '^Game graphics settings \(client_settings\.ini \[Renderer\], all of it in game-graphics-settings\.txt\): GraphicsQuality=3, ShaderSet=2, doShadows=true, EnableBloom=false, EnableSSAO=true, AntiAliasingLevel=4, Width=1728, Height=1117, FullScreen=true, D3DFullScreen=missing$'
@@ -298,13 +398,21 @@ SL
   rm -f "$L/wine.log.3" "$L/wine.log.2" "$L/wine.log.1"; mkdir -p "$R/zip1"
   printf '%s\r\n' '[Game]' 'SwtorRegKey = FkRegKeySentinel' >"$gsi"
   printf '%s\r\n' '[Game]' 'SwtorRegKey = FkDx12RegKeySentinel' >"$gsd"
-  z=$(SWTOR_ON_MAC_GPU_TIMEOUT=5 SWTOR_ON_MAC_BTM_TIMEOUT=5 "$app/Contents/Resources/collect-logs.sh" "$R/zip1" 2>>"$R/collect.err" || true)
+  # (the last start now one whose display limit changed: its whole line through the redaction)
+  cp "$R/limit-changed.log" "$L/wine.log"
+  z=$(FK_SYSCTL_MISSING=1 SWTOR_SYSCTL="$sc" SWTOR_ON_MAC_GPU_TIMEOUT=5 SWTOR_ON_MAC_BTM_TIMEOUT=5 "$app/Contents/Resources/collect-logs.sh" "$R/zip1" 2>>"$R/collect.err" || true)
   check "collect: one start, no comparison" eval '[ -f "$z" ] && ! unzip -l "$z" | piped sessions-compared.txt'
+  check "collect: not run by the app: the display limit not known" eval 'unzip -p "$z" "*/system-info.txt" | piped -x "Display limit now: not known (Collect Logs ran without the app, which reads it)"'
+  check "collect: a Mac without the pressure level: unknown, swap still read" eval 'unzip -p "$z" "*/system-info.txt" | piped -x "Memory now (sysctl): pressure unknown, swap 1536 MB used of 3072 MB"'
+  check "collect: a display limit that changed, whole after the redaction" eval 'unzip -p "$z" "*/session-report.txt" | piped -E "^  Display limit +30 fps \(macOS; it changed while the game ran: 60, 30; energy mode low power\)$"'
   check "collect: no [Renderer] section: one line, no settings file" eval '[ -f "$z" ] && ! unzip -l "$z" | piped game-graphics-settings && unzip -p "$z" "*/system-info.txt" | piped -x "Game graphics settings: none (no \[Renderer\] section in client_settings.ini)"'
   check "collect: no [Renderer] section in client_settings_DX12.ini: one line" eval '[ -f "$z" ] && unzip -p "$z" "*/system-info.txt" | piped -x "Game graphics settings, DirectX 12: none (no \[Renderer\] section in client_settings_DX12.ini)"'
   rm -f "$gsd"
   rm -f "$gsi"; mkdir -p "$R/zip2"
-  z=$(SWTOR_ON_MAC_GPU_TIMEOUT=5 SWTOR_ON_MAC_BTM_TIMEOUT=5 "$app/Contents/Resources/collect-logs.sh" "$R/zip2" 2>>"$R/collect.err" || true)
+  z=$(SWTOR_SCREEN_LIMIT="30 33.3 33.3
+junk" SWTOR_ON_MAC_GPU_TIMEOUT=5 SWTOR_ON_MAC_BTM_TIMEOUT=5 "$app/Contents/Resources/collect-logs.sh" "$R/zip2" 2>>"$R/collect.err" || true)
   check "collect: no client_settings.ini: one line, the zip still made" eval '[ -f "$z" ] && ! unzip -l "$z" | piped game-graphics-settings && unzip -p "$z" "*/system-info.txt" | piped -x "Game graphics settings: none (no client_settings.ini in the app.s prefix)"'
   check "collect: no client_settings_DX12.ini: one line" eval '[ -f "$z" ] && unzip -p "$z" "*/system-info.txt" | piped -x "Game graphics settings, DirectX 12: none (no client_settings_DX12.ini in the app.s prefix)"'
+  check "collect: a display limit with more than its one line: not used" eval 'unzip -p "$z" "*/system-info.txt" | piped -x "Display limit now: not known (not in the form the app passes)"'
+  check "collect: this Mac's sysctl: memory now read" eval 'unzip -p "$z" "*/system-info.txt" | piped -E "^Memory now \(sysctl\): pressure (normal|warning|critical) \([0-9]+ % free\), swap [0-9]+ MB used of [0-9]+ MB$"'
 }

@@ -63,16 +63,23 @@
   athei's build). The build is reproducible (the PE sides without their debug info).
 
 - `scripts/build-ntdll.sh` builds Wine's `ntdll.so` (the x86_64 unix side) from the same sources
-  with `patches/ntdll-msync-alert-fd.patch` into `prebuilt/ntdll`. CodeWeavers' msync port
+  with `patches/ntdll-msync-alert-fd.patch` and `ntdll-foreign-thread-faults.patch`, in that
+  order, into `prebuilt/ntdll`. CodeWeavers' msync port
   keeps a thread's msync alert index in the field Wine 11 keeps its alert file descriptor in,
   and a thread's exit closes it: every thread that did an alertable wait closes an unrelated
   file descriptor when it exits (a file, another thread's wineserver pipe, a kqueue); with
-  msync the patch leaves it alone, as athei/wine `12927acab0` does on another branch. It is
+  msync the first patch leaves it alone, as athei/wine `12927acab0` does on another branch. The
+  second is OmniTroid/wine#8, ported: a fault on a thread Wine didn't create (no TEB, such as
+  Metal's completion queue) made the signal handler fault inside itself, so the process hung at
+  full CPU with the fault lost; such a fault now gets its default action and is sent again, so
+  it ends the process. The build is
   configured as athei's `build-wine.sh` configures the engine (`--with-unwind`, unoptimized)
   against the engine's macOS 26.5 SDK (the Command Line Tools'), together with an unpatched
   build: `scripts/ntdll-compare.py` checks that one against the engine's own `ntdll.so`
   (exports, imports, libraries and the code of every function the same; the files differ in
-  the linker's layout only) and that the patch changes only `pthread_exit_wrapper`. The
+  the linker's layout only) and that the patches change exactly `pthread_exit_wrapper`,
+  `segv_handler`, `trap_handler` and `fpe_handler`, and add `is_foreign_thread_fault` and an
+  import of `raise`. The
   sources come from `.cache/`, a local copy (`WINE_SRC_CACHE`; the commit is on no branch of
   athei/wine any more) or codeload. The build is reproducible.
 
@@ -153,6 +160,12 @@ Development builds (`APP_VERSION` `X.Y.Z-dev.N`, on the `dev` branch):
 `./build.sh && scripts/release.sh --dev`. It signs, notarizes and staples the DMG, then
 creates the GitHub pre-release `v<version>` with the DMG and `release-notes/<version>.md`, and
 no feed. The other modes refuse dev versions.
+
+DirectX 12 development builds come from the `dx12` branch, numbered with the next release of the
+DirectX 9 line (0.1.10 while 0.1.9 is the latest release), and stay on my Mac:
+`SWTOR_ON_MAC_VERSION=0.1.10-dev.909 ./build.sh --install`, then *Update to 0.1.10-dev.909* in the
+app. No `scripts/release.sh`. Its CFBundleVersion, 0.1.9.1909, sorts above every 0.1.9-dev build
+(0.1.8.1908 for 0.1.9-dev.908) and below 0.1.10.
 
 `./build.sh && scripts/release.sh` also does everything in one go (sign, notarize, feed, a draft
 release with the DMG, the deltas and the feed), without the gates above.
