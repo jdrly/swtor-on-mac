@@ -920,12 +920,6 @@ esac
   echo "Mac: $(sysctl -n hw.model), $(sysctl -n machdep.cpu.brand_string)" \
     "($(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null)+$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null) cores)," \
     "$(($(sysctl -n hw.memsize) / 1073741824)) GB, macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
-  # (development builds keep a set of settings per renderer: settings.conf's dx12.* lines are
-  # DirectX 12's, the others DirectX 9's; the one chosen now, for the next game start, and each
-  # wine.log names the set its game start ran with, "SWTOR on Mac settings set:")
-  if [ "$(sed -n 's/^channel=//p' "$RES/app.properties" 2>/dev/null)" = dev ]; then
-    echo "Settings set chosen now (the next game start; each wine.log names its own): $([ -f "$SOM/settings.conf" ] && awk -F= '$1 == "dx12" { v = $2 } END { print (v == "on" ? "DirectX 12'"'"'s" : "DirectX 9'"'"'s") }' "$SOM/settings.conf" 2>/dev/null || echo unknown)"
-  fi
   # (now; each game start's own is in its wine.log's conditions line, from the same awk as the
   # wrapper's session_conditions, sysctl in the C locale as there. SWTOR_SYSCTL: a stand-in for tests)
   echo "Memory now (sysctl): $(LC_ALL=C "${SWTOR_SYSCTL:-/usr/sbin/sysctl}" kern.memorystatus_vm_pressure_level kern.memorystatus_level vm.swapusage 2>/dev/null | LC_ALL=C awk '
@@ -935,6 +929,12 @@ esac
     $1 == "vm.swapusage:" { for (i = 2; i + 2 <= NF; i++) if ($(i + 1) == "=" && $(i + 2) ~ /^[0-9.]+[KMG]?$/) s[$i] = mb($(i + 2)) }
     END { printf "pressure %s%s, swap %s\n", (p == "" ? "unknown" : p), (f == "" ? "" : " (" f " % free)"),
       (("used" in s) && ("total" in s) ? s["used"] " MB used of " s["total"] " MB" : "unknown") }')"
+  # (development builds keep a set of settings per renderer: settings.conf's dx12.* lines are
+  # DirectX 12's, the others DirectX 9's; the one chosen now, for the next game start, and each
+  # wine.log names the set its game start ran with, "SWTOR on Mac settings set:")
+  if [ "$(sed -n 's/^channel=//p' "$RES/app.properties" 2>/dev/null)" = dev ]; then
+    echo "Settings set chosen now (the next game start; each wine.log names its own): $([ -f "$SOM/settings.conf" ] && awk -F= '$1 == "dx12" { v = $2 } END { print (v == "on" ? "DirectX 12'"'"'s" : "DirectX 9'"'"'s") }' "$SOM/settings.conf" 2>/dev/null || echo unknown)"
+  fi
   echo "Rosetta: $([ -e /Library/Apple/usr/libexec/oah/libRosettaRuntime ] && echo installed || echo "not installed")"
   echo "Power: $(pmset -g ps 2>/dev/null | sed -n "1s/.*'\(.*\)'.*/\1/p")$(pmset -g 2>/dev/null | awk '($1 == "lowpowermode" || $1 == "powermode") && $2 == 1 { print ", Low Power Mode" } $1 == "powermode" && $2 == 2 { print ", High Power Mode" }')"
   # (now; each game start's own is in its wine.log, "SWTOR on Mac conditions:")
