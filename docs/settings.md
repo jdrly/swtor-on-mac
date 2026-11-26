@@ -128,24 +128,28 @@ DirectX 12 client (`swtor_RC2.exe`, which the patcher puts next to `swtor.exe`).
 neither shows nor applies them: `som.sh set dx12` refuses there, and a `dx12=on` left in
 `settings.conf` by a development build does nothing.
 
-DirectX 9 and DirectX 12 each keep their own settings. Turning *DirectX 12 (experimental)* on or
-off switches to the other set: the window shows its values at once, and the next game start uses
-them, the prefix's too (Retina mode and `swtor.exe`'s Mac driver options, rewritten at the
-switch). Which set a session ran with is in its `wine.log` (`SWTOR on Mac settings set:`), the
-session report's *Settings set* and Collect Logs' `system-info.txt`.
+DirectX 9 and DirectX 12 each keep their own settings ([ADR 0008](adr/0008-settings-per-renderer.md)).
+Turning *DirectX 12 (experimental)* on or off switches the window to the other set at once. The
+game runs with the set of the client that starts: `swtor_RC2.exe` with DirectX 12's, and
+`swtor.exe` with DirectX 9's, also when DirectX 12 is on but falls back to it (no
+`swtor_RC2.exe`, or its driver not ready). Each `wine.log` says which (`SWTOR on Mac settings
+set:`, *fell back* for a fallback), and so do the session report's *Settings set* and Collect Logs.
 
 | Kind | Settings | With DirectX 12 on |
 |---|---|---|
-| Global | Debug Logging, Check for updates, the three DirectX 12 settings | one value for both |
+| Global | Debug Logging, Check for updates, the three DirectX 12 settings, and the window's own *Quit SWTOR on Mac after launching* | one value for both |
 | Per renderer | Retina Mode, Show Metal HUD, Metal HUD Position | DirectX 12's own values |
-| DirectX 9 only | Vsync, Frame Rate Limit, Only on battery, Video Memory Profile, Fewer GPU Batches (d9mt's), Game Mode, Native fullscreen, Game keys by keyboard position, Raw mouse-look, Mouse-Look Speed (they don't work with the DirectX 12 client) | off and greyed out, the DirectX 9 values kept |
+| DirectX 9 only | d9mt's: Vsync, Frame Rate Limit, Only on battery, Video Memory Profile, Fewer GPU Batches | off and greyed out (d9mt doesn't run with the DirectX 12 client), the DirectX 9 values kept |
+| DirectX 9 only, by Jan's test | Game Mode, Native fullscreen, Game keys by keyboard position, Raw mouse-look, Mouse-Look Speed | off and greyed out: the code would apply them to `swtor_RC2.exe` too, but they didn't work with the DirectX 12 client in Jan's tests (2026-11-26) |
 
 `settings.conf` keeps the DirectX 9 set as before (`key=value`, which a release build reads as its
-own) and DirectX 12's as `dx12.<key>=value`. The first start of a build with two sets gives
-DirectX 12 the settings it finds, its DirectX 9-only ones off. A release build that changes a
-setting writes its own keys only: the DirectX 12 set then starts again from the DirectX 9 one.
-The engine's Mac driver follows the DirectX 9 set: with its options off in the prefix, the app's
-build does what the engine's own does.
+own) and DirectX 12's as `dx12.<key>=value`. A file of one set (an earlier version's) gets both at
+the hook check when the app opens or before Play: DirectX 12's starts as the settings it finds,
+its DirectX 9-only ones off. A release build that changes a setting writes its own keys only, and
+DirectX 12's set then starts again from the DirectX 9 one. The files made from the settings hold
+both sets: `swtor.exe`'s values in the prefix, Retina mode for every program, `env`'s game
+settings and `dxvk.conf` are DirectX 9's; `swtor_RC2.exe`'s values (Retina mode among them) and
+`env`'s `SWTOR_DX12_HUD` lines are DirectX 12's.
 
 | Setting | Default | What it changes |
 |---|---|---|

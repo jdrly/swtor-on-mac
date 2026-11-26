@@ -70,8 +70,13 @@ final class GameSettings {
   static let dx9OnlyNote = "Doesn't work with DirectX 12. Turn DirectX 12 off to change it: it keeps its value for DirectX 9."
 
   func reload() {
+    Task { await load() }
+  }
+
+  // som.sh settings, into values (the set chosen; a change waits for it, see set)
+  private func load() async {
     nonDigitLayout = NumberRow.nonDigitLayout()
-    Task {
+    do {
       let output = await Installer.capture(script: script, arguments: ["settings"])
       var parsed: [String: String] = [:]
       for line in output.split(separator: "\n") {
@@ -148,14 +153,16 @@ final class GameSettings {
     let script = script
     Task {
       let output = await Installer.capture(script: script, arguments: ["set", key, value])
-      saving = false
       if !output.contains("@done ") {
         values[key] = previous
         if key == "updates" { updates?.automaticChecks = previous != "off" }
         error = output.split(separator: "\n").first { $0.hasPrefix("@error ") }.map { String($0.dropFirst(7)) }
           ?? "The setting could not be saved."
       }
-      reload()
+      // (the window takes the next change only once it shows what som.sh saved: after the
+      // DirectX 12 switch, the other set)
+      await load()
+      saving = false
     }
   }
 }
@@ -226,6 +233,9 @@ struct SettingsView: View {
     } detail: {
       Form {
         sections(for: selectedPane)
+          // (one change at a time, and the next only once the window shows the set it left:
+          // DirectX 12 on or off switches every value)
+          .disabled(settings.saving)
           .disabled(!settings.loaded || !settings.installed)
         notes(for: selectedPane)
       }
@@ -413,7 +423,7 @@ struct SettingsView: View {
         .disabled(settings.running)
         .dx9Only(settings.dx9Only("physkeys"))
       } footer: {
-        if let layout = settings.nonDigitLayout, settings.values["physkeys"] != "on" {
+        if let layout = settings.nonDigitLayout, settings.values["physkeys"] != "on", !settings.dx9Only("physkeys") {
           Label("Your keyboard layout (\(layout.name)) types \(layout.keys) on the number row: "
                 + "turn this on to have 1–0 in the game.", systemImage: "keyboard")
             .font(.callout)

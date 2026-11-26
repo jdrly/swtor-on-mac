@@ -38,3 +38,4 @@ This table is the status source of truth. Update both it and the ADR's frontmatt
 | [0005](0005-no-background-helper.md) | No background helper: nothing of SWTOR on Mac runs while the app is closed; the app checks the launcher hook when it opens | `accepted` |
 | [0006](0006-engine-downloaded-from-jdrly-wine-engine.md) | The engine is downloaded at install time from jdrly/wine-engine, a byte-for-byte copy of athei's gone release with its source, never bundled | `accepted` |
 | [0007](0007-releases-from-the-maintainers-mac.md) | Releases are built, checked and published from the maintainer's Mac, gated by a binary-diff against the played release candidate and the last release; CI builds no release | `accepted` |
+| [0008](0008-settings-per-renderer.md) | One app keeps a set of settings per renderer in one settings.conf (DirectX 9's as before, DirectX 12's as `dx12.` lines); the game runs with the set of the client that starts | `accepted` |

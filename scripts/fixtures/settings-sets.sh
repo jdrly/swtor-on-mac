@@ -35,6 +35,8 @@ fx_ss_reg() {
 # fx_ss_old <key>: the value a reader of 0.1.9 gets (its setting(): the last key= line, no default)
 fx_ss_old() { sed -n "s/^$1=//p" "$FX_SS_SOM/settings.conf" | tail -1; }
 
+# (dx9only and bad are read in the checks' eval strings)
+# shellcheck disable=SC2034
 fx_settings_sets() {
   local d=$2 res="$1/Contents/Resources" k bad=""
   FX_SS_D=$d
@@ -68,64 +70,60 @@ REG
     >"$FX_SS_SOM/settings.conf"
   cp "$FX_SS_SOM/settings.conf" "$d/settings.old"
 
-  # 1. the map
-  local keys global dx9only
+  local keys dx9only
   keys=$(sed -n 's/^SETTING_KEYS="\(.*\)"$/\1/p' "$d/dev/som.sh")
-  global=$(sed -n 's/^SETTINGS_GLOBAL="\(.*\)"$/\1/p' "$d/dev/som.sh")
-  dx9only=$(sed -n 's/^SETTINGS_DX9_ONLY="\(.*\)"$/\1/p' "$d/dev/som.sh")
-  for k in $global $dx9only; do case " $keys " in *" $k "*) ;; *) bad="$bad $k" ;; esac; done
-  check "settings-sets: the map's global and DX9-only keys are settings (SETTING_KEYS)${bad:+ (not:$bad)}" test -z "$bad"
-  check "settings-sets: the map: global debug updates dx12 dx12driver dx12fps, DX9 only the d9mt and DirectX 9 ones, retina hud hudpos per renderer" \
-    eval '[ "$global" = "debug updates dx12 dx12driver dx12fps" ] && [ "$dx9only" = "gamemode vsync memory physkeys rawmouse mousespeed fpslimit fpsbattery flushcap nativefs" ]'
-  # (the Settings window greys out each DX9-only setting, and only those)
-  bad=""
-  for k in $dx9only; do grep -qF "dx9Only(settings.dx9Only(\"$k\"))" "$FX_SS_REPO/src/native/Settings.swift" || bad="$bad $k"; done
-  check "settings-sets: Settings greys out every DX9-only setting while DirectX 12's set is in effect${bad:+ (missing:$bad)}" test -z "$bad"
-  check "settings-sets: ...and no other (one dx9Only per DX9-only key)" \
-    eval '[ "$(grep -c "\.dx9Only(settings\.dx9Only(" "$FX_SS_REPO/src/native/Settings.swift")" = "$(echo $dx9only | wc -w | tr -d " ")" ]'
 
-  # 2. the earlier version's file: the DirectX 9 set as it was, and the DirectX 12 set seeded
+  # 1. the earlier version's file: the DirectX 9 set as it was, and the DirectX 12 set seeded
   fx_ss_som settings
-  check "settings-sets: an earlier file, DirectX 12 off: the DirectX 9 set is its values, set in effect dx9" \
+  dx9only=$(sed -n 's/^dx9_only=//p' "$d/out.txt")
+  check "settings-sets: an earlier file, DirectX 12 off: the DirectX 9 set is its values, the set chosen dx9" \
     eval 'piped -qx retina=off "$d/out.txt" && piped -qx physkeys=on "$d/out.txt" && piped -qx memory=high "$d/out.txt" && piped -qx fpslimit=30 "$d/out.txt" && piped -qx settings_set=dx9 "$d/out.txt"'
   fx_ss_som set dx12 on
   check "settings-sets: set dx12 on ($FX_RC)" eval '[ "$FX_RC" = 0 ] && fx_ss_conf dx12=on'
   fx_ss_som settings
   check "settings-sets: DirectX 12 on: the DirectX 12 set seeded from the DirectX 9 one (retina off, HUD on at top left)" \
     eval 'piped -qx retina=off "$d/out.txt" && piped -qx hud=on "$d/out.txt" && piped -qx hudpos=topleft "$d/out.txt" && piped -qx settings_set=dx12 "$d/out.txt"'
-  check "settings-sets: ...its DX9-only settings off (memory auto, mouse speed 1), the global ones as they are" \
-    eval 'for k in gamemode vsync physkeys rawmouse fpslimit fpsbattery flushcap nativefs; do piped -qx "$k=off" "$d/out.txt" || exit 1; done; piped -qx memory=auto "$d/out.txt" && piped -qx mousespeed=1 "$d/out.txt" && piped -qx debug=on "$d/out.txt" && piped -qx updates=on "$d/out.txt"'
-  check "settings-sets: ...and the DX9-only list for Settings" piped -qx "dx9_only=$dx9only" "$d/out.txt"
+  check "settings-sets: ...the DX9-only ones off (memory auto, mouse speed 1), the global ones as they are" \
+    eval '( for k in $dx9only; do case $k in memory) piped -qx memory=auto "$d/out.txt" ;; mousespeed) piped -qx mousespeed=1 "$d/out.txt" ;; *) piped -qx "$k=off" "$d/out.txt" ;; esac || exit 1; done ) && [ -n "$dx9only" ] && piped -qx debug=on "$d/out.txt" && piped -qx updates=on "$d/out.txt"'
   check "settings-sets: the file keeps the DirectX 9 set's lines as they were, the DirectX 12 set as dx12.* lines" \
     eval 'diff <(grep -v -e "^#" -e "^dx12\\." -e "^dx12=" "$d/settings.old") <(grep -v -e "^#" -e "^dx12\\." -e "^dx12=" "$FX_SS_SOM/settings.conf") >/dev/null && fx_ss_conf dx12.retina=off && fx_ss_conf dx12.hud=on && fx_ss_conf dx12.hudpos=topleft && [ "$(grep -c "^dx12\\." "$FX_SS_SOM/settings.conf")" = 3 ]'
-  check "settings-sets: DirectX 12 on: the prefix gets the DirectX 12 set's values (swtor.exe's DX9-only ones off)" \
-    eval 'fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"n\"" && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"RawMouseWhenCursorHidden\"=\"n\"" && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"NativeFullscreen\"=\"n\"" && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"RawMouseGameControllerScale\"=\"1\"" && fx_ss_reg "Software\\\\Wine\\\\Mac Driver" "\"RetinaMode\"=\"n\""'
-  check "settings-sets: ...env names the DirectX 12 set, no d9mt frame cap, the default memory profile" \
-    eval 'grep -qx SWTOR_SETTINGS_SET=dx12 "$FX_SS_SOM/env" && grep -qx SWTOR_FPS_LIMIT=0 "$FX_SS_SOM/env" && grep -qx D9MT_MEMORY_PROFILE=auto "$FX_SS_SOM/env" && grep -qx MTL_HUD_ALIGNMENT=topleft "$FX_SS_SOM/env"'
+  # (the files hold both sets: swtor.exe's values and env's game settings the DirectX 9 set's,
+  # which a fallback to swtor.exe runs with; swtor_RC2.exe's the DirectX 12 set's)
+  check "settings-sets: DirectX 12 on: swtor_RC2.exe gets the DirectX 12 set (its DX9-only ones off), swtor.exe keeps the DirectX 9 set" \
+    eval 'fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor_RC2.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"n\"" && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor_RC2.exe\\\\Mac Driver" "\"RawMouseWhenCursorHidden\"=\"n\"" && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor_RC2.exe\\\\Mac Driver" "\"RetinaMode\"=\"n\"" && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"y\"" && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"RawMouseGameControllerScale\"=\"1.5\"" && fx_ss_reg "Software\\\\Wine\\\\Mac Driver" "\"RetinaMode\"=\"n\""'
+  check "settings-sets: ...env: the set chosen dx12, the DirectX 12 set's HUD for swtor_RC2.exe, the DirectX 9 set's game settings kept" \
+    eval 'grep -qx SWTOR_SETTINGS_SET=dx12 "$FX_SS_SOM/env" && grep -qx SWTOR_DX12_HUD=1 "$FX_SS_SOM/env" && grep -qx SWTOR_DX12_HUD_POS=topleft "$FX_SS_SOM/env" && grep -qx SWTOR_FPS_LIMIT=30 "$FX_SS_SOM/env" && grep -qx D9MT_MEMORY_PROFILE=high "$FX_SS_SOM/env"'
 
-  # 3. the DirectX 12 set's own values, and a DX9-only setting refused while it is in effect
+  # 2. the DirectX 12 set's own values, and a DX9-only setting refused while it is chosen
   fx_ss_som set retina on
-  check "settings-sets: Retina on with DirectX 12: dx12.retina=on, the DirectX 9 set's retina=off kept, RetinaMode y ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && fx_ss_conf dx12.retina=on && fx_ss_conf retina=off && fx_ss_reg "Software\\\\Wine\\\\Mac Driver" "\"RetinaMode\"=\"y\""'
+  check "settings-sets: Retina on with DirectX 12: dx12.retina=on, the DirectX 9 set's off kept; swtor_RC2.exe's RetinaMode y, every other program's n ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && fx_ss_conf dx12.retina=on && fx_ss_conf retina=off && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor_RC2.exe\\\\Mac Driver" "\"RetinaMode\"=\"y\"" && fx_ss_reg "Software\\\\Wine\\\\Mac Driver" "\"RetinaMode\"=\"n\""'
   cp "$FX_SS_SOM/settings.conf" "$d/settings.dx12"
   fx_ss_som set vsync on
-  check "settings-sets: a DX9-only setting with DirectX 12's set in effect: refused, said why, settings.conf unchanged ($FX_RC)" \
+  check "settings-sets: a DX9-only setting while DirectX 12's set is chosen: refused, said why, settings.conf unchanged ($FX_RC)" \
     eval '[ "$FX_RC" = 1 ] && piped -q "^@error This setting doesn.t work with DirectX 12" "$d/out.txt" && cmp -s "$d/settings.dx12" "$FX_SS_SOM/settings.conf"'
   fx_ss_som set debug off
   check "settings-sets: a global setting with DirectX 12 on: one value for both sets ($FX_RC)" \
     eval '[ "$FX_RC" = 0 ] && fx_ss_conf debug=off && ! grep -q "^dx12\\.debug=" "$FX_SS_SOM/settings.conf"'
 
-  # 4. back to DirectX 9: its own values, everywhere
+  # 3. back to DirectX 9: its own values shown, swtor_RC2.exe's gone
   fx_ss_som set dx12 off
   fx_ss_som settings
   check "settings-sets: DirectX 12 off: the DirectX 9 set shown again (retina off, keys by position, memory high, 30 fps)" \
     eval 'piped -qx retina=off "$d/out.txt" && piped -qx physkeys=on "$d/out.txt" && piped -qx memory=high "$d/out.txt" && piped -qx fpslimit=30 "$d/out.txt" && piped -qx mousespeed=1.5 "$d/out.txt" && piped -qx settings_set=dx9 "$d/out.txt" && piped -qx debug=off "$d/out.txt"'
-  check "settings-sets: ...the prefix gets the DirectX 9 set's values back" \
-    eval 'fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"y\"" && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"RawMouseWhenCursorHidden\"=\"y\"" && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"NativeFullscreen\"=\"y\"" && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"RawMouseGameControllerScale\"=\"1.5\"" && fx_ss_reg "Software\\\\Wine\\\\Mac Driver" "\"RetinaMode\"=\"n\""'
-  check "settings-sets: ...env and dxvk.conf the DirectX 9 set's (d9mt's 30 fps, memory high, vsync off)" \
-    eval 'grep -qx SWTOR_SETTINGS_SET=dx9 "$FX_SS_SOM/env" && grep -qx SWTOR_FPS_LIMIT=30 "$FX_SS_SOM/env" && grep -qx D9MT_MEMORY_PROFILE=high "$FX_SS_SOM/env" && grep -q "^# d3d9.presentInterval = 1" "$FX_SS_SOM/dxvk.conf"'
+  check "settings-sets: ...swtor_RC2.exe's values gone, the DirectX 9 set's in place, env names dx9" \
+    eval '! grep -qi swtor_RC2 "$FX_SS_SOM/prefix/user.reg" && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"y\"" && fx_ss_reg "Software\\\\Wine\\\\Mac Driver" "\"RetinaMode\"=\"n\"" && grep -qx SWTOR_SETTINGS_SET=dx9 "$FX_SS_SOM/env" && ! grep -q "^SWTOR_DX12_HUD=" "$FX_SS_SOM/env"'
   fx_ss_som set dx12 on
   check "settings-sets: DirectX 12 on again: its own Retina on remembered" eval '[ "$(fx_ss_get retina)" = on ]'
+
+  # 4. a switch that fails half way (the prefix can't be written): settings.conf, env and the
+  # registry as they were, so the window and the next game start agree
+  cp "$FX_SS_SOM/settings.conf" "$d/settings.before"; cp "$FX_SS_SOM/env" "$d/env.before"; cp "$FX_SS_SOM/prefix/user.reg" "$d/user.reg.before"
+  chmod a-w "$FX_SS_SOM/prefix"
+  fx_ss_som set dx12 off
+  chmod u+w "$FX_SS_SOM/prefix"
+  check "settings-sets: a switch that fails: an error, settings.conf, env and user.reg as they were, no copy left ($FX_RC)" \
+    eval '[ "$FX_RC" != 0 ] && cmp -s "$d/settings.before" "$FX_SS_SOM/settings.conf" && cmp -s "$d/env.before" "$FX_SS_SOM/env" && cmp -s "$d/user.reg.before" "$FX_SS_SOM/prefix/user.reg" && [ ! -e "$FX_SS_SOM/set-before.new" ] && [ ! -e "$FX_SS_SOM/.lock" ]'
   fx_ss_som set dx12 off
 
   # 5. a reader of 0.1.9 (key=value, its last line) gets the DirectX 9 set, every key
@@ -134,13 +132,20 @@ REG
     [ "$(fx_ss_old "$k")" = "$(SWTOR_ON_MAC_ROOT="$d/root" "$d/dev/som.sh" settings | sed -n "s/^$k=//p")" ] || bad="$bad $k"
   done
   check "settings-sets: a reader of 0.1.9 gets the DirectX 9 set's value of every key from the new file${bad:+ (not:$bad)}" test -z "$bad"
-  check "settings-sets: ...and no line of the DirectX 12 set it would take for its own (none starts with a key of it)" \
-    eval '! grep -E "^($(echo $keys | tr " " "|"))=" "$FX_SS_SOM/settings.conf" | grep -q "^dx12\\."'
 
-  # 6. the set in effect in wine.log and the session report
-  check "settings-sets: the wrapper names the set in wine.log" \
-    eval 'grep -qF "dx12) echo \"SWTOR on Mac settings set: DirectX 12'"'"'s\" >&2 ;;" "$d/dev/wine-wrapper.sh"'
-  printf 'SWTOR on Mac 0.0.0-fx.1: engine cx26 cx-26.3.0-8, d9mt abc1234, started 2026-11-26 10:00:00\nSWTOR on Mac settings: debug-logging=off hud=off game-mode=off native-fullscreen=off\nSWTOR on Mac settings set: DirectX 12'"'"'s\n' >"$d/wine.log"
+  # 6. an install of an earlier version with DirectX 12 on (one set; swtor_RC2.exe given
+  # swtor.exe's values): the hook check, when the app opens and before Play, makes the two sets
+  # and the files follow
+  cp "$d/settings.old" "$FX_SS_SOM/settings.conf"
+  sed -i.bak 's/^dx12=off$/dx12=on/' "$FX_SS_SOM/settings.conf" && rm -f "$FX_SS_SOM/settings.conf.bak"
+  printf '\n[Software\\\\Wine\\\\AppDefaults\\\\swtor_RC2.exe\\\\Mac Driver] 1763000000\n#time=1dc54a1b2c3d4e5\n"PhysicalKeyboard"="y"\n' >>"$FX_SS_SOM/prefix/user.reg"
+  echo '# env of an earlier version' >"$FX_SS_SOM/env"
+  fx_ss_som rehook
+  check "settings-sets: an earlier install with DirectX 12 on: the hook check makes both sets, swtor_RC2.exe gets the DirectX 12 set's, env follows" \
+    eval 'grep -q "^dx12\\.retina=" "$FX_SS_SOM/settings.conf" && fx_ss_reg "Software\\\\Wine\\\\AppDefaults\\\\swtor_RC2.exe\\\\Mac Driver" "\"PhysicalKeyboard\"=\"n\"" && grep -qx SWTOR_SETTINGS_SET=dx12 "$FX_SS_SOM/env" && grep -qx SWTOR_FPS_LIMIT=30 "$FX_SS_SOM/env"'
+
+  # 7. the set a session ran with, in the session report
+  printf 'SWTOR on Mac 0.0.0-fx.1: engine cx26 cx-26.3.0-8, d9mt abc1234, started 2026-11-26 10:00:00\nSWTOR on Mac settings: debug-logging=off hud=off game-mode=off native-fullscreen=off\nSWTOR on Mac settings set: DirectX 9'"'"'s (DirectX 12 is on, but swtor.exe runs: fell back)\n' >"$d/wine.log"
   "$res/session-report.sh" "$d/wine.log" >"$d/report.txt" 2>&1 || true
-  check "settings-sets: the session report shows the set in effect" grep -qE "^  Settings set +DirectX 12's$" "$d/report.txt"
+  check "settings-sets: the session report shows the set a session ran with, a fallback said" grep -qE "^  Settings set +DirectX 9's \(DirectX 12 is on, but swtor.exe runs: fell back\)$" "$d/report.txt"
 }

@@ -211,6 +211,8 @@ extension Installer {
     return action
   }
 
+  nonisolated static let busyMessage =
+    "SWTOR on Mac is changing its settings or its install right now. Press Play SWTOR again in a moment."
   nonisolated static let changingMessage =
     "SWTOR's launcher is changing its Wine right now. Wait until it has finished, then press Play SWTOR again."
 
@@ -220,6 +222,9 @@ extension Installer {
                                         launcher: Bool, game: Bool) -> PlayAction {
     let action = playAction(status: status, working: working, launcher: launcher, game: game)
     if answer == "@notice changing", case .unavailable = action { return .unavailable(changingMessage) }
+    // (an install, uninstall or settings change runs, a switch of DirectX 12 among them: the game
+    // waits for its files)
+    if answer == "@notice busy" { return .unavailable(busyMessage) }
     return action
   }
 

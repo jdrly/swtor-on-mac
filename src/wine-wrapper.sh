@@ -233,6 +233,11 @@ dx12_swap() {
     game_args[${#game_args[@]}]=$a
   done
   [ "$game_exe" = swtor_RC2.exe ] || return 0
+  # the DirectX 12 set's Metal HUD (env's MTL_HUD_* lines are the DirectX 9 set's, for swtor.exe)
+  if [ -n "${SWTOR_DX12_HUD:-}" ]; then
+    if [ "$SWTOR_DX12_HUD" = 1 ]; then export MTL_HUD_ENABLED=1 MTL_HUD_ALIGNMENT="${SWTOR_DX12_HUD_POS:-topcenter}"
+    else unset MTL_HUD_ENABLED MTL_HUD_ALIGNMENT; fi
+  fi
   # Wine's builtin d3d9 for it, not d9mt: Wine asks WINEDLLOVERRIDES before the registry's
   # AppDefaults\swtor_RC2.exe, and env gives every process d3d9=n,b
   export WINEDLLOVERRIDES="d3d9=b"
@@ -321,10 +326,17 @@ if [ -n "$SWTOR_ENGINE" ]; then
       if [ "$SWTOR_DX12" = 1 ]; then dx12_swap "$@"; set -- "${game_args[@]}"; fi
       # Debug Logging: Wine debug channels for the game only (RAWMOUSE, THREADCPU lines)
       [ -z "$SWTOR_GAME_WINEDEBUG" ] || export WINEDEBUG="$SWTOR_GAME_WINEDEBUG"
-      # Native fullscreen: the driver's NATIVEFS lines (after Debug Logging's channels)
-      native_fullscreen
-      fps_limit
-      flush_cap
+      # Native fullscreen: the driver's NATIVEFS lines (after Debug Logging's channels); it and
+      # d9mt's frame cap and flush cap are DirectX 9 settings: not for swtor_RC2.exe, whose set
+      # has them off (Game Mode below too)
+      nf_note=off fps_note="" flush_note=""
+      if [ "$game_exe" != swtor_RC2.exe ]; then
+        native_fullscreen
+        fps_limit
+        flush_cap
+      else
+        SWTOR_GAMEMODE_APP="" SWTOR_NATIVE_FULLSCREEN=0
+      fi
       game_lang "$@"
       # (and the locale the game gets: a German one once failed where English worked)
       { date; env | grep -E '^(WINE|DYLD_|SWTOR_|DXVK_|MTL_|D9MT_|D3DM_|MULLION_|LANG=|LC_)' | sort
@@ -365,10 +377,13 @@ if [ -n "$SWTOR_ENGINE" ]; then
         echo "SWTOR on Mac settings: $(session_settings)" >&2
         echo "SWTOR on Mac conditions: $diag_conditions" >&2
         echo "SWTOR on Mac ${files%_files} files: $diag_files" >&2
-        # the settings set in effect (development builds keep one per renderer)
-        case "${SWTOR_SETTINGS_SET:-}" in
-          dx12) echo "SWTOR on Mac settings set: DirectX 12's" >&2 ;;
-          dx9) echo "SWTOR on Mac settings set: DirectX 9's" >&2 ;;
+        # the settings set this game start runs with (development builds keep one per
+        # renderer): the DirectX 12 client's, or swtor.exe's, DirectX 9's, also when DirectX 12
+        # is chosen but falls back to it
+        case "${SWTOR_SETTINGS_SET:-}:$game_exe" in
+          dx12:swtor_RC2.exe) echo "SWTOR on Mac settings set: DirectX 12's" >&2 ;;
+          dx12:*) echo "SWTOR on Mac settings set: DirectX 9's (DirectX 12 is on, but swtor.exe runs: fell back)" >&2 ;;
+          dx9:*) echo "SWTOR on Mac settings set: DirectX 9's" >&2 ;;
         esac
       else
         exec >/dev/null 2>/dev/null
