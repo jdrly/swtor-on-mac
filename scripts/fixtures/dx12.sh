@@ -234,87 +234,106 @@ STUB
 }
 
 # fx_dx12_fit <folder>: DirectX 12's game window (Settings: "Fit the game window to the screen at
-# each start", the wrapper's dx12_fit_window) on fx_dx12's planted install, DirectX 12 on: env's
-# SWTOR_DX12_FIT, and at a game start the four window keys of client_settings_DX12.ini's
-# [Renderer] from the app's dx12-window-fit (as Play writes it: two screens, the main one first),
-# nothing else of the file; a start without a fresh file, with the setting off, without the
-# file or its section, or of swtor.exe changes nothing. A control: a wrapper that ignores the
-# section fails the "nothing else" check.
+# each start", som.sh fit-window, which Play SWTOR runs before it opens the launcher) on fx_dx12's
+# planted install, DirectX 12 on: the four window keys of client_settings_DX12.ini's [Renderer]
+# from the screens Play passes (two: the main one first), a missing one added, every other byte
+# kept (CRLF, an unterminated last line, the file's mode); the backup in the app's folder, none
+# beside the file; the log line numbers only; nothing written for the setting off, a release
+# build, no file or section, no screen, an unreadable file; a game start changes nothing. A
+# control: a som.sh that ignores the section fails the "nothing else" check.
 fx_dx12_fit() {
-  local d=$1 win='C:\swtor\retailclient\swtor.exe' logs="$1/root/home/Library/Logs/SWTOR on Mac" set ini fit
+  local d=$1 win='C:\swtor\retailclient\swtor.exe' set ini
+  local s1="0.00,0.00,1920.00,1080.00,0.00,62.00,1920.00,1018.00" s2="1920.00,0.00,1728.00,1117.00,1920.00,69.00,1728.00,1048.00"
   set="$FX_DX12_SOM/prefix/drive_c/users/crossover/AppData/Local/SWTOR/swtor/settings"
-  ini="$set/client_settings_DX12.ini" fit="$FX_DX12_SOM/dx12-window-fit"
-  check "dx12 fit: on by default, Retina mode on: SWTOR_DX12_FIT=2 in env" eval 'grep -qx dx12fit=on "$FX_DX12_SOM/settings.conf" && [ "$(fx_dx12_env SWTOR_DX12_FIT)" = 2 ]'
-  fx_dx12_som dev set retina off
-  check "dx12 fit: Retina mode off: SWTOR_DX12_FIT=1 ($FX_RC)" eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_env SWTOR_DX12_FIT)" = 1 ]'
-  fx_dx12_som dev set retina on
+  ini="$set/client_settings_DX12.ini"
+  check "dx12 fit: on by default" grep -qx dx12fit=on "$FX_DX12_SOM/settings.conf"
   fx_dx12_som release set dx12fit off
   check "dx12 fit: release build: set dx12fit refused ($FX_RC)" eval '[ "$FX_RC" = 1 ] && grep -qx dx12fit=on "$FX_DX12_SOM/settings.conf"'
-  # (Play's file: the main screen 1920x1080 points with a 30-point menu bar, a 32-point title bar;
-  # a second one 1728x1117 to its right, 37 points of menu bar)
-  fx_dx12_fitfile() { printf '%s\n' "0.00 0.00 1920.00 1080.00 0.00 62.00 1920.00 1018.00" "1920.00 0.00 1728.00 1117.00 1920.00 69.00 1728.00 1048.00" >"$fit"; }
-  # no settings file yet (the client's first start writes it): none made, the file used up
-  fx_dx12_fitfile; fx_dx12_game "$win"
-  check "dx12 fit: no client_settings_DX12.ini: none written, the app's file used up, wine.log says so" \
-    eval '[ ! -e "$ini" ] && [ ! -e "$fit" ] && grep -qx "SWTOR on Mac DirectX 12 window: the game.s own (no client_settings_DX12.ini yet)" "$logs/wine.log"'
-  # the game's file (CRLF), the window saved small on the second screen, a [Game] section with a
-  # Width of its own
+  # no settings file yet (the client's first start writes it): none made
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: no client_settings_DX12.ini: none written ($FX_RC)" eval '[ "$FX_RC" = 0 ] && [ ! -e "$ini" ] && piped -qx "@done no file" "$d/out.txt"'
+  # the game's file (CRLF), the window saved small on the second screen, a [Game] section with
+  # keys of the same names, an unterminated last line, mode 600
   mkdir -p "$set"
-  printf '%s\r\n' '[Renderer]' 'AllowColorRemapping = false' 'DX12_RenderHeight = 2075' 'DX12_RenderWidth = 3840' 'Height = 1018' \
-    'Width = 1920' 'WindowX = 4000' 'WindowY = 300' 'GammaRamp = 1' '[Game]' 'Width = 7' 'WindowX = 5' >"$ini"
-  cp "$ini" "$d/ini.orig"
+  { printf '%s\r\n' '[Renderer]' 'AllowColorRemapping = false' 'DX12_RenderHeight = 2075' 'DX12_RenderWidth = 3840' 'Height = 1018' \
+      'Width = 1920' 'WindowX = 4000' 'WindowY = 300' 'GammaRamp = 1' '[Game]' 'Width = 7' 'WindowX = 5'
+    printf 'Last = 1'; } >"$ini"
+  chmod 600 "$ini"; cp -p "$ini" "$d/ini.orig"
   sed 's/^Height = 1018/Height = 2096/; s/^Width = 1920/Width = 3456/; s/^WindowX = 4000/WindowX = 3840/; s/^WindowY = 300/WindowY = 138/' "$d/ini.orig" >"$d/ini.want2"
-  fx_dx12_fitfile; fx_dx12_game "$win"
-  check "dx12 fit: the window on the second screen gets that screen's area, nothing else of the file changes (CRLF kept)" cmp -s "$ini" "$d/ini.want2"
-  check "dx12 fit: the game's file kept once as client_settings_DX12.ini.som-backup, the app's file used up" \
-    eval 'cmp -s "$ini.som-backup" "$d/ini.orig" && [ ! -e "$fit" ] && [ ! -e "$ini.som-new" ]'
-  check "dx12 fit: wine.log names the screen and both sizes" \
-    grep -qx "SWTOR on Mac DirectX 12 window: fitted to screen 2 of 2: 3840,138 3456x2096 (was 4000,300 1920x1018)" "$logs/wine.log"
-  # a start from Broadsword's launcher alone (no file): as the game saved it
-  cp "$d/ini.orig" "$ini"
+  # (a temporary file another attempt left beside it: never renamed over it)
+  printf 'stale\n' >"$ini.new.1"
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: the window on the second screen gets that screen's area, every other byte kept (CRLF, the [Game] keys, the unterminated last line) ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && cmp -s "$ini" "$d/ini.want2" && piped -qx "@done fitted" "$d/out.txt"'
+  check "dx12 fit: the file's mode kept (600), a stale temporary file of another attempt left as it was" \
+    eval '[ "$(stat -c %a "$ini" 2>/dev/null || stat -f %Lp "$ini")" = 600 ] && [ "$(cat "$ini.new.1")" = stale ]'
+  rm -f "$ini.new.1"
+  check "dx12 fit: the game's file kept once in the app's folder (backup/), nothing new beside it in the prefix" \
+    eval 'cmp -s "$FX_DX12_SOM/backup/client_settings_DX12.ini" "$d/ini.orig" && [ "$(ls -A "$set")" = client_settings_DX12.ini ]'
+  check "dx12 fit: rehook.log names the screen and the numbers" \
+    grep -q "fit-window: fitted to screen 2 of 2: 3840,138 3456x2096 (was 4000,300 1920x1018)$" "$FX_DX12_SOM/../../Logs/SWTOR on Mac/rehook.log"
+  # a value that isn't a number (an e-mail address in a note after it): logged as ?, the window
+  # then on the main screen (its centre unknown), no text of the file in the logs
+  printf '%s\r\n' '[Renderer]' 'Height = 1018' 'Width = 1920 ; fx.person@example.com' 'WindowX = 4000' 'WindowY = 300' >"$ini"
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: a value that isn't a number: logged as ?, the main screen's area, no text of the file in the logs" \
+    eval 'grep -q "fit-window: fitted to screen 1 of 2: 0,124 3840x2036 (was 4000,300 ?x1018)$" "$FX_DX12_SOM/../../Logs/SWTOR on Mac/rehook.log" && grep -q "^Width = 3840.$" "$ini" && ! grep -rq example.com "$FX_DX12_SOM/../../Logs/SWTOR on Mac"'
+  # a game start (from Broadsword's launcher or not) changes nothing of it
+  cp -p "$d/ini.orig" "$ini"
   fx_dx12_game "$win"
-  check "dx12 fit: no file from Play: the file unchanged, wine.log says why" \
-    eval 'cmp -s "$ini" "$d/ini.orig" && grep -qx "SWTOR on Mac DirectX 12 window: as the game saved it (not started from SWTOR on Mac.s Play)" "$logs/wine.log"'
-  # a file from a Play more than an hour ago: the same, and used up
-  fx_dx12_fitfile; touch -t 202001010000 "$fit"; fx_dx12_game "$win"
-  check "dx12 fit: a file older than an hour: the file unchanged, the old one used up" eval 'cmp -s "$ini" "$d/ini.orig" && [ ! -e "$fit" ]'
-  # the saved centre on no screen (a display unplugged): the main screen's area; the backup stays
-  # the first one
-  sed 's/^WindowX = 4000/WindowX = 9000/' "$d/ini.orig" >"$ini"
-  sed 's/^Height = 1018/Height = 2036/; s/^Width = 1920/Width = 3840/; s/^WindowX = 4000/WindowX = 0/; s/^WindowY = 300/WindowY = 124/' "$d/ini.orig" >"$d/ini.want1"
-  fx_dx12_fitfile; fx_dx12_game "$win"
-  check "dx12 fit: the saved centre on no screen: the main screen's area, the backup the first file still" \
-    eval 'cmp -s "$ini" "$d/ini.want1" && cmp -s "$ini.som-backup" "$d/ini.orig"'
-  fx_dx12_fitfile; fx_dx12_game "$win"
-  check "dx12 fit: already fitted: the file unchanged, wine.log says so" \
-    eval 'cmp -s "$ini" "$d/ini.want1" && grep -qx "SWTOR on Mac DirectX 12 window: fitted already (screen 1 of 2: 0,124 3840x2036)" "$logs/wine.log"'
-  # the setting off: as the game saved it, the app's file used up
-  cp "$d/ini.orig" "$ini"
-  fx_dx12_som dev set dx12fit off
-  fx_dx12_fitfile; fx_dx12_game "$win"
-  check "dx12 fit: off: no SWTOR_DX12_FIT, the file unchanged, the app's file used up ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && [ "$(fx_dx12_env SWTOR_DX12_FIT)" = "<unset>" ] && cmp -s "$ini" "$d/ini.orig" && [ ! -e "$fit" ] && grep -qx "SWTOR on Mac DirectX 12 window: as the game saved it (Settings: fitting is off)" "$logs/wine.log"'
-  fx_dx12_som dev set dx12fit on
-  # no [Renderer] section: left alone
-  printf '%s\r\n' '[Game]' 'Width = 7' >"$ini"; cp "$ini" "$d/ini.nosec"
-  fx_dx12_fitfile; fx_dx12_game "$win"
-  check "dx12 fit: no [Renderer] section: the file unchanged" eval 'cmp -s "$ini" "$d/ini.nosec" && [ ! -e "$fit" ]'
-  # swtor.exe starts (no swtor_RC2.exe): DirectX 12's file unchanged, the app's file used up
-  cp "$d/ini.orig" "$ini"
-  mv "$FX_DX12_SOM/prefix/drive_c/swtor/retailclient/swtor_RC2.exe" "$d/swtor_RC2.exe"
-  fx_dx12_fitfile; fx_dx12_game "$win"
-  check "dx12 fit: swtor.exe starts instead: the file unchanged, the app's file used up" eval 'cmp -s "$ini" "$d/ini.orig" && [ ! -e "$fit" ]'
-  mv "$d/swtor_RC2.exe" "$FX_DX12_SOM/prefix/drive_c/swtor/retailclient/swtor_RC2.exe"
-  # the control: a wrapper that changes the four keys in every section
-  cp "$FX_DX12_W/bin/wine64-preloader" "$d/wrapper.good"
-  sed 's/if (sec \&\& index(l, "=")) {$/if (index(l, "=")) {/' "$d/wrapper.good" >"$FX_DX12_W/bin/wine64-preloader"
-  cp "$d/ini.orig" "$ini"
-  fx_dx12_fitfile; fx_dx12_game "$win"
-  if ! grep -q 'if (sec && index(l, "=")) {$' "$FX_DX12_W/bin/wine64-preloader" && ! cmp -s "$ini" "$d/ini.want2"; then
-    ok "dx12 fit: control: a wrapper that ignores the section fails the check (the [Game] keys change)"
-  else
-    bad "dx12 fit: control: a wrapper that ignores the section passes the check"
+  check "dx12 fit: a game start leaves the file as the game saved it" cmp -s "$ini" "$d/ini.orig"
+  # the saved centre on no screen (a display unplugged): the main screen's area; WindowY missing:
+  # added at the end of [Renderer] with its line ending; the backup stays the first file
+  printf '%s\r\n' '[Renderer]' 'Height = 1018' 'Width = 1920' 'WindowX = 9000' '[Game]' 'Width = 7' >"$ini"
+  printf '%s\r\n' '[Renderer]' 'Height = 2036' 'Width = 3840' 'WindowX = 0' 'WindowY = 124' '[Game]' 'Width = 7' >"$d/ini.want1"
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: the saved centre unknown: the main screen's area, the missing WindowY added in [Renderer], the backup the first file still" \
+    eval 'cmp -s "$ini" "$d/ini.want1" && cmp -s "$FX_DX12_SOM/backup/client_settings_DX12.ini" "$d/ini.orig"'
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: already fitted: unchanged, said so" eval 'cmp -s "$ini" "$d/ini.want1" && piped -qx "@done fitted already" "$d/out.txt"'
+  # no screen given, or none in the form: nothing written
+  cp -p "$d/ini.orig" "$ini"
+  fx_dx12_som dev fit-window
+  check "dx12 fit: no screen: nothing written ($FX_RC)" eval '[ "$FX_RC" = 0 ] && cmp -s "$ini" "$d/ini.orig" && piped -qx "@done no screen" "$d/out.txt"'
+  fx_dx12_som dev fit-window "1,2,3" "a,b,c,d,e,f,g,h"
+  check "dx12 fit: screens not in the form: nothing written" eval 'cmp -s "$ini" "$d/ini.orig" && piped -qx "@done no screen" "$d/out.txt"'
+  # the file can't be read: nothing written
+  chmod 000 "$ini"
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  chmod 600 "$ini"
+  if [ "$(id -u)" != 0 ]; then
+    check "dx12 fit: a file that can't be read: nothing written" eval 'cmp -s "$ini" "$d/ini.orig" && piped -qx "@done not read" "$d/out.txt"'
   fi
-  cp "$d/wrapper.good" "$FX_DX12_W/bin/wine64-preloader"
-  rm -f "$ini" "$ini.som-backup" "$fit"
+  # no [Renderer] section: nothing written
+  printf '%s\r\n' '[Game]' 'Width = 7' >"$ini"; cp -p "$ini" "$d/ini.nosec"
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: no [Renderer] section: nothing written" eval 'cmp -s "$ini" "$d/ini.nosec" && piped -qx "@done no section" "$d/out.txt"'
+  # the setting off, or DirectX 12 off: nothing written
+  cp -p "$d/ini.orig" "$ini"
+  fx_dx12_som dev set dx12fit off
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: the setting off: nothing written" eval 'cmp -s "$ini" "$d/ini.orig" && piped -qx "@done off" "$d/out.txt"'
+  fx_dx12_som dev set dx12fit on
+  fx_dx12_som dev set dx12 off
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: DirectX 12 off: nothing written" eval 'cmp -s "$ini" "$d/ini.orig" && piped -qx "@done off" "$d/out.txt"'
+  fx_dx12_som dev set dx12 on
+  # Retina mode off: Wine's pixels are points (the window saved on the second screen in points)
+  fx_dx12_som dev set retina off
+  printf '%s\r\n' '[Renderer]' 'Height = 509' 'Width = 960' 'WindowX = 2000' 'WindowY = 150' >"$ini"
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: Retina mode off: the second screen's area in points" eval 'grep -q "^WindowX = 1920.$" "$ini" && grep -q "^WindowY = 69.$" "$ini" && grep -q "^Width = 1728.$" "$ini" && grep -q "^Height = 1048.$" "$ini"'
+  fx_dx12_som dev set retina on
+  # the control: a som.sh that changes the four keys in every section
+  cp "$FX_DX12_D/dev/som.sh" "$d/som.good"
+  sed 's/if (in_r \&\& index(b, "=")) {$/if (index(b, "=")) {/' "$d/som.good" >"$FX_DX12_D/dev/som.sh"
+  cp -p "$d/ini.orig" "$ini"
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  if ! cmp -s "$FX_DX12_D/dev/som.sh" "$d/som.good" && ! cmp -s "$ini" "$d/ini.want2"; then
+    ok "dx12 fit: control: a som.sh that ignores the section fails the check (the [Game] keys change)"
+  else
+    bad "dx12 fit: control: a som.sh that ignores the section passes the check"
+  fi
+  cp "$d/som.good" "$FX_DX12_D/dev/som.sh"
+  rm -rf "$ini" "$FX_DX12_SOM/backup"
 }

@@ -277,91 +277,6 @@ dx12_swap() {
   dx12_note="swtor_RC2.exe, driver ${SWTOR_DX12_DRIVER:-?} (dxgi=$(printf '%s\n' "$WINE_COMPATDB" | sed -n 's/^name=swtor-dx12;exe=swtor_RC2\.exe;dxgi=//p'))${D3DM_MTL4:+, D3DM_MTL4=$D3DM_MTL4}${MULLION_D3D12_METAL4:+, MULLION_D3D12_METAL4=$MULLION_D3D12_METAL4}${MULLION_SESSION_HEADER:+, MULLION_SESSION_HEADER=$MULLION_SESSION_HEADER}${MULLION_STATS:+, MULLION_STATS=$MULLION_STATS}${MULLION_MEMSTATS:+, MULLION_MEMSTATS=$MULLION_MEMSTATS}${MULLION_CONFIG:+, MULLION_CONFIG=$MULLION_CONFIG}${SWTOR_DX12_DRIVER_VERSION:+, $SWTOR_DX12_DRIVER_VERSION}"
 }
 
-# DirectX 12's game window (Settings: "Fit the game window to the screen at each start", on by
-# default; env's SWTOR_DX12_FIT is Wine's pixels per point, 2 with Retina mode). swtor_RC2.exe
-# saves its window's place and size at every move or resize (WindowX, WindowY, Width and Height
-# in [Renderer] of client_settings_DX12.ini) and opens there, so a window macOS once made
-# smaller (fitted under the menu bar, moved to another display, tiled) stays that small. The
-# app's Play writes $SWTOR_APP_DIR/dx12-window-fit: one line per screen, the main screen first,
-# its frame and the client area that fills its visible part under a title bar, eight numbers
-# in Wine's points (x right, y down from the main screen's top). At a game start from that Play
-# (the file is there and less than an hour old), the window gets that area of the screen that
-# holds its saved centre, or of the main screen if none does (a display unplugged). Only those
-# four keys change; a missing file or [Renderer] section is left alone, and the first change
-# keeps the game's own file as client_settings_DX12.ini.som-backup. A start from Broadsword's
-# launcher alone finds no file and changes nothing; every game start uses the file up. Sets
-# dx12_fit_note for wine.log.
-dx12_fit_window() {
-  local f="$SWTOR_APP_DIR/dx12-window-fit" fresh="" note rc=0
-  local ini="$SWTOR_PREFIX/drive_c/users/crossover/AppData/Local/SWTOR/swtor/settings/client_settings_DX12.ini"
-  dx12_fit_note=""
-  [ -f "$f" ] && [ -n "$(find "$f" -mmin -60 2>/dev/null)" ] && fresh=1
-  if [ "$game_exe" != swtor_RC2.exe ]; then rm -f "$f"; return 0; fi
-  if [ -z "${SWTOR_DX12_FIT:-}" ]; then dx12_fit_note="as the game saved it (Settings: fitting is off)"
-  elif [ -z "$fresh" ]; then dx12_fit_note="as the game saved it (not started from SWTOR on Mac's Play)"
-  elif [ ! -f "$ini" ]; then dx12_fit_note="the game's own (no client_settings_DX12.ini yet)"
-  else
-    # (fit file, then the settings file twice: its four values, then the copy with the new ones;
-    # exit 3: nothing to change, 4: no [Renderer] section, 5: no screen in the fit file)
-    note=$(LC_ALL=C awk -v s="$SWTOR_DX12_FIT" -v out="$ini.som-new" '
-      function px(v) { v *= s; return v < 0 ? -int(-v + 0.5) : int(v + 0.5) }
-      function key(l,    k) { k = l; sub(/^[ \t]+/, "", k); sub(/[ \t]*=.*/, "", k); return k }
-      FNR == 1 { file++; sec = 0 }
-      file == 1 {
-        if (NF == 8 && $0 ~ /^[-0-9. ]+$/) { n++; for (i = 1; i <= 8; i++) scr[n, i] = $i + 0 }
-        next
-      }
-      { l = $0; cr = sub(/\r$/, "", l) }
-      l ~ /^[ \t]*\[/ { sec = (l ~ /^[ \t]*\[Renderer\][ \t]*$/); if (sec) found = 1 }
-      file == 2 {
-        if (sec && index(l, "=")) { k = key(l); if (k ~ /^(WindowX|WindowY|Width|Height)$/) { v = l; sub(/^[^=]*=[ \t]*/, "", v); old[k] = v } }
-        next
-      }
-      file == 3 && FNR == 1 {
-        if (!found) exit 4
-        if (!n) exit 5
-        # the screen holding the saved centre, in pixels, else the main one
-        pick = 1
-        if (("WindowX" in old) && ("WindowY" in old) && ("Width" in old) && ("Height" in old)) {
-          cx = old["WindowX"] + old["Width"] / 2; cy = old["WindowY"] + old["Height"] / 2
-          for (i = n; i >= 1; i--)
-            if (cx >= px(scr[i, 1]) && cx < px(scr[i, 1]) + px(scr[i, 3]) && cy >= px(scr[i, 2]) && cy < px(scr[i, 2]) + px(scr[i, 4])) pick = i
-        }
-        new["WindowX"] = px(scr[pick, 5]); new["WindowY"] = px(scr[pick, 6])
-        new["Width"] = px(scr[pick, 7]); new["Height"] = px(scr[pick, 8])
-        same = 1
-        for (k in new) if (!(k in old) || old[k] != new[k] "") same = 0
-        if (same) { printf "fitted already (screen %d of %d: %s,%s %sx%s)\n", pick, n, new["WindowX"], new["WindowY"], new["Width"], new["Height"]; exit 3 }
-      }
-      file == 3 {
-        if (sec && index(l, "=")) {
-          k = key(l)
-          if ((k in new) && (k in old)) { p = l; sub(/=.*/, "=", p); l = p " " new[k] }
-        }
-        printf "%s%s\n", l, (cr ? "\r" : "") > out
-      }
-      END {
-        if (file == 3 && found && n && !same)
-          printf "fitted to screen %d of %d: %s,%s %sx%s (was %s,%s %sx%s)\n", pick, n, new["WindowX"], new["WindowY"], new["Width"], new["Height"],
-            old["WindowX"], old["WindowY"], old["Width"], old["Height"]
-      }' "$f" "$ini" "$ini" 2>/dev/null) || rc=$?
-    case $rc in
-      0)
-        # (a copy of the game's own file first, once; then the new file in its place in one step)
-        if { [ -e "$ini.som-backup" ] || cp -p "$ini" "$ini.som-backup"; } && mv -f "$ini.som-new" "$ini"; then
-          dx12_fit_note=$note
-        else
-          dx12_fit_note="as the game saved it (could not write client_settings_DX12.ini)"
-        fi ;;
-      3) dx12_fit_note=$note ;;
-      4) dx12_fit_note="as the game saved it (no [Renderer] section in client_settings_DX12.ini)" ;;
-      *) dx12_fit_note="as the game saved it (no screen in the app's dx12-window-fit)" ;;
-    esac
-    rm -f "$ini.som-new"
-  fi
-  rm -f "$f"
-}
-
 # wine.log is written anew at every game start: keep the last 4 sessions' as wine.log.1 (the
 # one before) to wine.log.4, so a failed start isn't lost to the next one.
 rotate_wine_log() {
@@ -421,9 +336,6 @@ if [ -n "$SWTOR_ENGINE" ]; then
       # DirectX 12: the command from here on is game_args (swtor_RC2.exe if it is there)
       game_exe=swtor.exe dx12_note=""
       if [ "$SWTOR_DX12" = 1 ]; then dx12_swap "$@"; set -- "${game_args[@]}"; fi
-      # DirectX 12's window: fitted to its screen at a start from the app's Play (uses up the
-      # app's dx12-window-fit at any game start)
-      dx12_fit_window
       # Debug Logging: Wine debug channels for the game only (RAWMOUSE, THREADCPU lines)
       [ -z "$SWTOR_GAME_WINEDEBUG" ] || export WINEDEBUG="$SWTOR_GAME_WINEDEBUG"
       # Native fullscreen: the driver's NATIVEFS lines (after Debug Logging's channels); it and
@@ -485,8 +397,6 @@ if [ -n "$SWTOR_ENGINE" ]; then
           dx12:*) echo "SWTOR on Mac settings set: DirectX 9's (DirectX 12 is on, but swtor.exe runs: fell back)" >&2 ;;
           dx9:*) echo "SWTOR on Mac settings set: DirectX 9's" >&2 ;;
         esac
-        # DirectX 12's game window: fitted to its screen, or why it opens as the game saved it
-        [ -z "$dx12_fit_note" ] || echo "SWTOR on Mac DirectX 12 window: $dx12_fit_note" >&2
       else
         exec >/dev/null 2>/dev/null
       fi

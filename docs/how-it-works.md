@@ -36,18 +36,15 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
     with d9mt's `d3d9.dll` in `system32` (Wine's own kept as `d3d9.dll.wine`) and the settings
     in [Settings](settings.md); your existing game settings are taken over once. In a
     development build with DirectX 12 on and *Fit the game window to the screen at each start*
-    on, a start from *Play SWTOR* sets the four window keys of the game's
-    `client_settings_DX12.ini` (its first such change keeps the game's file as
-    `client_settings_DX12.ini.som-backup`)
+    on, *Play SWTOR* sets the four window keys of the game's `client_settings_DX12.ini`
   - `gamemode/SWTOR.app` – the bundle that gets the game macOS Game Mode (a clone of the
     engine's loader and a link to its `ntdll.so`)
   - `settings.conf` – the Settings window's settings; `env` – what the wrapper applies,
     `dxvk.conf` – d9mt's options (both made from `settings.conf`)
   - `install-manifest.json` – what was changed, for Uninstall
   - `last-update-check`, `update-available` – the wrapper's daily update check
-  - `dx12-window-fit` – only in development builds, from *Play SWTOR* with DirectX 12 on until
-    the next game start uses it up: the screens the DirectX 12 window is fitted to
-  - `backup/` – only if you replaced another Wine wrapper: a copy of it
+  - `backup/` – only if you replaced another Wine wrapper: a copy of it; in a development build
+    also `client_settings_DX12.ini`, the game's own before the first window fit
 - `~/Library/Caches/SWTOR on Mac/downloads` – the engine downloads, only during an install; in
   a development build also Mullion's archive, kept after a settings change until the next
   install, so switching back to Mullion needs no new download
