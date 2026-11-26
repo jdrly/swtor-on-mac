@@ -209,7 +209,7 @@ fx_dx12_mullion() {
   cp "$e/lib/wine/x86_64-unix/winemetal.so" "$d/bridge"
   # (with a key, as an install writes it: plutil reads a bare {} as OpenStep, which it can't
   # write back when Native fullscreen records the Mac driver in it)
-  printf '{\n  "fixture": "dx12-mullion"\n}\n' >"$FX_DXM_SOM/install-manifest.json"
+  printf '{\n  "fixture": "dx12-mullion",\n  "version": "0.0.0-dev.1"\n}\n' >"$FX_DXM_SOM/install-manifest.json"
   printf 'WINE REGISTRY Version 2\n' >"$FX_DXM_SOM/prefix/user.reg"
   # my fork's build of c1, pinned; its VERSION's codegen line with characters env can't hold
   # between quotes, which the install leaves out
@@ -238,30 +238,28 @@ fx_dx12_mullion() {
   check "dx12-mullion: env: DirectX 12 with Mullion, rule dxgi=dxmt for swtor_RC2.exe, the build named by its VERSION ($(fx_dxm_env SWTOR_DX12_DRIVER_VERSION))" \
     eval '[ "$(fx_dxm_env SWTOR_DX12)/$(fx_dxm_env SWTOR_DX12_DRIVER)" = 1/mullion ] && fx_dxm_env WINE_COMPATDB | piped -x "name=swtor-dx12;exe=swtor_RC2.exe;dxgi=dxmt" && [ "$(fx_dxm_env SWTOR_DX12_DRIVER_VERSION)" = "Mullion (jdrly/mullion 1111111), v0.5-alpha.3-1-g1111111, codegen airconv 103xy" ]'
 
-  # Native fullscreen with DirectX 12 on: swtor_RC2.exe gets swtor.exe's NativeFullscreen, at a
-  # change of either setting
+  # Native fullscreen: DirectX 9 only (Jan's tests, docs/settings.md). swtor.exe gets the
+  # DirectX 9 set's, swtor_RC2.exe the DirectX 12 set's off, whatever swtor.exe has
   fx_dxm set nativefs on
-  check "dx12-mullion: nativefs on, DirectX 12 on: NativeFullscreen=y for swtor.exe and swtor_RC2.exe, the app's Mac driver, the manifest says so ($FX_RC: $(tail -n 1 "$d/out.txt"))" \
-    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor.exe y && fx_dxm_nf swtor_RC2.exe y && cmp -s "$d/dev/Resources/wine/winemac.so" "$e/lib/wine/x86_64-unix/winemac.so" && [ "$(plutil -extract winemac raw -o - "$FX_DXM_SOM/install-manifest.json")" = app ]'
+  check "dx12-mullion: nativefs with DirectX 12 on: refused, DirectX 9 only; swtor_RC2.exe's NativeFullscreen n ($FX_RC)" \
+    eval '[ "$FX_RC" = 1 ] && piped -q "^@error This setting doesn.t work with DirectX 12" "$d/out.txt" && fx_dxm_nf swtor_RC2.exe n'
   fx_dxm set dx12 off
-  check "dx12-mullion: dx12 off, nativefs on: swtor_RC2.exe's keys gone, swtor.exe keeps NativeFullscreen=y ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && ! grep -qi swtor_RC2 "$FX_DXM_SOM/prefix/user.reg" && fx_dxm_nf swtor.exe y'
+  fx_dxm set nativefs on
+  check "dx12-mullion: dx12 off, nativefs on: swtor_RC2.exe's keys gone, swtor.exe NativeFullscreen=y, the app's Mac driver, the manifest says so ($FX_RC: $(tail -n 1 "$d/out.txt"))" \
+    eval '[ "$FX_RC" = 0 ] && ! grep -qi swtor_RC2 "$FX_DXM_SOM/prefix/user.reg" && fx_dxm_nf swtor.exe y && cmp -s "$d/dev/Resources/wine/winemac.so" "$e/lib/wine/x86_64-unix/winemac.so" && [ "$(plutil -extract winemac raw -o - "$FX_DXM_SOM/install-manifest.json")" = app ]'
   fx_dxm set dx12 on
-  check "dx12-mullion: dx12 on again, nativefs on: NativeFullscreen=y for swtor_RC2.exe, Mullion installed ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor_RC2.exe y && fx_dxm_mullion'
-  fx_dxm set nativefs off
-  check "dx12-mullion: nativefs off, DirectX 12 on: NativeFullscreen=n for both, the app's Mac driver kept for raw mouse-look (on by default) ($FX_RC)" \
-    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor.exe n && fx_dxm_nf swtor_RC2.exe n && grep -qx rawmouse=on "$FX_DXM_SOM/settings.conf" && cmp -s "$d/dev/Resources/wine/winemac.so" "$e/lib/wine/x86_64-unix/winemac.so"'
-  # the control: a dx12_reg that doesn't write NativeFullscreen; the same check must fail
+  check "dx12-mullion: dx12 on again: swtor_RC2.exe NativeFullscreen=n, swtor.exe keeps y, Mullion installed ($FX_RC)" \
+    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor_RC2.exe n && fx_dxm_nf swtor.exe y && fx_dxm_mullion'
+  # the control: a dx12_reg that gives swtor_RC2.exe the DirectX 9 set's value; the check must fail
   mkdir -p "$d/control"
   cp -R "$d/dev/Resources" "$d/control/"
-  awk '!(index($0, "set_reg \"$k") && index($0, "NativeFullscreen"))' "$d/dev/Resources/som.sh" >"$d/control/Resources/som.sh"
+  sed 's/set_value dx12 nativefs/set_value dx9 nativefs/' "$d/dev/Resources/som.sh" >"$d/control/Resources/som.sh"
   check "dx12-mullion: the control's som.sh differs only in dx12_reg's NativeFullscreen line" \
-    eval '[ "$(diff "$d/dev/Resources/som.sh" "$d/control/Resources/som.sh" | grep -c "^[<>]")" = 1 ]'
-  FX_DXM_RES="$d/control/Resources" fx_dxm set nativefs on
-  check "dx12-mullion: control: a dx12_reg without NativeFullscreen fails the check (swtor_RC2.exe not y, swtor.exe y)" \
-    eval '[ "$FX_RC" = 0 ] && fx_dxm_nf swtor.exe y && ! fx_dxm_nf swtor_RC2.exe y'
-  fx_dxm set nativefs off
+    eval '[ "$(diff "$d/dev/Resources/som.sh" "$d/control/Resources/som.sh" | grep -c "^[<>]")" = 2 ]'
+  FX_DXM_RES="$d/control/Resources" fx_dxm set dx12 on
+  check "dx12-mullion: control: a dx12_reg with the DirectX 9 set's value fails the check (swtor_RC2.exe not n)" \
+    eval '[ "$FX_RC" = 0 ] && ! fx_dxm_nf swtor_RC2.exe n'
+  fx_dxm set dx12 on
 
   fx_dxm set dx12driver mullion-mtl3
   check "dx12-mullion: mullion-mtl3: the tree as it was, nothing downloaded ($FX_RC)" \

@@ -145,9 +145,10 @@ set:`, *fell back* for a fallback), and so do the session report's *Settings set
 `settings.conf` keeps the DirectX 9 set as before (`key=value`, which a release build reads as its
 own) and DirectX 12's as `dx12.<key>=value`. A file of one set (an earlier version's) gets both at
 the hook check when the app opens or before Play: DirectX 12's starts as the settings it finds,
-its DirectX 9-only ones off. That check writes `settings.conf` only; `env` and the prefix get
-DirectX 12's set at the next settings change or Update, and an earlier version's install can't
-change DirectX 12's set until Update (its wrapper doesn't know it). A release build that changes
+its DirectX 9-only ones off. That check writes `settings.conf` only. Update writes `env`,
+`swtor_RC2.exe`'s values and the wrapper for this version; until then an earlier version's
+install runs as it did, and DirectX 12's set and the switch can't change (its wrapper doesn't
+know the set). A release build that changes
 a setting writes its own keys only, and DirectX 12's set then starts again from the DirectX 9 one.
 The files made from the settings hold both sets: `swtor.exe`'s values in the prefix, Retina mode,
 `env`'s game settings and `dxvk.conf` are DirectX 9's; `swtor_RC2.exe`'s values and `env`'s

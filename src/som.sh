@@ -1926,8 +1926,8 @@ cmd_rehook() {
   [ -f "$MANIFEST" ] || { log "SWTOR on Mac is not installed; nothing to do"; echo "@done not installed"; return 0; }
   [ ! -d "$SOM/.lock" ] || { log "an install, uninstall or settings change is running; leaving it alone"; echo "@notice busy"; return 0; }
   # settings.conf of one set (an earlier version's, or a release build's rewrite): both sets, the
-  # DirectX 12 one seeded from it. Only settings.conf: env, the prefix and the wrapper get the
-  # DirectX 12 set at the next settings change or Update, which write them for this version.
+  # DirectX 12 one seeded from it. Only settings.conf: Update writes env, the prefix and the
+  # wrapper for this version (an earlier version's install can't change DirectX 12's set before).
   # (A write that fails leaves the file as it was, and the next check tries again.)
   if [ -z "$DRY" ] && [ "$CHANNEL" = dev ] && [ -f "$SETTINGS" ] && ! grep -q '^dx12\.' "$SETTINGS" && mkdir "$SOM/.lock" 2>/dev/null; then
     log "settings: a set for each renderer from now on (DirectX 12's from the settings there were)"

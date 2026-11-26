@@ -22,7 +22,8 @@ renderer (Jan, 2026-11-26).
 - **Where they live.** `settings.conf` keeps the DirectX 9 set as `key=value`, as before, and
   DirectX 12's per-renderer settings (Show Metal HUD and its position) as `dx12.<key>=value`. A
   file of one set gets both at the hook check, DirectX 12's seeded from it; that check writes
-  `settings.conf` only, and the other files get the set at the next change or Update.
+  `settings.conf` only (the dispatcher's decision, 2026-11-26), and Update writes the other files
+  and the wrapper for this version.
 - **Retina mode is global.** Wine's Mac driver reads `RetinaMode` for the whole prefix and not
   per program (athei/wine d23b397, `dlls/winemac.drv/macdrv_main.c:360`), so one value serves
   both clients (the dispatcher's decision, 2026-11-26).
@@ -33,8 +34,9 @@ renderer (Jan, 2026-11-26).
   9's set, and `wine.log` says it fell back (the dispatcher's decision, 2026-11-26).
 - A settings change that fails puts `settings.conf`, `dxvk.conf` and `user.reg` back and makes
   `env` again from them, for the drivers the engine has then.
-- An earlier version's install keeps its own wrapper, which doesn't know DirectX 12's set, so that
-  set can't change until Update.
+- An earlier version's install keeps its own wrapper and files until Update (Play doesn't replace
+  them), so `swtor_RC2.exe` runs with that version's values meanwhile, and DirectX 12's set and
+  the switch can't change.
 
 ## Consequences
 

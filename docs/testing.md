@@ -85,8 +85,9 @@ engine's files kept as `.stock` and put back byte for byte, d9mt's bridge behind
 `winemetal.so` link untouched, a tree left by Mullion v0.5-alpha.3 switched to the fork's build
 or put back with its NVIDIA shims gone, a changed download, an archive whose `VERSION` names
 another commit or another engine's tree refused with nothing changed, `env` without
-DirectX 12 while Mullion isn't in place, and Native fullscreen reaching `swtor_RC2.exe` (its
-`NativeFullscreen` with either setting changed, with a control without it that fails)), the Mullion pin check (group `mullion-pin`:
+DirectX 12 while Mullion isn't in place, and Native fullscreen kept from `swtor_RC2.exe`
+(DirectX 9 only: refused while DirectX 12 is on, `swtor.exe`'s `NativeFullscreen` its own and
+`swtor_RC2.exe`'s off, with a control giving it the DirectX 9 value that fails)), the Mullion pin check (group `mullion-pin`:
 `scripts/check-mullion-pin.sh` with a stand-in `gh` and planted answers, a commit without a green
 push run failing), development builds' D3DMetal import (group
 `dx12-gptk`: `som.sh dx12-gptk` on made-up Game Porting Toolkit images, real disk images made
