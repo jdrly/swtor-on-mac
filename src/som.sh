@@ -1838,7 +1838,8 @@ restore_game_settings() {
   # anything to copy? (ContextError.ini aside)
   for item in "$src"/* "$src"/.[!.]*; do
     [ -e "$item" ] || continue
-    [ "${item##*/}" = ContextError.ini ] && continue
+    # (and a write of som.sh fit-window's that didn't finish)
+    case "${item##*/}" in ContextError.ini|client_settings_DX12.ini.new.*) continue ;; esac
     if ! diff -r -q "$item" "$dst/${item##*/}" >/dev/null 2>&1; then changed=1; break; fi
   done
   if [ -z "$changed" ]; then say "Game settings are the same in both prefixes"; return 0; fi
@@ -1851,7 +1852,8 @@ restore_game_settings() {
   run mkdir -p "$dst"
   for item in "$src"/* "$src"/.[!.]*; do
     [ -e "$item" ] || continue
-    [ "${item##*/}" = ContextError.ini ] && continue
+    # (and a write of som.sh fit-window's that didn't finish)
+    case "${item##*/}" in ContextError.ini|client_settings_DX12.ini.new.*) continue ;; esac
     if [ -d "$item" ]; then
       run mkdir -p "$dst/${item##*/}"
       run cp -c -R -p "$item/." "$dst/${item##*/}/"
@@ -2377,9 +2379,24 @@ cmd_uninstall() {
 # Broadsword's launcher alone, the game opens as it saved it. One line in rehook.log, numbers
 # only; always status 0 (Play goes on).
 cmd_fit_window() {
-  local ini="$SOM/prefix/drive_c/users/crossover/$GAME_SETTINGS_REL/client_settings_DX12.ini"
-  local s=1 nonl="" tmp note rc=0 mode
+  local rc=0
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/rehook.log"; fi
+  [ -f "$MANIFEST" ] || { echo "@done not installed"; return 0; }
+  # (under the lock, as a settings change: one fit at a time, none while an install, uninstall
+  # or settings change runs; the settings read again with it)
+  if [ -z "$DRY" ]; then
+    mkdir "$SOM/.lock" 2>/dev/null || { log "fit-window: an install, uninstall or settings change is running; left alone"; echo "@notice busy"; return 0; }
+  fi
+  ( load_settings || exit 3; fit_window "$@" ) || rc=$?
+  [ -n "$DRY" ] || rmdir "$SOM/.lock" 2>/dev/null || true
+  if [ "$rc" = 3 ]; then log "fit-window: settings.conf can't be read; left alone"; echo "@done not read"; fi
+  return 0
+}
+# fit_window <screen>...: cmd_fit_window's work, with the lock held. The helpers' own log lines
+# (paths, which hold the user's name) go nowhere; the one line it logs has numbers only.
+fit_window() {
+  local ini="$SOM/prefix/drive_c/users/crossover/$GAME_SETTINGS_REL/client_settings_DX12.ini"
+  local bak="$SOM/backup/client_settings_DX12.ini" s=1 nonl="" tmp note rc=0 mode
   if ! dx12_on || [ "$(setting dx12fit)" != on ]; then echo "@done off"; return 0; fi
   if [ ! -f "$ini" ]; then log "fit-window: no client_settings_DX12.ini yet"; echo "@done no file"; return 0; fi
   [ "$(setting retina)" != on ] || s=2
@@ -2432,28 +2449,31 @@ cmd_fit_window() {
       for (i = 1; i <= nl; i++) {
         l = line[i]
         if (i in at) { p = body(l); sub(/=.*/, "=", p); l = p " " new[at[i]] ((l ~ /\r$/) ? "\r" : "") }
-        printf "%s", l > out
         add = ""
         if (i == last)
           for (j = 1; j <= 4; j++) {
             k = (j == 1 ? "WindowX" : j == 2 ? "WindowY" : j == 3 ? "Width" : "Height")
             if (!(k in seen)) add = add k " = " new[k] eol "\n"
           }
-        if (i < nl || !nonl || add != "") printf "\n" > out
-        if (add != "") printf "%s", add > out
+        # (the missing keys after the last line of the section, or before it when that line ends
+        # the file without a line end, which it keeps)
+        if (i == nl && nonl) { printf "%s%s", add, l > out; continue }
+        printf "%s\n%s", l, add > out
       }
       print "fitted to " now " (was " was ")"
     }' "$ini" 2>/dev/null) || rc=$?
   case $rc in
     0)
       mode=$(stat -c %a "$ini" 2>/dev/null || stat -f %Lp "$ini" 2>/dev/null)
-      # (a copy of the game's own file first, once, in the app's folder; then the new file in its
-      # place in one step, with the mode it had)
+      # (a copy of the game's own file first, once, in the app's folder, with its mode; then the
+      # new file in its place in one step, with the mode it had; put's per-attempt file beside it
+      # removed if that failed)
       if [ -n "$mode" ] && [ -s "$tmp" ] &&
-         { [ -e "$SOM/backup/client_settings_DX12.ini" ] || { mkdir -p "$SOM/backup" && copy_atomic "$ini" "$SOM/backup/client_settings_DX12.ini" 644; }; } &&
-         put "$ini" "$mode" <"$tmp"; then
+         ( LOGFILE=/dev/null; [ -e "$bak" ] || { run mkdir -p "$SOM/backup" && copy_atomic "$ini" "$bak" "$mode"; } ) &&
+         ( LOGFILE=/dev/null; put "$ini" "$mode" <"$tmp" ); then
         log "fit-window: $note"; echo "@done fitted"
       else
+        rm -f "$ini.new.$$" "$bak.new.$$"
         log "fit-window: client_settings_DX12.ini could not be written"; echo "@done not written"
       fi ;;
     3) log "fit-window: $note"; echo "@done fitted already" ;;

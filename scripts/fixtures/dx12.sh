@@ -268,8 +268,10 @@ fx_dx12_fit() {
   check "dx12 fit: the file's mode kept (600), a stale temporary file of another attempt left as it was" \
     eval '[ "$(stat -c %a "$ini" 2>/dev/null || stat -f %Lp "$ini")" = 600 ] && [ "$(cat "$ini.new.1")" = stale ]'
   rm -f "$ini.new.1"
-  check "dx12 fit: the game's file kept once in the app's folder (backup/), nothing new beside it in the prefix" \
-    eval 'cmp -s "$FX_DX12_SOM/backup/client_settings_DX12.ini" "$d/ini.orig" && [ "$(ls -A "$set")" = client_settings_DX12.ini ]'
+  check "dx12 fit: the game's file kept once in the app's folder (backup/, its mode 600), nothing new beside it in the prefix" \
+    eval 'cmp -s "$FX_DX12_SOM/backup/client_settings_DX12.ini" "$d/ini.orig" && [ "$(stat -c %a "$FX_DX12_SOM/backup/client_settings_DX12.ini" 2>/dev/null || stat -f %Lp "$FX_DX12_SOM/backup/client_settings_DX12.ini")" = 600 ] && [ "$(ls -A "$set")" = client_settings_DX12.ini ]'
+  check "dx12 fit: rehook.log has no path (the user's name is in them), the lock released" \
+    eval '! grep -q "Application Support" "$FX_DX12_SOM/../../Logs/SWTOR on Mac/rehook.log" && [ ! -e "$FX_DX12_SOM/.lock" ]'
   check "dx12 fit: rehook.log names the screen and the numbers" \
     grep -q "fit-window: fitted to screen 2 of 2: 3840,138 3456x2096 (was 4000,300 1920x1018)$" "$FX_DX12_SOM/../../Logs/SWTOR on Mac/rehook.log"
   # a value that isn't a number (an e-mail address in a note after it): logged as ?, the window
@@ -291,6 +293,29 @@ fx_dx12_fit() {
     eval 'cmp -s "$ini" "$d/ini.want1" && cmp -s "$FX_DX12_SOM/backup/client_settings_DX12.ini" "$d/ini.orig"'
   fx_dx12_som dev fit-window "$s1" "$s2"
   check "dx12 fit: already fitted: unchanged, said so" eval 'cmp -s "$ini" "$d/ini.want1" && piped -qx "@done fitted already" "$d/out.txt"'
+  # a missing key and an unterminated last line in [Renderer]: the keys before that line, which
+  # keeps its bytes and ends the file as it did
+  printf '%s\r\n' '[Renderer]' 'Height = 1018' 'Width = 1920' 'WindowX = 9000' >"$ini"; printf 'Gamma=1' >>"$ini"
+  { printf '%s\r\n' '[Renderer]' 'Height = 2036' 'Width = 3840' 'WindowX = 0' 'WindowY = 124'; printf 'Gamma=1'; } >"$d/ini.want3"
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: a missing key and an unterminated last line: the key before it, the line and the end of the file as they were" cmp -s "$ini" "$d/ini.want3"
+  # an install, uninstall or settings change running (the lock): nothing written, said so
+  cp -p "$d/ini.orig" "$ini"; mkdir "$FX_DX12_SOM/.lock"
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  rmdir "$FX_DX12_SOM/.lock"
+  check "dx12 fit: the lock held by another command: nothing written, busy" eval 'cmp -s "$ini" "$d/ini.orig" && piped -qx "@notice busy" "$d/out.txt"'
+  # a dry run: nothing written, no backup folder made
+  rm -rf "$FX_DX12_SOM/backup"
+  SWTOR_ON_MAC_DRY_RUN=1 fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: a dry run: nothing written, no backup folder" eval 'cmp -s "$ini" "$d/ini.orig" && [ ! -e "$FX_DX12_SOM/backup" ]'
+  # the settings folder can't be written: the file as it was, nothing of the attempt left
+  if [ "$(id -u)" != 0 ]; then
+    chmod 555 "$set"
+    fx_dx12_som dev fit-window "$s1" "$s2"
+    chmod 755 "$set"
+    check "dx12 fit: a folder that can't be written: the file unchanged, nothing left beside it" \
+      eval 'cmp -s "$ini" "$d/ini.orig" && [ "$(ls -A "$set")" = client_settings_DX12.ini ] && piped -qx "@done not written" "$d/out.txt"'
+  fi
   # no screen given, or none in the form: nothing written
   cp -p "$d/ini.orig" "$ini"
   fx_dx12_som dev fit-window
