@@ -378,6 +378,9 @@ status() {
   if [ -f "$MANIFEST" ]; then
     echo "installed=yes"
     echo "installed_version=$(json_get "$MANIFEST" version)"
+    # DirectX 12 on (development builds): Play waits for Update while another version is
+    # installed, whose wrapper and files don't know the settings sets
+    echo "dx12=$(dx12_on && echo on || echo off)"
     echo "installed_d9mt=$(json_get "$MANIFEST" d9mt)"
     # the engine in place (an install from 0.0.x: CrossOver 24.0.7 until Reinstall upgrades it)
     echo "installed_engine=$(json_get "$MANIFEST" engine)"
@@ -533,6 +536,8 @@ dx12_driver_ok() {
 # in the set in effect (a global one in the DirectX 9 set's lines, which hold them)
 write_settings() {
   local k v in=dx9
+  # (a file it can't read would be written over with the defaults)
+  [ ! -e "$SETTINGS" ] || [ -r "$SETTINGS" ] || die "SWTOR on Mac can't read its settings ($SETTINGS), so it leaves them as they are. Give your user read access to that file (or Reinstall), then try again."
   if [ -n "${1:-}" ] && ! in_list "$1" "$SETTINGS_GLOBAL"; then in=$(settings_set); fi
   {
     echo "# SWTOR on Mac settings (change them in the app: SWTOR on Mac > Settings…)"
@@ -1929,9 +1934,11 @@ cmd_rehook() {
   # DirectX 12 one seeded from it. Only settings.conf: Update writes env, the prefix and the
   # wrapper for this version (an earlier version's install can't change DirectX 12's set before).
   # (A write that fails leaves the file as it was, and the next check tries again.)
-  if [ -z "$DRY" ] && [ "$CHANNEL" = dev ] && [ -f "$SETTINGS" ] && ! grep -q '^dx12\.' "$SETTINGS" && mkdir "$SOM/.lock" 2>/dev/null; then
-    log "settings: a set for each renderer from now on (DirectX 12's from the settings there were)"
-    ( write_settings ) || log "settings: could not write both sets now (the next check tries again)"
+  # (only a file read whole: grep's 1, not 2 for a read error; the lock released whatever fails)
+  if [ -z "$DRY" ] && [ "$CHANNEL" = dev ] && [ -f "$SETTINGS" ] && { grep -q '^dx12\.' "$SETTINGS" 2>/dev/null; [ $? = 1 ]; } &&
+    mkdir "$SOM/.lock" 2>/dev/null; then
+    ( log "settings: a set for each renderer from now on (DirectX 12's from the settings there were)"
+      write_settings || log "settings: could not write both sets now (the next check tries again)" ) >/dev/null 2>&1 || true
     rmdir "$SOM/.lock" 2>/dev/null || true
   fi
   rehook_inspect

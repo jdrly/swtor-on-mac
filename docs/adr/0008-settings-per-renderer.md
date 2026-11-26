@@ -35,8 +35,8 @@ renderer (Jan, 2026-11-26).
 - A settings change that fails puts `settings.conf`, `dxvk.conf` and `user.reg` back and makes
   `env` again from them, for the drivers the engine has then.
 - An earlier version's install keeps its own wrapper and files until Update (Play doesn't replace
-  them), so `swtor_RC2.exe` runs with that version's values meanwhile, and DirectX 12's set and
-  the switch can't change.
+  them). Meanwhile DirectX 12's set and the switch can't change, and with DirectX 12 on, Play asks
+  for Update first (the dispatcher's decision, 2026-11-26).
 
 ## Consequences
 

@@ -168,6 +168,17 @@ REG
   echo '# env of an earlier version' >"$FX_SS_SOM/env"
   echo '{"version": "0.0.0-fx.0"}' >"$FX_SS_SOM/install-manifest.json"
   cp "$FX_SS_SOM/prefix/user.reg" "$d/user.reg.before"
+  # (a settings.conf it can't read: left as it is, no lock left, and the next check tries again)
+  cp "$FX_SS_SOM/settings.conf" "$d/settings.before"
+  chmod 000 "$FX_SS_SOM/settings.conf"
+  fx_ss_som rehook
+  fx_ss_som set hudpos topright
+  chmod 644 "$FX_SS_SOM/settings.conf"
+  check "settings-sets: an unreadable settings.conf: the hook check and a change leave its bytes, no lock left ($FX_RC)" \
+    eval '[ "$FX_RC" = 1 ] && piped -q "^@error " "$d/out.txt" && cmp -s "$d/settings.before" "$FX_SS_SOM/settings.conf" && [ ! -e "$FX_SS_SOM/.lock" ]'
+  fx_ss_som status
+  check "settings-sets: ...status says DirectX 12 is on, and which version is installed (Play's Update first)" \
+    eval 'piped -qx dx12=on "$d/out.txt" && piped -qx installed_version=0.0.0-fx.0 "$d/out.txt" && piped -qx version=0.0.0-fx.1 "$d/out.txt"'
   fx_ss_som rehook
   check "settings-sets: an earlier install with DirectX 12 on: the hook check writes both sets into settings.conf, the DirectX 9 set's lines as they were" \
     eval 'fx_ss_conf dx12.hud=on && fx_ss_conf dx12.hudpos=topleft && diff <(grep -v -e "^#" -e "^dx12\\." "$d/settings.old" | sed "s/^dx12=off$/dx12=on/") <(grep -v -e "^#" -e "^dx12\\." "$FX_SS_SOM/settings.conf") >/dev/null'

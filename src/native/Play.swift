@@ -58,6 +58,11 @@ extension Installer {
     let busy = status["busy"] ?? ""
     if game { return .show(game: true) }
     if launcher || busy == "launcher" || busy == "game" { return .show(game: busy == "game") }
+    // DirectX 12 on an earlier version's install: its wrapper and files don't have DirectX 12's
+    // settings yet (Update writes them)
+    if status["dx12"] == "on", let installed = status["installed_version"], installed != status["version"] {
+      return .unavailable("DirectX 12 is on, and SWTOR on Mac \(installed) is installed. Click Update first.")
+    }
     return .launch(url)
   }
 

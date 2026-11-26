@@ -147,8 +147,8 @@ own) and DirectX 12's as `dx12.<key>=value`. A file of one set (an earlier versi
 the hook check when the app opens or before Play: DirectX 12's starts as the settings it finds,
 its DirectX 9-only ones off. That check writes `settings.conf` only. Update writes `env`,
 `swtor_RC2.exe`'s values and the wrapper for this version; until then an earlier version's
-install runs as it did, and DirectX 12's set and the switch can't change (its wrapper doesn't
-know the set). A release build that changes
+install runs as it did, DirectX 12's set and the switch can't change, and with DirectX 12 on,
+*Play SWTOR* asks for Update first (*Show* still works). A release build that changes
 a setting writes its own keys only, and DirectX 12's set then starts again from the DirectX 9 one.
 The files made from the settings hold both sets: `swtor.exe`'s values in the prefix, Retina mode,
 `env`'s game settings and `dxvk.conf` are DirectX 9's; `swtor_RC2.exe`'s values and `env`'s
@@ -183,8 +183,8 @@ With the setting on:
 - the client gets Wine's builtin `d3d9` (`WINEDLLOVERRIDES=d3d9=b` from the wrapper, and
   `DllOverrides` under `AppDefaults\swtor_RC2.exe` in the prefix), so d9mt and its Metal bridge
   stay out of the Direct3D 12 process. `swtor.exe` keeps d9mt;
-- `AppDefaults\swtor_RC2.exe` gets DirectX 12's set: `GrabPointer` and `ThreadCpuStats` on,
-  and *Game keys by keyboard position*, *Raw mouse-look* and its speed and *Native fullscreen*
+- `AppDefaults\swtor_RC2.exe` gets DirectX 12's set: the mouse-look fix (`GrabPointer` n) and
+  `ThreadCpuStats` y, and *Game keys by keyboard position*, *Raw mouse-look* and its speed and *Native fullscreen*
   off (DirectX 9 only), whatever `swtor.exe` has;
 - with a Mullion driver and Debug Logging on, the wrapper turns on my fork's diagnostic switches
   for the client, which the fork leaves off by default: `MULLION_SESSION_HEADER=1` (a header with
