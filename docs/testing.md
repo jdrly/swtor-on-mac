@@ -70,11 +70,14 @@ x86_64 probe started behind dead exception ports faults once, through the packag
 fault still ends it by `SIGSEGV`; the control, the probe itself in `hold-launcher`'s place, must
 fail with Rosetta's `failed to send exception`; needs clang and Rosetta, skipped without them),
 the settings kept per renderer in development builds (group `settings-sets`: on a planted
-install, every setting global, DirectX 9 only or per renderer, and Settings greying out exactly the
-DirectX 9-only ones; an earlier version's `settings.conf` seeding both sets; DirectX 12 on and off
-swapping the values shown, the prefix's, `env`'s and `dxvk.conf`'s; a DirectX 9-only setting
-refused while DirectX 12's set is in effect; a reader of 0.1.9 getting the DirectX 9 set; the set
-in the session report), development builds' Mullion for DirectX 12 (group `dx12-mullion`: `som.sh set` on a
+install, an earlier version's `settings.conf` seeding both sets; DirectX 12 on and off swapping
+the values shown, each set keeping its own, Retina one value for both, `swtor_RC2.exe`'s and
+`env`'s DirectX 12 lines DirectX 12's; a DirectX 9-only setting refused while DirectX 12's set is
+in effect; a change failing half way put back, a switch off Mullion leaving no `env` that starts
+it, a failed copy leaving no lock; the hook check writing only `settings.conf`, and an earlier
+version's install refusing DirectX 12's set until Update; a reader of 0.1.9 getting the DirectX 9
+set; the set in the session report. Settings greying out the DirectX 9-only rows is checked on
+the Mac, by hand), development builds' Mullion for DirectX 12 (group `dx12-mullion`: `som.sh set` on a
 planted install with the engine's real `dxmt` tree, downloaded once into `.cache/`, and
 stand-in archives in the layout of my fork's builds, pinned in the test's `som.sh` and served by
 `scripts/fetch-test-server.py`: Mullion installed, `env` naming the build from its `VERSION`, the

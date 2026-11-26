@@ -137,19 +137,22 @@ set:`, *fell back* for a fallback), and so do the session report's *Settings set
 
 | Kind | Settings | With DirectX 12 on |
 |---|---|---|
-| Global | Debug Logging, Check for updates, the three DirectX 12 settings, and the window's own *Quit SWTOR on Mac after launching* | one value for both |
-| Per renderer | Retina Mode, Show Metal HUD, Metal HUD Position | DirectX 12's own values |
+| Global | Debug Logging, Check for updates, Retina Mode, the three DirectX 12 settings, and the window's own *Quit SWTOR on Mac after launching* | one value for both (Wine's Mac driver reads `RetinaMode` for the whole prefix, not per program) |
+| Per renderer | Show Metal HUD, Metal HUD Position | DirectX 12's own values |
 | DirectX 9 only | d9mt's: Vsync, Frame Rate Limit, Only on battery, Video Memory Profile, Fewer GPU Batches | off and greyed out (d9mt doesn't run with the DirectX 12 client), the DirectX 9 values kept |
 | DirectX 9 only, by Jan's test | Game Mode, Native fullscreen, Game keys by keyboard position, Raw mouse-look, Mouse-Look Speed | off and greyed out: the code would apply them to `swtor_RC2.exe` too, but they didn't work with the DirectX 12 client in Jan's tests (2026-11-26) |
 
 `settings.conf` keeps the DirectX 9 set as before (`key=value`, which a release build reads as its
 own) and DirectX 12's as `dx12.<key>=value`. A file of one set (an earlier version's) gets both at
 the hook check when the app opens or before Play: DirectX 12's starts as the settings it finds,
-its DirectX 9-only ones off. A release build that changes a setting writes its own keys only, and
-DirectX 12's set then starts again from the DirectX 9 one. The files made from the settings hold
-both sets: `swtor.exe`'s values in the prefix, Retina mode for every program, `env`'s game
-settings and `dxvk.conf` are DirectX 9's; `swtor_RC2.exe`'s values (Retina mode among them) and
-`env`'s `SWTOR_DX12_HUD` lines are DirectX 12's.
+its DirectX 9-only ones off. That check writes `settings.conf` only; `env` and the prefix get
+DirectX 12's set at the next settings change or Update, and an earlier version's install can't
+change DirectX 12's set until Update (its wrapper doesn't know it). A release build that changes
+a setting writes its own keys only, and DirectX 12's set then starts again from the DirectX 9 one.
+The files made from the settings hold both sets: `swtor.exe`'s values in the prefix, Retina mode,
+`env`'s game settings and `dxvk.conf` are DirectX 9's; `swtor_RC2.exe`'s values and `env`'s
+`SWTOR_DX12_HUD` lines are DirectX 12's. A change that fails half way puts `settings.conf`,
+`dxvk.conf` and `user.reg` back and makes `env` again from them, for the drivers the engine has.
 
 | Setting | Default | What it changes |
 |---|---|---|
@@ -179,9 +182,9 @@ With the setting on:
 - the client gets Wine's builtin `d3d9` (`WINEDLLOVERRIDES=d3d9=b` from the wrapper, and
   `DllOverrides` under `AppDefaults\swtor_RC2.exe` in the prefix), so d9mt and its Metal bridge
   stay out of the Direct3D 12 process. `swtor.exe` keeps d9mt;
-- `AppDefaults\swtor_RC2.exe` gets the values `swtor.exe` has (`GrabPointer`, *Game keys by
-  keyboard position*, *Raw mouse-look* and its speed, *Native fullscreen*, `ThreadCpuStats`),
-  and follows them when they change;
+- `AppDefaults\swtor_RC2.exe` gets DirectX 12's set: `GrabPointer` and `ThreadCpuStats` on,
+  and *Game keys by keyboard position*, *Raw mouse-look* and its speed and *Native fullscreen*
+  off (DirectX 9 only), whatever `swtor.exe` has;
 - with a Mullion driver and Debug Logging on, the wrapper turns on my fork's diagnostic switches
   for the client, which the fork leaves off by default: `MULLION_SESSION_HEADER=1` (a header with
   the build, the Mac, its GPU family and the switches, once per process) and `MULLION_STATS=1` (a
