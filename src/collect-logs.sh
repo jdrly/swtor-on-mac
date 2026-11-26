@@ -919,6 +919,9 @@ esac
   echo "Mac: $(sysctl -n hw.model), $(sysctl -n machdep.cpu.brand_string)" \
     "($(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null)+$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null) cores)," \
     "$(($(sysctl -n hw.memsize) / 1073741824)) GB, macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+  # (development builds keep a set of settings per renderer: settings.conf's dx12.* lines are
+  # DirectX 12's, the others DirectX 9's)
+  echo "Settings set in effect: $([ -f "$SOM/settings.conf" ] && awk -F= '$1 == "dx12" { v = $2 } END { print (v == "on" ? "DirectX 12'"'"'s (dx12.* in settings.conf)" : "DirectX 9'"'"'s") }' "$SOM/settings.conf" 2>/dev/null || echo unknown)"
   echo "Rosetta: $([ -e /Library/Apple/usr/libexec/oah/libRosettaRuntime ] && echo installed || echo "not installed")"
   echo "Power: $(pmset -g ps 2>/dev/null | sed -n "1s/.*'\(.*\)'.*/\1/p")$(pmset -g 2>/dev/null | awk '($1 == "lowpowermode" || $1 == "powermode") && $2 == 1 { print ", Low Power Mode" } $1 == "powermode" && $2 == 2 { print ", High Power Mode" }')"
   # (now; each game start's own is in its wine.log, "SWTOR on Mac conditions:")

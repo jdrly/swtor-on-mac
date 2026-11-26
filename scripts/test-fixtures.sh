@@ -108,6 +108,8 @@ pass=0 fail=0
 . scripts/fixtures/dx12-gptk.sh
 # shellcheck source=scripts/fixtures/nativefs.sh
 . scripts/fixtures/nativefs.sh
+# shellcheck source=scripts/fixtures/settings-sets.sh
+. scripts/fixtures/settings-sets.sh
 # shellcheck source=scripts/fixtures/release-receipt.sh
 . scripts/fixtures/release-receipt.sh
 # shellcheck source=scripts/fixtures/version-table.sh
@@ -118,7 +120,7 @@ APP="dist/SWTOR on Mac.app"
 if [ $# -gt 0 ] && [ -d "$1" ]; then APP=$1; shift; fi
 APP="$(cd "$APP" 2>/dev/null && pwd)" || { echo "no app at $APP; run ./build.sh" >&2; exit 1; }
 [ -x "$APP/Contents/Resources/session-report.sh" ] || { echo "no session-report.sh in $APP" >&2; exit 1; }
-FX_ALL="session-report session-report-dx12 field-kit job-sandbox orphan-as is-launcher eval-exit bridge system-reports d9mt-pin mullion-pin air-codegen d9mt-ab nativefs release-receipt version-table exception-ports dx12 dx12-mullion dx12-gptk self"
+FX_ALL="session-report session-report-dx12 field-kit job-sandbox orphan-as is-launcher eval-exit bridge system-reports d9mt-pin mullion-pin air-codegen d9mt-ab nativefs release-receipt version-table exception-ports dx12 dx12-mullion dx12-gptk settings-sets self"
 FX_GROUPS="${*:-$FX_ALL}"
 for g in $FX_GROUPS; do
   case " $FX_ALL " in *" $g "*) ;; *) echo "unknown group $g (groups: $FX_ALL)" >&2; exit 2 ;; esac
@@ -163,6 +165,7 @@ for g in $FX_GROUPS; do
     dx12) fx_dx12 "$APP" "$ROOT/dx12" ;;
     dx12-mullion) fx_dx12_mullion "$APP" "$ROOT/dx12-mullion" ;;
     dx12-gptk) fx_dx12_gptk "$APP" "$ROOT/dx12-gptk" ;;
+    settings-sets) FX_SS_REPO=$REPO fx_settings_sets "$APP" "$ROOT/settings-sets" ;;
     nativefs) fx_nativefs "$APP" "$APP/Contents/Resources/wine-wrapper.sh" "$ROOT/nativefs" "$REPO/scripts/test-nativefs-decide.sh" ;;
     release-receipt) fx_release_receipt "$REPO/scripts/release-receipt.sh" "$REPO/build.sh" "$APP" "$ROOT/release-receipt" ;;
     version-table) fx_version_table "$REPO/build.sh" "$APP/Contents/Resources/wine-wrapper.sh" "$REPO/src/native/App.swift" "$ROOT/version-table" ;;

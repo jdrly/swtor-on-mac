@@ -365,6 +365,11 @@ if [ -n "$SWTOR_ENGINE" ]; then
         echo "SWTOR on Mac settings: $(session_settings)" >&2
         echo "SWTOR on Mac conditions: $diag_conditions" >&2
         echo "SWTOR on Mac ${files%_files} files: $diag_files" >&2
+        # the settings set in effect (development builds keep one per renderer)
+        case "${SWTOR_SETTINGS_SET:-}" in
+          dx12) echo "SWTOR on Mac settings set: DirectX 12's" >&2 ;;
+          dx9) echo "SWTOR on Mac settings set: DirectX 9's" >&2 ;;
+        esac
       else
         exec >/dev/null 2>/dev/null
       fi

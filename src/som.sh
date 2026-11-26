@@ -469,10 +469,46 @@ setting_valid() { # <key> <value>
   esac
   return 1
 }
-setting() { # <key>: its value, or the default
+# Settings per renderer (development builds): DirectX 9 and DirectX 12 each keep a set of their
+# own, and the dx12 switch picks the one in effect; turning it on or off swaps the whole set.
+#   global       the same for both: Debug Logging, the update check, and the DirectX 12
+#                settings themselves (only the DirectX 12 set reads its driver and frame limit)
+#   DX9 only     d9mt's settings, and the ones that don't work with the DirectX 12 client (Jan's
+#                list, 2026-11-26): off in the DirectX 12 set, which doesn't keep them, and
+#                greyed out in Settings while it is in effect
+#   the rest     per renderer: retina, hud, hudpos
+# settings.conf keeps the DirectX 9 set as before (key=value, which a release build reads as
+# its own) and the DirectX 12 set's as dx12.<key>=value. A DirectX 12 set not written yet starts
+# as the DirectX 9 set (a file of an earlier version), its DX9-only settings off.
+SETTINGS_GLOBAL="debug updates dx12 dx12driver dx12fps"
+SETTINGS_DX9_ONLY="gamemode vsync memory physkeys rawmouse mousespeed fpslimit fpsbattery flushcap nativefs"
+# stored <name>: the value settings.conf has for <key> or dx12.<key>, if it is a valid one
+stored() {
   local v
-  v=$(sed -n "s/^$1=//p" "$SETTINGS" 2>/dev/null | tail -1)
-  if setting_valid "$1" "$v"; then echo "$v"; else setting_default "$1"; fi
+  # (the name compared as it is: no pattern; the last line of it counts)
+  v=$(awk -v k="$1" 'index($0, k "=") == 1 { v = substr($0, length(k) + 2) } END { print v }' "$SETTINGS" 2>/dev/null || true)
+  if setting_valid "${1#dx12.}" "$v"; then echo "$v"; fi
+}
+# off_value <key>: a DX9-only setting's value in the DirectX 12 set (what does nothing)
+off_value() {
+  case "$1" in memory) echo auto ;; mousespeed) echo 1 ;; *) echo off ;; esac
+}
+# set_value <dx9|dx12> <key>: that set's value: the DirectX 12 set's own (a global setting's,
+# or a DX9-only one's off value), else the DirectX 9 set's, else the default
+set_value() {
+  local v=""
+  if [ "$1" = dx12 ] && ! in_list "$2" "$SETTINGS_GLOBAL"; then
+    if in_list "$2" "$SETTINGS_DX9_ONLY"; then off_value "$2"; return; fi
+    v=$(stored "dx12.$2")
+  fi
+  [ -n "$v" ] || v=$(stored "$2")
+  [ -n "$v" ] || v=$(setting_default "$2")
+  echo "$v"
+}
+# settings_set: the set in effect, dx12 with DirectX 12 on (development builds), else dx9
+settings_set() { if [ "$CHANNEL" = dev ] && [ "$(set_value dx9 dx12)" = on ]; then echo dx12; else echo dx9; fi; }
+setting() { # <key>: its value in the set in effect, or the default
+  if in_list "$1" "$SETTINGS_GLOBAL"; then set_value dx9 "$1"; else set_value "$(settings_set)" "$1"; fi
 }
 
 # Is DirectX 12 in effect? Only in a development build: a release build never writes or applies
@@ -487,15 +523,28 @@ dx12_driver_ok() {
   esac
 }
 
-write_settings() { # [<key> <value>]: settings.conf with every key, one of them changed
-  local k v
-  for k in $SETTING_KEYS; do
-    v=$(setting "$k")
-    if [ "$k" = "${1:-}" ]; then v=$2; fi
-    echo "$k=$v"
-  done | {
+# write_settings [<key> <value>]: settings.conf with every key of both sets, one of them changed
+# in the set in effect (a global one in the DirectX 9 set's lines, which hold them)
+write_settings() {
+  local k v in=dx9
+  if [ -n "${1:-}" ] && ! in_list "$1" "$SETTINGS_GLOBAL"; then in=$(settings_set); fi
+  {
     echo "# SWTOR on Mac settings (change them in the app: SWTOR on Mac > Settings…)"
-    cat
+    for k in $SETTING_KEYS; do
+      v=$(set_value dx9 "$k")
+      if [ "$k" = "${1:-}" ] && [ "$in" = dx9 ]; then v=$2; fi
+      echo "$k=$v"
+    done
+    if [ "$CHANNEL" = dev ]; then
+      echo "# the DirectX 12 set (development builds): its own values of the settings above that"
+      echo "# aren't global or DX9 only, in effect while dx12=on"
+      for k in $SETTING_KEYS; do
+        in_list "$k" "$SETTINGS_GLOBAL $SETTINGS_DX9_ONLY" && continue
+        v=$(set_value dx12 "$k")
+        if [ "$k" = "${1:-}" ] && [ "$in" = dx12 ]; then v=$2; fi
+        echo "dx12.$k=$v"
+      done
+    fi
   } | put "$SETTINGS" 644
 }
 
@@ -518,6 +567,10 @@ settings() {
   echo "installed=$([ -f "$MANIFEST" ] && echo yes || echo no)"
   if running_now; then echo "running=yes"; else echo "running=no"; fi
   for k in $SETTING_KEYS; do echo "$k=$(setting "$k")"; done
+  # the set in effect (dx9, or dx12: DirectX 12 on), and the settings that don't work with
+  # DirectX 12 (Settings greys them out while its set is in effect)
+  echo "settings_set=$(settings_set)"
+  echo "dx9_only=$SETTINGS_DX9_ONLY"
 }
 
 # set_reg <key> <name> <value>: a REG_SZ value in HKCU, written straight into the prefix's
@@ -586,6 +639,9 @@ cmd_set() {
   local key="${1:-}" value="${2:-}"
   setting_valid "$key" "$value" || { echo "@error Unknown setting: $key=$value"; exit 2; }
   case "$key" in dx12|dx12driver|dx12fps) [ "$CHANNEL" = dev ] || die "DirectX 12 is in development builds only." ;; esac
+  if [ "$(settings_set)" = dx12 ] && in_list "$key" "$SETTINGS_DX9_ONLY"; then
+    die "This setting doesn't work with DirectX 12. Turn DirectX 12 off to change it (it keeps its value for DirectX 9)."
+  fi
   [ -f "$MANIFEST" ] || die "SWTOR on Mac is not installed."
   # an install from 0.0.x runs on its own engine until Reinstall upgrades it: settings written
   # for this version's engine would break it
@@ -615,11 +671,25 @@ cmd_set() {
     dx12|dx12driver) install_mullion "$(mullion_wanted "$key" "$value")" ;;
   esac
   write_settings "$key" "$value"
+  # DirectX 12 on or off: the other set is in effect now; the prefix's settings and the engine's
+  # Mac driver follow it
+  [ "$key" != dx12 ] || apply_set
   # (swtor_RC2.exe's values follow swtor.exe's, from the settings just written)
   case "$key" in physkeys|rawmouse|mousespeed|nativefs|dx12) dx12_reg ;; esac
   write_env >/dev/null
   write_dxvk_conf
   echo "@done $key=$value. It takes effect the next time the game starts."
+}
+
+# apply_set: what the prefix keeps of the settings in effect (the Mac driver's options for every
+# program and for swtor.exe), written from the set in effect; after the DirectX 12 switch (no Wine
+# may run, as for set_reg). The engine's Mac driver follows the DirectX 9 set (winemac_wanted).
+apply_set() {
+  set_reg 'Software\\Wine\\Mac Driver' RetinaMode "$([ "$(setting retina)" = on ] && echo y || echo n)"
+  set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' PhysicalKeyboard "$([ "$(setting physkeys)" = on ] && echo y || echo n)"
+  set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' RawMouseWhenCursorHidden "$([ "$(setting rawmouse)" = on ] && echo y || echo n)"
+  set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' RawMouseGameControllerScale "$(setting mousespeed)"
+  set_reg 'Software\\Wine\\AppDefaults\\swtor.exe\\Mac Driver' NativeFullscreen "$([ "$(setting nativefs)" = on ] && echo y || echo n)"
 }
 
 # --- Install steps
@@ -906,7 +976,10 @@ install_ntdll() {
 # of their options; <key> about to be set to <value>), else off
 winemac_wanted() {
   local pk rm nf
-  pk=$(setting physkeys) rm=$(setting rawmouse) nf=$(setting nativefs)
+  # (the DirectX 9 set's: these are DX9-only settings, off in the DirectX 12 set, and the app's
+  # driver with its options off in the prefix does what the engine's own does, so switching
+  # renderers leaves the driver as it is)
+  pk=$(set_value dx9 physkeys) rm=$(set_value dx9 rawmouse) nf=$(set_value dx9 nativefs)
   case "${1:-}" in physkeys) pk=$2 ;; rawmouse) rm=$2 ;; nativefs) nf=$2 ;; esac
   if [ "$pk" = on ] || [ "$rm" = on ] || [ "$nf" = on ]; then echo on; else echo off; fi
 }
@@ -1533,6 +1606,9 @@ SWTOR_ON_MAC_VERSION=$VERSION
 SWTOR_APP_DIR="$SOM"
 SWTOR_UPDATE_FEED="$FEED_URL"
 SWTOR_UPDATE_CHECK=$upd
+# the settings set in effect (development builds keep one per renderer: dx9, dx12), which the
+# wrapper names in wine.log
+SWTOR_SETTINGS_SET=$(settings_set)
 
 # When the Wine session's start had to end leftover Wine processes: did macOS end the last
 # session because the launcher is not allowed in the background? (this app's som.sh btm-check;

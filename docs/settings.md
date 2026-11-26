@@ -128,6 +128,25 @@ DirectX 12 client (`swtor_RC2.exe`, which the patcher puts next to `swtor.exe`).
 neither shows nor applies them: `som.sh set dx12` refuses there, and a `dx12=on` left in
 `settings.conf` by a development build does nothing.
 
+DirectX 9 and DirectX 12 each keep their own settings. Turning *DirectX 12 (experimental)* on or
+off switches to the other set: the window shows its values at once, and the next game start uses
+them, the prefix's too (Retina mode and `swtor.exe`'s Mac driver options, rewritten at the
+switch). Which set a session ran with is in its `wine.log` (`SWTOR on Mac settings set:`), the
+session report's *Settings set* and Collect Logs' `system-info.txt`.
+
+| Kind | Settings | With DirectX 12 on |
+|---|---|---|
+| Global | Debug Logging, Check for updates, the three DirectX 12 settings | one value for both |
+| Per renderer | Retina Mode, Show Metal HUD, Metal HUD Position | DirectX 12's own values |
+| DirectX 9 only | Vsync, Frame Rate Limit, Only on battery, Video Memory Profile, Fewer GPU Batches (d9mt's), Game Mode, Native fullscreen, Game keys by keyboard position, Raw mouse-look, Mouse-Look Speed (they don't work with the DirectX 12 client) | off and greyed out, the DirectX 9 values kept |
+
+`settings.conf` keeps the DirectX 9 set as before (`key=value`, which a release build reads as its
+own) and DirectX 12's as `dx12.<key>=value`. The first start of a build with two sets gives
+DirectX 12 the settings it finds, its DirectX 9-only ones off. A release build that changes a
+setting writes its own keys only: the DirectX 12 set then starts again from the DirectX 9 one.
+The engine's Mac driver follows the DirectX 9 set: with its options off in the prefix, the app's
+build does what the engine's own does.
+
 | Setting | Default | What it changes |
 |---|---|---|
 | DirectX 12 (experimental) | off | `SWTOR_DX12=1` in `env`: when the launcher starts `…\retailclient\swtor.exe`, the wrapper starts `swtor_RC2.exe` from the same folder with the same arguments. If that file isn't there, it starts `swtor.exe` as always and says so in `wine.log` and `hold.log`. Only while the launcher and the game are closed (it changes the prefix's registry) |
