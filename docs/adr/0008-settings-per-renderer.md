@@ -34,9 +34,12 @@ renderer (Jan, 2026-11-26).
   9's set, and `wine.log` says it fell back (the dispatcher's decision, 2026-11-26).
 - A settings change that fails puts `settings.conf`, `dxvk.conf` and `user.reg` back and makes
   `env` again from them, for the drivers the engine has then.
-- An earlier version's install keeps its own wrapper and files until Update (Play doesn't replace
-  them). Meanwhile DirectX 12's set and the switch can't change, and with DirectX 12 on, Play asks
-  for Update first (the dispatcher's decision, 2026-11-26).
+- An earlier build's install keeps its own wrapper and files until Update or Reinstall (Play
+  doesn't replace them), which record `settings_sets` in the manifest. Meanwhile DirectX 12's set
+  and the switch can't change, and while its `env` starts DirectX 12, Play asks for Update or
+  Reinstall first (the dispatcher's decision, 2026-11-26).
+- A `settings.conf` that can't be read stops every command at `som.sh`'s entry, so nothing writes
+  defaults over it (the dispatcher's decision, 2026-11-26).
 
 ## Consequences
 

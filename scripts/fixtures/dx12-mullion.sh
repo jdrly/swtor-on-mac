@@ -209,7 +209,7 @@ fx_dx12_mullion() {
   cp "$e/lib/wine/x86_64-unix/winemetal.so" "$d/bridge"
   # (with a key, as an install writes it: plutil reads a bare {} as OpenStep, which it can't
   # write back when Native fullscreen records the Mac driver in it)
-  printf '{\n  "fixture": "dx12-mullion",\n  "version": "0.0.0-dev.1"\n}\n' >"$FX_DXM_SOM/install-manifest.json"
+  printf '{\n  "fixture": "dx12-mullion",\n  "version": "0.0.0-dev.1",\n  "settings_sets": "yes"\n}\n' >"$FX_DXM_SOM/install-manifest.json"
   printf 'WINE REGISTRY Version 2\n' >"$FX_DXM_SOM/prefix/user.reg"
   # my fork's build of c1, pinned; its VERSION's codegen line with characters env can't hold
   # between quotes, which the install leaves out

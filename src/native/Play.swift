@@ -58,12 +58,21 @@ extension Installer {
     let busy = status["busy"] ?? ""
     if game { return .show(game: true) }
     if launcher || busy == "launcher" || busy == "game" { return .show(game: busy == "game") }
-    // DirectX 12 on an earlier version's install: its wrapper and files don't have DirectX 12's
-    // settings yet (Update writes them)
-    if status["dx12"] == "on", let installed = status["installed_version"], installed != status["version"] {
-      return .unavailable("DirectX 12 is on, and SWTOR on Mac \(installed) is installed. Click Update first.")
-    }
+    if let reason = launchBlocked(status) { return .unavailable(reason) }
     return .launch(url)
+  }
+
+  // Why a new game start must wait, if it must: the installed env starts DirectX 12 on an earlier
+  // build's wrapper and files, which don't have DirectX 12's settings (Update or Reinstall writes
+  // them; som.sh status's dx12 and settings_sets). Showing a running launcher or game still works.
+  // A settings.conf som.sh can't read blocks it too (som.sh refuses every command then).
+  nonisolated static func launchBlocked(_ status: [String: String]) -> String? {
+    if let error = status["settings_error"] { return error }
+    guard status["dx12"] == "on", status["settings_sets"] != "yes" else { return nil }
+    let installed = status["installed_version"] ?? ""
+    return installed != status["version"]
+      ? "DirectX 12 is on, and SWTOR on Mac \(installed) is installed. Click Update first."
+      : "DirectX 12 is on, and the installed SWTOR on Mac is an earlier build. Click Reinstall first."
   }
 
   // The sandbox's root (SWTOR_ON_MAC_ROOT; som.sh reports its real path), or nil.
@@ -230,6 +239,8 @@ extension Installer {
     // (an install, uninstall or settings change runs, a switch of DirectX 12 among them: the game
     // waits for its files)
     if answer == "@notice busy" { return .unavailable(busyMessage) }
+    // (settings.conf became unreadable since the last status: som.sh refused the check)
+    if answer.hasPrefix("@error Settings can't be read"), case .launch = action { return .unavailable(String(answer.dropFirst(7))) }
     return action
   }
 
@@ -294,6 +305,8 @@ extension Installer {
   private func showSWTOR(then: @escaping (String?) -> Void) {
     let running = Installer.runningSWTOR(status)
     guard let app = running.game ?? running.launcher else {
+      // (it ended meanwhile: a new start, which waits as Play's does)
+      if let reason = Installer.launchBlocked(status) { then(reason); return }
       if let url = Installer.officialAppURL(status) { launch(url, then: then) } else { refresh() }
       return
     }

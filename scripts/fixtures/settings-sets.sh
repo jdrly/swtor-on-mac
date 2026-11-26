@@ -50,7 +50,7 @@ fx_settings_sets() {
   # the planted install (manifest, this version's engine, the prefix's user.reg as Install
   # writes it), and an earlier version's settings.conf: one set, Jan's DirectX 9 choices
   mkdir -p "$FX_SS_SOM/engine" "$FX_SS_SOM/prefix"
-  echo '{"version": "0.0.0-fx.1"}' >"$FX_SS_SOM/install-manifest.json"
+  echo '{"version": "0.0.0-fx.1", "settings_sets": "yes"}' >"$FX_SS_SOM/install-manifest.json"
   sed -n 's/^ENGINE_SHA256=//p' "$d/dev/som.sh" >"$FX_SS_SOM/engine/.som-source"
   cat >"$FX_SS_SOM/prefix/user.reg" <<'REG'
 WINE REGISTRY Version 2
@@ -165,29 +165,48 @@ REG
   cp "$d/settings.old" "$FX_SS_SOM/settings.conf"
   sed -i.bak 's/^dx12=off$/dx12=on/' "$FX_SS_SOM/settings.conf" && rm -f "$FX_SS_SOM/settings.conf.bak"
   printf '\n[Software\\\\Wine\\\\AppDefaults\\\\swtor_RC2.exe\\\\Mac Driver] 1763000000\n#time=1dc54a1b2c3d4e5\n"PhysicalKeyboard"="y"\n' >>"$FX_SS_SOM/prefix/user.reg"
-  echo '# env of an earlier version' >"$FX_SS_SOM/env"
+  printf '# env of an earlier version\nSWTOR_DX12=1\n' >"$FX_SS_SOM/env"
+  cp "$FX_SS_SOM/env" "$d/env.before"
   echo '{"version": "0.0.0-fx.0"}' >"$FX_SS_SOM/install-manifest.json"
   cp "$FX_SS_SOM/prefix/user.reg" "$d/user.reg.before"
-  # (a settings.conf it can't read: left as it is, no lock left, and the next check tries again)
+  # (a settings.conf it can't read: every command refuses at once with one line, status says so
+  # first, and nothing changes; the next check, once it can be read, goes on)
   cp "$FX_SS_SOM/settings.conf" "$d/settings.before"
+  cp "$FX_SS_SOM/install-manifest.json" "$d/manifest.before"
   chmod 000 "$FX_SS_SOM/settings.conf"
-  fx_ss_som rehook
-  fx_ss_som set hudpos topright
-  chmod 644 "$FX_SS_SOM/settings.conf"
-  check "settings-sets: an unreadable settings.conf: the hook check and a change leave its bytes, no lock left ($FX_RC)" \
-    eval '[ "$FX_RC" = 1 ] && piped -q "^@error " "$d/out.txt" && cmp -s "$d/settings.before" "$FX_SS_SOM/settings.conf" && [ ! -e "$FX_SS_SOM/.lock" ]'
+  bad=""
+  for k in rehook "set hudpos topright" "set debug on" install settings; do
+    # shellcheck disable=SC2086 # (the command's words)
+    fx_ss_som $k
+    [ "$FX_RC" = 1 ] && [ "$(cat "$d/out.txt")" = "@error Settings can't be read: $FX_SS_SOM/settings.conf. Fix its permissions, then try again." ] || bad="$bad $k($FX_RC)"
+  done
+  rm -f "$FX_SS_SOM/install-manifest.json"
+  fx_ss_som install
+  [ "$FX_RC" = 1 ] && piped -q "^@error Settings can.t be read" "$d/out.txt" || bad="$bad install-without-manifest($FX_RC)"
+  cp "$d/manifest.before" "$FX_SS_SOM/install-manifest.json"
   fx_ss_som status
-  check "settings-sets: ...status says DirectX 12 is on, and which version is installed (Play's Update first)" \
-    eval 'piped -qx dx12=on "$d/out.txt" && piped -qx installed_version=0.0.0-fx.0 "$d/out.txt" && piped -qx version=0.0.0-fx.1 "$d/out.txt"'
+  chmod 644 "$FX_SS_SOM/settings.conf"
+  check "settings-sets: an unreadable settings.conf: rehook, set, install (with and without a manifest) and settings refuse with one line${bad:+ (not:$bad)}" test -z "$bad"
+  check "settings-sets: ...settings.conf, env, user.reg as they were, no lock left" \
+    eval 'cmp -s "$d/settings.before" "$FX_SS_SOM/settings.conf" && cmp -s "$d/env.before" "$FX_SS_SOM/env" && cmp -s "$d/user.reg.before" "$FX_SS_SOM/prefix/user.reg" && [ ! -e "$FX_SS_SOM/.lock" ]'
+  check "settings-sets: ...status says so on its first line" \
+    eval '[ "$(head -1 "$d/out.txt")" = "settings_error=Settings can'"'"'t be read: $FX_SS_SOM/settings.conf. Fix its permissions, then try again." ]'
+  fx_ss_som status
+  check "settings-sets: an earlier install whose env starts DirectX 12: status says dx12=on, settings_sets=no (Play waits for Update), no settings_error" \
+    eval 'piped -qx dx12=on "$d/out.txt" && piped -qx settings_sets=no "$d/out.txt" && piped -qx installed_version=0.0.0-fx.0 "$d/out.txt" && ! piped -q settings_error "$d/out.txt"'
   fx_ss_som rehook
   check "settings-sets: an earlier install with DirectX 12 on: the hook check writes both sets into settings.conf, the DirectX 9 set's lines as they were" \
     eval 'fx_ss_conf dx12.hud=on && fx_ss_conf dx12.hudpos=topleft && diff <(grep -v -e "^#" -e "^dx12\\." "$d/settings.old" | sed "s/^dx12=off$/dx12=on/") <(grep -v -e "^#" -e "^dx12\\." "$FX_SS_SOM/settings.conf") >/dev/null'
   check "settings-sets: ...and nothing else: env and user.reg as they were" \
-    eval 'grep -qx "# env of an earlier version" "$FX_SS_SOM/env" && cmp -s "$d/user.reg.before" "$FX_SS_SOM/prefix/user.reg"'
+    eval 'cmp -s "$d/env.before" "$FX_SS_SOM/env" && cmp -s "$d/user.reg.before" "$FX_SS_SOM/prefix/user.reg"'
   cp "$FX_SS_SOM/settings.conf" "$d/settings.before"
   fx_ss_som set hud off
   check "settings-sets: ...DirectX 12's set can't change until Update: said so, settings.conf unchanged ($FX_RC)" \
     eval '[ "$FX_RC" = 1 ] && piped -q "^@error SWTOR on Mac 0.0.0-fx.0 is installed. Click Update" "$d/out.txt" && cmp -s "$d/settings.before" "$FX_SS_SOM/settings.conf"'
+  echo '{"version": "0.0.0-fx.1"}' >"$FX_SS_SOM/install-manifest.json"
+  fx_ss_som set hud off
+  check "settings-sets: ...an earlier build of this version: Reinstall first, said so ($FX_RC)" \
+    eval '[ "$FX_RC" = 1 ] && piped -q "^@error The installed SWTOR on Mac is an earlier build of 0.0.0-fx.1. Click Reinstall first" "$d/out.txt" && cmp -s "$d/settings.before" "$FX_SS_SOM/settings.conf"'
   fx_ss_som set debug off
   check "settings-sets: ...a global setting can ($FX_RC)" eval '[ "$FX_RC" = 0 ] && fx_ss_conf debug=off'
 

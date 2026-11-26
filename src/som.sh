@@ -378,9 +378,11 @@ status() {
   if [ -f "$MANIFEST" ]; then
     echo "installed=yes"
     echo "installed_version=$(json_get "$MANIFEST" version)"
-    # DirectX 12 on (development builds): Play waits for Update while another version is
-    # installed, whose wrapper and files don't know the settings sets
-    echo "dx12=$(dx12_on && echo on || echo off)"
+    # whether Install wrote the files of the settings sets, and whether the installed env starts
+    # DirectX 12 (development builds): Play waits for Update or Reinstall while that env runs on
+    # files without the sets (sets_installed)
+    echo "settings_sets=$(sets_installed && echo yes || echo no)"
+    echo "dx12=$([ "$CHANNEL" = dev ] && grep -qx 'SWTOR_DX12=1' "$SOM/env" 2>/dev/null && echo on || echo off)"
     echo "installed_d9mt=$(json_get "$MANIFEST" d9mt)"
     # the engine in place (an install from 0.0.x: CrossOver 24.0.7 until Reinstall upgrades it)
     echo "installed_engine=$(json_get "$MANIFEST" engine)"
@@ -509,6 +511,10 @@ set_value() {
   [ -n "$v" ] || v=$(setting_default "$2")
   echo "$v"
 }
+# sets_installed: Install (or Update) of a build with the settings sets wrote the wrapper, env and
+# the prefix's values (the manifest's settings_sets); before, they are an earlier build's, which
+# start swtor_RC2.exe with the DirectX 9 set's values whatever the window shows
+sets_installed() { [ "$(json_get "$MANIFEST" settings_sets)" = yes ]; }
 # settings_set: the set chosen in Settings, dx12 with DirectX 12 on (development builds), else dx9
 settings_set() { if [ "$CHANNEL" = dev ] && [ "$(set_value dx9 dx12)" = on ]; then echo dx12; else echo dx9; fi; }
 # The files made from the settings hold both sets where they differ: env's game settings,
@@ -536,8 +542,6 @@ dx12_driver_ok() {
 # in the set in effect (a global one in the DirectX 9 set's lines, which hold them)
 write_settings() {
   local k v in=dx9
-  # (a file it can't read would be written over with the defaults)
-  [ ! -e "$SETTINGS" ] || [ -r "$SETTINGS" ] || die "SWTOR on Mac can't read its settings ($SETTINGS), so it leaves them as they are. Give your user read access to that file (or Reinstall), then try again."
   if [ -n "${1:-}" ] && ! in_list "$1" "$SETTINGS_GLOBAL"; then in=$(settings_set); fi
   {
     echo "# SWTOR on Mac settings (change them in the app: SWTOR on Mac > Settings…)"
@@ -687,11 +691,13 @@ cmd_set() {
   if [ "$(settings_set)" = dx12 ] && in_list "$key" "$SETTINGS_DX9_ONLY"; then
     die "This setting doesn't work with DirectX 12. Turn DirectX 12 off to change it (it keeps its value for DirectX 9)."
   fi
-  # an earlier version's install runs its own wrapper, which doesn't know the DirectX 12 set:
-  # it would start swtor_RC2.exe with the DirectX 9 set's values whatever the window showed
-  if [ "$(json_get "$MANIFEST" version)" != "$VERSION" ] &&
-    { [ "$key" = dx12 ] || { [ "$(settings_set)" = dx12 ] && ! in_list "$key" "$SETTINGS_GLOBAL"; }; }; then
-    die "SWTOR on Mac $(json_get "$MANIFEST" version) is installed. Click Update to $VERSION first, then change DirectX 12's settings."
+  # an earlier build's install runs its own wrapper and files, which don't know the DirectX 12
+  # set (sets_installed)
+  if ! sets_installed && { [ "$key" = dx12 ] || { [ "$(settings_set)" = dx12 ] && ! in_list "$key" "$SETTINGS_GLOBAL"; }; }; then
+    if [ "$(json_get "$MANIFEST" version)" != "$VERSION" ]; then
+      die "SWTOR on Mac $(json_get "$MANIFEST" version) is installed. Click Update to $VERSION first, then change DirectX 12's settings."
+    fi
+    die "The installed SWTOR on Mac is an earlier build of $VERSION. Click Reinstall first, then change DirectX 12's settings."
   fi
   # a copy of the files a change rewrites (settings.conf, dxvk.conf, the prefix's user.reg), put
   # back if it fails half way: the window, the next game start and the registry
@@ -1769,6 +1775,7 @@ write_manifest() {
   "previous_wrapper": "$WRAPPER_STATE",
   "bin_real_created": $([ "$BIN_REAL_EXISTED" = false ] && echo true || echo false),
   "settings_user": "$user",
+  "settings_sets": "yes",
   "original_preloaders_sha256": {$pre
   },
   "helpers": ["setsid-exec", "hold-launcher"],
@@ -1934,9 +1941,9 @@ cmd_rehook() {
   # DirectX 12 one seeded from it. Only settings.conf: Update writes env, the prefix and the
   # wrapper for this version (an earlier version's install can't change DirectX 12's set before).
   # (A write that fails leaves the file as it was, and the next check tries again.)
-  # (only a file read whole: grep's 1, not 2 for a read error; the lock released whatever fails)
-  if [ -z "$DRY" ] && [ "$CHANNEL" = dev ] && [ -f "$SETTINGS" ] && { grep -q '^dx12\.' "$SETTINGS" 2>/dev/null; [ $? = 1 ]; } &&
-    mkdir "$SOM/.lock" 2>/dev/null; then
+  # (the lock released whatever fails; taken meanwhile by a change: busy, as above)
+  if [ -z "$DRY" ] && [ "$CHANNEL" = dev ] && [ -f "$SETTINGS" ] && ! grep -q '^dx12\.' "$SETTINGS"; then
+    mkdir "$SOM/.lock" 2>/dev/null || { log "a settings change just started; leaving it alone"; echo "@notice busy"; return 0; }
     ( log "settings: a set for each renderer from now on (DirectX 12's from the settings there were)"
       write_settings || log "settings: could not write both sets now (the next check tries again)" ) >/dev/null 2>&1 || true
     rmdir "$SOM/.lock" 2>/dev/null || true
@@ -2317,6 +2324,14 @@ cmd_uninstall() {
   log "uninstall complete"
   echo "@done SWTOR on Mac is removed. The official SWTOR app runs as it came from Broadsword. Logs stay in $LOGS."
 }
+
+# A settings.conf that is there but can't be read: every command refuses before it changes or
+# guesses anything from it, so nothing writes defaults over it. Status says so first (its other
+# lines don't read settings.conf), and the window shows it in place of Play.
+if [ -e "$SETTINGS" ] && [ ! -r "$SETTINGS" ]; then
+  SETTINGS_ERROR="Settings can't be read: $SETTINGS. Fix its permissions, then try again."
+  if [ "${1:-}" = status ]; then echo "settings_error=$SETTINGS_ERROR"; else echo "@error $SETTINGS_ERROR"; exit 1; fi
+fi
 
 case "${1:-}" in
   status) status ;;

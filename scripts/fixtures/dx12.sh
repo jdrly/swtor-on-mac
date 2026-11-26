@@ -56,7 +56,7 @@ fx_dx12() {
   sha=$(sed -n 's/^ENGINE_SHA256=//p' "$d/dev/som.sh")
   mkdir -p "$FX_DX12_SOM/engine/bin" "$FX_DX12_SOM/prefix/dosdevices" "$FX_DX12_SOM/prefix/drive_c/swtor/retailclient" \
     "$d/unix/retailclient" "$FX_DX12_W/bin" "$FX_DX12_W/bin-real"
-  echo '{"version": "0.0.0-fx.1"}' >"$FX_DX12_SOM/install-manifest.json"
+  echo '{"version": "0.0.0-fx.1", "settings_sets": "yes"}' >"$FX_DX12_SOM/install-manifest.json"
   echo "$sha" >"$FX_DX12_SOM/engine/.som-source"
   ln -s ../drive_c "$FX_DX12_SOM/prefix/dosdevices/c:"
   touch "$FX_DX12_SOM/prefix/drive_c/swtor/retailclient/swtor.exe" "$FX_DX12_SOM/prefix/drive_c/swtor/retailclient/swtor_RC2.exe" \
