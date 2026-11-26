@@ -198,8 +198,8 @@ REG
   # migration's lock: nothing written, busy for a change that holds the lock)
   SWTOR_ON_MAC_TEST_MIGRATE='chmod 000 "$SETTINGS"' fx_ss_som rehook
   chmod 644 "$FX_SS_SOM/settings.conf"
-  check "settings-sets: settings.conf unreadable by the migration's read under the lock: its bytes kept, no lock left ($FX_RC)" \
-    eval 'cmp -s "$d/settings.before" "$FX_SS_SOM/settings.conf" && [ ! -e "$FX_SS_SOM/.lock" ]'
+  check "settings-sets: settings.conf unreadable by the migration's read under the lock: the check stops with the error, its bytes and the manifest kept, no lock left ($FX_RC)" \
+    eval '[ "$FX_RC" = 1 ] && [ "$(cat "$d/out.txt")" = "@error Settings can'"'"'t be read: $FX_SS_SOM/settings.conf. Fix its permissions, then try again." ] && cmp -s "$d/settings.before" "$FX_SS_SOM/settings.conf" && cmp -s "$d/manifest.before" "$FX_SS_SOM/install-manifest.json" && [ ! -e "$FX_SS_SOM/.lock" ]'
   SWTOR_ON_MAC_TEST_MIGRATE='mkdir "$SOM/.lock"' fx_ss_som rehook
   check "settings-sets: a change takes the lock before the migration: busy, its bytes kept ($FX_RC)" \
     eval 'piped -qx "@notice busy" "$d/out.txt" && cmp -s "$d/settings.before" "$FX_SS_SOM/settings.conf"'

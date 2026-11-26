@@ -1948,7 +1948,7 @@ rehook_leave() {
 }
 
 cmd_rehook() {
-  local b h leave
+  local b h leave rc=0
   SETTLE="${SWTOR_ON_MAC_SETTLE:-20}"
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/rehook.log"; fi
   log "---- rehook $VERSION"
@@ -1965,12 +1965,14 @@ cmd_rehook() {
     # change of the file or the lock since the read above)
     if [ -n "$ROOT" ] && [ -n "${SWTOR_ON_MAC_TEST_MIGRATE:-}" ]; then eval "$SWTOR_ON_MAC_TEST_MIGRATE"; fi
     mkdir "$SOM/.lock" 2>/dev/null || { log "a settings change just started; leaving it alone"; echo "@notice busy"; return 0; }
-    ( if ! load_settings; then log "settings: $SETTINGS_ERROR (the next check tries again)"
-      elif ! has_two_sets; then
+    # (a read that fails: the lock released, then the check stops there, the hook untouched)
+    ( load_settings || exit 3
+      if ! has_two_sets; then
         log "settings: a set for each renderer from now on (DirectX 12's from the settings there were)"
         write_settings || log "settings: could not write both sets now (the next check tries again)"
-      fi ) >/dev/null 2>&1 || true
+      fi ) >/dev/null 2>&1 || rc=$?
     rmdir "$SOM/.lock" 2>/dev/null || true
+    [ "$rc" != 3 ] || die "$SETTINGS_ERROR"
   fi
   rehook_inspect
   if [ -z "$REDO$NEED$OTHER$ODD" ]; then log "state:$STATES; the wrapper is in place"; echo "@done in place"; return 0; fi
