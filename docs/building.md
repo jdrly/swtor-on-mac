@@ -173,8 +173,33 @@ request, the version PR's included. A pin older than d9mt's CI (before `45fcedb`
 passes with a note. Exit status 1 means the pin fails; 2 means GitHub didn't answer or d9mt's run
 hasn't finished, which is no verdict: run it again.
 
-`main` pins d9mt `9b64581`, d9mt main after jdrly/d9mt#206: the driver of 0.1.9. Since `f5439a6`
-it adds:
+`main` pins d9mt `6f577b3`, d9mt main after jdrly/d9mt#220: the driver `main` builds for 0.1.10.
+Since `9b64581` it adds:
+
+- an app profile of SWTOR's own, selected by `swtor.exe` (d9mt ADR-0008), #212. Every other game
+  keeps the generic path. Three fields of the profile are on for SWTOR, and each has a 0/1
+  environment override:
+  - static buffers mapped directly on every memory profile, `D9MT_STATIC_BUFFERS_DIRECT`, #218;
+  - a depth/stencil clear drawn in a viewport inside the open pass, `D9MT_INPASS_CLEAR`, #219;
+  - the open pass kept across a visit that only clears other targets,
+    `D9MT_KEEP_PASS_OVER_CLEAR_VISIT`, #220;
+- a sampler's `D3DSAMP_MIPMAPLODBIAS` applied on Apple10 GPUs (M5), which every Mac dropped;
+  `D9MT_SAMPLER_LOD_BIAS=0` turns it off, #215;
+- a Lock that syncs the CS thread for queued draws even when an older GPU use retires during the
+  check, #217;
+- a TIMESTAMPFREQ query's `GetData` that stays `S_OK` on the first call, #213;
+- `SCREEN-INFO` in an ordinary log, without Debug Logging, #211, and the texture kind warning
+  naming the bound texture's size, mip levels and format, #210;
+- `D9MT_RT_SAMPLE`, off unless set: a sampler of the render thread's time by module, #216;
+- a STATS counter of the Locks that wait and the hash suite's `unlimited` memory profile, #214,
+  and the GPU gates' bench set, #207.
+
+None of them changes the AIR codegen: the bridge reports `25fc2491…` with no lineage, as 0.1.8's
+and 0.1.9's did, so players keep the shaders 0.1.8 compiled. #215 changes the bridge's Metal side
+(`winemetal_unix.c`, `winemetal.h`), which is outside the id; `winemetal.dll` is byte for byte
+0.1.9's.
+
+`9b64581`, d9mt main after jdrly/d9mt#206, was the driver of 0.1.9. Since `f5439a6` it added:
 
 - Metal's pipeline archive written at the bridge's DLL detach, before Wine's exit kill, instead
   of only from `atexit` inside it, so a session's archive loads at the next start; and Metal's
