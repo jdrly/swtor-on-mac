@@ -232,11 +232,42 @@ add_log() {  # file max-bytes [folder in the zip [launcher]]: the end of a log (
   fi
 }
 
+# report_ours <report>: false if a report's process ran from another app's files, as its path
+# shows (an .ips report's procPath, JSON-escaped; the Path: line of the others): a folder in
+# Application Support other than SWTOR on Mac's and Broadsword's, or an app bundle other than this
+# app (by its name, or this one's), the Game Mode bundle (SWTOR.app) and the official launcher.
+# Another CrossOver-based app's Wine (GW2 on Mac's) has the same process names, wine and
+# wineserver. macOS shortens the paths in its reports: the engine's wine is /Users/USER/*/wine,
+# GW2 on Mac's /Users/USER/Library/Application Support/GW2 on Mac arm64/*/wine.app/Contents/MacOS/wine.
+# So a path that names no other app (also none at all, or none in the header's first 200 lines)
+# counts as ours, and this app's own path always does.
+APP_BUNDLE=${RES%/Contents/Resources}
+APP_BUNDLE=${APP_BUNDLE##*/}
+report_ours() {
+  local p a
+  p=$(LC_ALL=C awk '
+    NR > 200 { exit }
+    /^Path:/ { sub(/^Path:[ \t]*/, ""); sub(/[ \t\r]+$/, ""); print; exit }
+    /^[ \t]*"procPath"[ \t]*:[ \t]*"/ { sub(/^[ \t]*"procPath"[ \t]*:[ \t]*"/, ""); sub(/",?[ \t\r]*$/, ""); gsub(/\\\//, "/"); print; exit }' "$1" 2>/dev/null)
+  case "$p" in
+    "${RES%/Contents/Resources}/"*) return 0 ;;
+    *"/Library/Application Support/SWTOR on Mac/"* | *"/Library/Application Support/com.broadsword.swtor/"*) ;;
+    *"/Library/Application Support/"*) return 1 ;;
+  esac
+  case "$p" in
+    *.app/*)
+      a=${p%%.app/*}; a=${a##*/}.app
+      case "$a" in "SWTOR on Mac.app" | "$APP_BUNDLE" | SWTOR.app | "Star Wars - The Old Republic.app") ;; *) return 1 ;; esac ;;
+  esac
+  return 0
+}
+
 # Crash reports: macOS's reports in ~/Library/Logs/DiagnosticReports (crashes .ips/.crash,
 # hangs .hang, spins .spin, .diag) of the last 7 days, of what SWTOR on Mac runs: the game and
 # Wine (wine, wine64-preloader, wineserver, mac_wine; swtor.exe, the Game Mode bundle's), the
 # official launcher (Star Wars - The Old Republic Launcher), this app and its helpers, and
-# Metal's shader compiler when it worked for the game or Wine. The newest first, at most
+# Metal's shader compiler when it worked for the game or Wine. Not another app's Wine, which has
+# the same names (report_ours): its reports are left out without a word. The newest first, at most
 # CRASH_MAX of them, CRASH_MAX_BYTES together and CRASH_FILE_MAX each (larger ones are left
 # out, and named in system-info.txt). Prints "add <path>" or "skip <name> (<why>)" per report.
 CRASH_MAX=20
@@ -250,6 +281,7 @@ crash_reports() {
     -mtime -7 -exec stat -f '%m %z %N' {} + 2>/dev/null | sort -rn | while read -r _ size f; do
       case "${f##*/}" in
         MTLCompilerService*) LC_ALL=C grep -q -E '"responsibleProc" : "(swtor|wine)' "$f" || continue ;;
+        *) report_ours "$f" || continue ;;
       esac
       if [ "$n" -ge "$CRASH_MAX" ]; then echo "skip ${f##*/} (more than $CRASH_MAX reports)"
       elif [ "$size" -gt "$CRASH_FILE_MAX" ]; then echo "skip ${f##*/} ($(((size + 999) / 1000)) KB, too large)"
@@ -392,7 +424,8 @@ gpu_errors() {  # → stdout; the count's line also into $work/gpu-summary
 #   *.userspace_watchdog_timeout.spin     known header lines, WindowServer's and the game's threads
 #   panic-full-*.panic                    the panic string's head, WindowServer's, loginwindow's
 #                                         and the game's uptime and thread names
-#   swtor.exe_*.diag, wine*_*.diag        the event, limit and duration lines
+#   swtor.exe_*.diag, wine*_*.diag        the event, limit and duration lines (not another app's
+#                                         Wine's, report_ours)
 # No other names: every line of an extract (but the GPU event's) must have one of the forms in
 # sys_forms, Apple's lines in these reports with their numbers in number places; any other line is
 # replaced by a note. A form's identity places (a process, a service, a kext, a thread's or queue's
@@ -685,6 +718,10 @@ system_reports() {  # → $work/sys/<name in the zip>, $work/sys-index, $work/sy
     case "$base" in
       gpuEvent-*) kind=gpu ;; WindowServer*.ips) kind=ws ;; *.spin) kind=spin ;; panic-full-*) kind=panic ;; *) kind=diag ;;
     esac
+    # (a resource report of another app's Wine, by its path: not ours, and not counted in SYS_MAX)
+    if [ "$kind" = diag ] && ! report_ours "$f"; then
+      zname=$(sys_zname "$base"); echo "  left out: ${zname:-OTHER-diag} (not the game's)" >>"$work/sys-index"; continue
+    fi
     # the newest SYS_MAX of each kind
     eval "x=\${count_$kind:-0}"; x=$((x + 1)); eval "count_$kind=$x"
     zname=$(sys_zname "$base")

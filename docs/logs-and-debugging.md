@@ -19,7 +19,9 @@ screen's display limit now (the frames per second macOS lets it show, which can 
 refresh rate: `NSScreen`'s `maximumFramesPerSecond` and refresh interval, which the app reads and
 passes; *not known* when the script runs without the app), the size of macOS's Metal caches for the engine's processes, shared with other CrossOver-based apps, the size of Metal's archive usage index and the MDB_MAP_FULL events of the last 2 hours beside it) and
 macOS's crash, hang and spin reports of the last 7 days (from `~/Library/Logs/DiagnosticReports`)
-for the game, Wine, the official launcher and SWTOR on Mac, so you don't have to look for them:
+for the game, Wine, the official launcher and SWTOR on Mac, so you don't have to look for them
+(another app's Wine, such as another CrossOver-based app's, has the same names: a report whose
+process ran from another app's folder in Application Support or another app's bundle stays out):
 the newest 20, up to 10 MB together; `system-info.txt` lists which are in the zip and which were
 left out, and when in the last 7 days macOS ended what the launcher left running because it is
 not allowed in the background (`som.sh btm-check 7d`, the times or *none*). `gpu-errors.txt` has the GPU errors of the game and Wine from macOS's unified log
@@ -69,7 +71,8 @@ number belongs; a line of any other form is replaced by *(a line of an unknown f
 Where a form names a process, a service, a kext or a thread's or queue's name, the whole name is
 kept only if it is WindowServer's, loginwindow's, the kernel's, the game's, Wine's or the app's
 (exact names), or one of Apple's, Wine's and d9mt's thread names in those processes; any other
-name becomes `OTHER`. A GPU event or resource report of any other process is left out. The Mac's
+name becomes `OTHER`. A GPU event or resource report of any other process is left out, and a resource report also
+when its process ran from another app's folder or bundle (another app's Wine). The Mac's
 name goes from the file names (also an older one with dots in it); no form has a place for a
 user's or a Mac's name, and the files go through the same redaction as the other files. `system-info.txt` and `session-report.txt` say *System reports of the last 48 h:
 N GPU faults, N WindowServer watchdog restarts, N kernel panics*; `system-info.txt` lists the

@@ -23,6 +23,10 @@ sr_plant() {  # <name> <minutes ago>: stdin into the system reports folder
   cat >"$SYSD/$1"
   touch -t "$(date -v-"$2"M +%Y%m%d%H%M)" "$SYSD/$1"
 }
+cr_plant() {  # <name> <procPath>: a crash report in the home's DiagnosticReports ($cr)
+  printf '{"app_name":"wine","bug_type":"309"}\n{\n  "procName" : "wine",\n  "procPath" : "%s",\n  "parentProc" : "launchd"\n}\n' \
+    "$(printf '%s' "$2" | sed 's#/#\\/#g')" >"$cr/$1"
+}
 fx_system_reports() {
   SR_SH=$1 SR=$2
   local root="$SWTOR_ON_MAC_ROOT" me logs
@@ -200,11 +204,35 @@ Heaviest stack for the target process:
   104  ??? (SecretAppDelta + 2000) [0x200000000]
 EOF
 
+  # another app's Wine (another CrossOver-based app: the same process names), by its path
+  sr_plant wine64-preloader_2026-10-31-213200_Fixture-Host-Mac.diag 58 <<'EOF'
+Command:          wine64-preloader
+Path:             /Users/USER/Library/Application Support/SecretAppGamma on Mac/*/wine.app/Contents/MacOS/wine
+Event:            disk writes
+EOF
+  # Crash reports in the home's DiagnosticReports, with the paths as macOS shortens and escapes
+  # them: the engine's wine (/Users/USER/*/wine), the Game Mode bundle and Broadsword's mac_wine
+  # (a hang report's Path: line) are kept; another app's Wine (its folder in Application Support,
+  # its bundle) is left out
+  local cr="$root/home/Library/Logs/DiagnosticReports"
+  mkdir -p "$cr"
+  cr_plant wine-2026-10-31-195500.ips "/Users/USER/*/wine"
+  cr_plant swtor.exe-2026-10-31-195600.ips "/Users/USER/Library/Application Support/SWTOR on Mac/*/SWTOR.app/Contents/MacOS/swtor.exe"
+  cr_plant wine-2026-10-31-195700.ips "/Users/USER/Library/Application Support/SecretAppGamma on Mac/*/wine.app/Contents/MacOS/wine"
+  cr_plant wineserver-2026-10-31-195800.ips "/Applications/SecretAppGamma.app/Contents/SharedSupport/wine/bin/wineserver"
+  printf 'Command:         mac_wine\nPath:            /Applications/Star Wars - The Old Republic.app/Contents/MacOS/mac_wine\n' \
+    >"$cr/mac_wine-2026-10-31-195900.hang"
+
   echo "  (run 1: planted reports)"
   sr_zip planted
+  check "crash reports: the game's and Wine's kept (the engine, the Game Mode bundle, mac_wine), another app's Wine left out" \
+    eval '[ "$(LC_ALL=C ls "$SR_OUT/crash-reports" | tr "\n" " ")" = "mac_wine-2026-10-31-195900.hang swtor.exe-2026-10-31-195600.ips wine-2026-10-31-195500.ips " ]'
+  rm -rf "$cr"
   check "system reports: the zip is written" eval '[ -s "$SR/planted/zip" ] && [ -f "$(cat "$SR/planted/zip")" ] && [ -n "$SR_OUT" ]'
   local d="system-reports"
   check "system reports: the extracts, the Mac's name gone from the names" eval '[ "$(LC_ALL=C ls "$SR_OUT/$d" | tr "\n" " ")" = "WindowServer-2026-10-31-195329.ips.txt WindowServer-2026-10-31-234600.ips.txt WindowServer_2026-10-31-195334.userspace_watchdog_timeout.spin.txt gpuEvent-swtor.exe-2026-10-31-195244.ips panic-full-2026-11-01-000358.0002.panic.txt swtor.exe_2026-10-31-213115.diag.txt " ]'
+  check "system reports: another app's Wine resource report (its Path: elsewhere) left out" \
+    grep -qxF "  left out: wine64-preloader_2026-10-31-213200.diag (not the game's)" "$SR_OUT/system-info.txt"
   check "system reports: the GPU event whole" eval 'sr_has "$d/gpuEvent-swtor.exe-2026-10-31-195244.ips" "\"restart_reason_desc\":\"BIF0 page fault\"" && sr_has "$d/gpuEvent-swtor.exe-2026-10-31-195244.ips" "\"is_read\":true"'
   # (ws, wc, sp, pn and dg are read in the checks' eval strings)
   # shellcheck disable=SC2034
