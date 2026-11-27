@@ -75,8 +75,8 @@
 #             DXVK's environment, paths left out), the power source, Low Power Mode,
 #             macOS's thermal warning and (wrappers after 0.1.9) memory pressure and swap at
 #             the start, and the d9mt files' SHA-256
-#   SCREEN-INFO (d9mt 9b64581 and later, Debug Logging only) the game window's screen: the
-#             frames per second macOS lets it show (NSScreen's maximumFramesPerSecond, the
+#   SCREEN-INFO (d9mt 9b64581 and later; Debug Logging only before 6f577b3) the game window's
+#             screen: the frames per second macOS lets it show (NSScreen's maximumFramesPerSecond, the
 #             display limit; "?" or 0 not known) and Wine's display mode (hz, 0.0 not known: the
 #             SCREEN lines' hz is then d9mt's 60 Hz fallback, so it isn't read). The limit is
 #             printed with the energy mode from the conditions line. When one limit under 60
