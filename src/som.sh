@@ -1571,16 +1571,16 @@ backup_d9mt() {
   D9MT_SAVED=1
 }
 
-# (a backup this run didn't finish, or an older run's, only goes; one that didn't all go back stays)
+# (a backup this run didn't finish, or an older run's, only goes)
 restore_d9mt() {
-  local b="$SOM/d9mt-backup" f keep=""
+  local b="$SOM/d9mt-backup" f
   if [ -n "${D9MT_SAVED:-}" ]; then
     for f in $D9MT_FILES; do
       [ -f "$b/$f" ] && [ -d "$SOM/${f%/*}" ] || continue
-      if mv -f "$b/$f" "$SOM/$f"; then log "rolled back $f" || true; else keep=1; fi
+      if mv -f "$b/$f" "$SOM/$f"; then log "rolled back $f"; else log "could not roll back $f"; fi
     done
   fi
-  [ -n "$keep" ] || rm -rf "$b"
+  rm -rf "$b"
 }
 
 # The upgrade went through: the old engine, its libraries and the copies go
@@ -1608,7 +1608,10 @@ rollback_upgrade() {
 
 on_install_exit() {
   local st=$?
-  trap '' TERM INT HUP   # a second Cancel doesn't cut the rollback short
+  # the rollback runs to its end and frees the lock: a second Cancel, or a step of it that
+  # fails, doesn't cut it short
+  trap '' TERM INT HUP
+  set +e
   if [ $st -ne 0 ] && [ -z "$DRY" ]; then
     if [ -n "${FETCH_PID:-}" ]; then kill "$FETCH_PID" 2>/dev/null || true; fi
     stop_wine >/dev/null 2>&1 || true
