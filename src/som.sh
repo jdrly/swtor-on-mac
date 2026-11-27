@@ -1558,29 +1558,36 @@ begin_upgrade() {
 # structs (d9mt 6f577b3 made WMTSamplerInfo 40 bytes). An install copies the bridge before Wine
 # sets up the prefix and d3d9.dll after it, so the ones it found wait in $SOM/d9mt-backup and go
 # back if the install fails or is cancelled (on_install_exit). A first install has none; over
-# another engine rollback_upgrade brings the old engine back first, with the same bridge.
+# another engine rollback_upgrade brings the old engine back first, with the same bridge. The
+# backup counts once its .complete mark is there; one that is still there when the next install
+# starts (it couldn't all go back, or that run was killed) goes back before the new copy is made.
 D9MT_FILES="engine/lib/wine/x86_64-unix/winemetal.so engine/lib/wine/x86_64-windows/winemetal.dll prefix/drive_c/windows/system32/d3d9.dll"
 backup_d9mt() {
-  local f
-  run rm -rf "$SOM/d9mt-backup"
+  local f b="$SOM/d9mt-backup"
+  [ -n "$DRY" ] || restore_d9mt || die "SWTOR on Mac could not put d9mt's files back as they were (details in $LOGS/install.log)."
+  run rm -rf "$b"
+  run mkdir -p "$b"
   for f in $D9MT_FILES; do
     [ -f "$SOM/$f" ] || continue
-    run mkdir -p "$SOM/d9mt-backup/${f%/*}"
-    run cp -c -p "$SOM/$f" "$SOM/d9mt-backup/$f"
+    run mkdir -p "$b/${f%/*}"
+    run cp -c -p "$SOM/$f" "$b/$f"
   done
-  D9MT_SAVED=1
+  run touch "$b/.complete"
 }
 
-# (a backup this run didn't finish, or an older run's, only goes)
+# restore_d9mt: a complete backup goes back (false, and it stays, if a file of it can't); an
+# unfinished one only goes. Never stops the shell (it runs in on_install_exit).
 restore_d9mt() {
   local b="$SOM/d9mt-backup" f
-  if [ -n "${D9MT_SAVED:-}" ]; then
+  [ -d "$b" ] || return 0
+  if [ -f "$b/.complete" ]; then
     for f in $D9MT_FILES; do
       [ -f "$b/$f" ] && [ -d "$SOM/${f%/*}" ] || continue
-      if mv -f "$b/$f" "$SOM/$f"; then log "rolled back $f"; else log "could not roll back $f"; fi
+      if mv -f "$b/$f" "$SOM/$f"; then log "rolled back $f" || true
+      else log "could not roll back $f; the next install tries again" || true; return 1; fi
     done
   fi
-  rm -rf "$b"
+  rm -f "$b/.complete" && rm -rf "$b" || true
 }
 
 # The upgrade went through: the old engine, its libraries and the copies go
@@ -1608,10 +1615,7 @@ rollback_upgrade() {
 
 on_install_exit() {
   local st=$?
-  # the rollback runs to its end and frees the lock: a second Cancel, or a step of it that
-  # fails, doesn't cut it short
-  trap '' TERM INT HUP
-  set +e
+  trap '' TERM INT HUP   # a second Cancel doesn't cut the rollback short
   if [ $st -ne 0 ] && [ -z "$DRY" ]; then
     if [ -n "${FETCH_PID:-}" ]; then kill "$FETCH_PID" 2>/dev/null || true; fi
     stop_wine >/dev/null 2>&1 || true
@@ -1623,7 +1627,7 @@ on_install_exit() {
       if [ -e "$SOM/$c" ]; then rm -rf "${SOM:?}/$c"; log "removed $c (install failed)"; fi
     done
     [ -z "${UPGRADE:-}" ] || rollback_upgrade
-    restore_d9mt
+    restore_d9mt || true
     rm -rf "$SOM"/*.new "$SOM/gamemode"/.SWTOR.app.new.* 2>/dev/null || true
     log "install failed (status $st)"
   fi
@@ -1666,7 +1670,7 @@ cmd_fetch_engine() {
 }
 
 cmd_install() {
-  CREATED="" MOVED="" WRAPPER_PHASE="" NEW_PREFIX="" WRAPPER_STATE="" FIRST_INSTALL="" SETTINGS_USER="" UPGRADE="" D9MT_SAVED=""
+  CREATED="" MOVED="" WRAPPER_PHASE="" NEW_PREFIX="" WRAPPER_STATE="" FIRST_INSTALL="" SETTINGS_USER="" UPGRADE=""
   [ -f "$MANIFEST" ] || FIRST_INSTALL=1
   if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/install.log"; fi
   log "---- install $VERSION (d9mt $D9MT_VERSION, engine $ENGINE_ID $ENGINE_NAME) root=${ROOT:-/} dry=${DRY:-0} force=${FORCE:-0}"
@@ -1701,8 +1705,8 @@ cmd_install() {
   install_wrapper
   write_manifest
   finish_upgrade
-  D9MT_SAVED=""
-  if [ -d "$SOM/d9mt-backup" ]; then run rm -rf "$SOM/d9mt-backup"; fi
+  # (the mark first: a backup without it never goes back)
+  if [ -d "$SOM/d9mt-backup" ]; then run rm -f "$SOM/d9mt-backup/.complete"; run rm -rf "$SOM/d9mt-backup"; fi
   # an older version's launcher-update guard (a launchd job, unloaded at the start): nothing of
   # SWTOR on Mac runs while the app is closed any more (the app checks the hook when it opens)
   remove_agent_files
