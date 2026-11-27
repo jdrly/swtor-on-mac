@@ -114,7 +114,8 @@ is on, so it can be turned off again.
 
 `main` is building 0.1.10 with d9mt
 [`6f577b3`](https://github.com/jdrly/d9mt/tree/6f577b33f5479295dee05218023432665908e30a). It keeps
-the same shader compiler (AIR codegen `25fc2491`), so nothing recompiles after that update either.
+the shader compiler of 0.1.8 and 0.1.9 (AIR codegen `25fc2491`), so the shaders those versions
+compiled stay in the cache.
 
 ## Install
 

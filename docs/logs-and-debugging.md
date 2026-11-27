@@ -107,7 +107,8 @@ performance. A setting you choose is kept through updates and Reinstall.
   log has no frame times (the Metal HUD shows them);
 - **Data**: what is left out or lost (a missing start of the log, STATS windows of 2 s or
   more, lines d9mt's limiter suppressed, a second device, a short interval);
-- the display limit, with Debug Logging (d9mt's `SCREEN-INFO` line): the frames per second macOS
+- the display limit (d9mt's `SCREEN-INFO` line; in every log since d9mt `6f577b3`, only with
+  Debug Logging before): the frames per second macOS
   lets the game window's screen show, beside Wine's display mode (when d9mt knows it) and the
   energy mode at the start, so a session held at 30 fps says that macOS allowed no more. When one
   limit under 60 fps holds from the log's start to its end, the seconds are counted below that

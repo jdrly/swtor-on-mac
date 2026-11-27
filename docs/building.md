@@ -176,8 +176,9 @@ hasn't finished, which is no verdict: run it again.
 `main` pins d9mt `6f577b3`, d9mt main after jdrly/d9mt#220: the driver `main` builds for 0.1.10.
 Since `9b64581` it adds:
 
-- an app profile of SWTOR's own, selected by `swtor.exe` (d9mt ADR-0008), #212. Every other game
-  keeps the generic path. Three fields of the profile are on for SWTOR, and each has a 0/1
+- an app profile of SWTOR's own, which an exe named `swtor.exe` selects (d9mt ADR-0008), #212.
+  Every other exe selects the generic one; `D9MT_APP_PROFILE=swtor` or `generic` overrides the
+  exe's choice, for tests and A/Bs. Three fields of the profile are on for SWTOR, and each has a 0/1
   environment override:
   - static buffers mapped directly on every memory profile, `D9MT_STATIC_BUFFERS_DIRECT`, #218;
   - a depth/stencil clear drawn in a viewport inside the open pass, `D9MT_INPASS_CLEAR`, #219;

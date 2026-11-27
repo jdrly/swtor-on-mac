@@ -174,7 +174,7 @@ warn:  STATS t=40 /' "$R/b.log" >"$R/b-hidden.log"
   "$SR" "$R/long.log" >"$R/long.txt" 2>&1 || true
   check "field: a 2.5-hour steady session" eval 'fk_in "$R/long.txt" "^  FPS: median second +60\.0$" && ! grep -q "Segmentation\|awk:" "$R/long.txt"'
 
-  # 5b. The display limit (d9mt's SCREEN-INFO, Debug Logging only): "?" until AppKit answered,
+  # 5b. The display limit (d9mt's SCREEN-INFO; Debug Logging only before d9mt 6f577b3): "?" until AppKit answered,
   # then 30 fps, in Low Power Mode, Wine's display mode not known (hz=0.0: the SCREEN lines' 60
   # is d9mt's fallback, not read). The FPS read against 28, not 58: 3 of 20 seconds below it. A
   # limit of 60 keeps the 58, with Wine's mode when SCREEN-INFO has it; one that changes, also to
