@@ -962,6 +962,7 @@ install_prefix() {
     fi
   fi
   copy_atomic "$RES/d9mt/d3d9.dll" "$sys/d3d9.dll" 644
+  D9MT_SAVED=""   # (the three are this version's now: a later failure keeps them, see backup_d9mt)
 }
 
 # The Game Mode bundle (as SWGL on Mac makes it for this engine): a clone of the engine's loader
@@ -1557,8 +1558,9 @@ begin_upgrade() {
 # d9mt's three files work only as a set: the bridge in the engine and d3d9.dll in the prefix share
 # structs (d9mt 6f577b3 made WMTSamplerInfo 40 bytes). An install copies the bridge before Wine
 # sets up the prefix and d3d9.dll after it, so the ones it found wait in $SOM/d9mt-backup and go
-# back if the install fails or is cancelled (on_install_exit). A first install has none; over
-# another engine rollback_upgrade brings the old engine back first, with the same bridge.
+# back if the install fails or is cancelled before d3d9.dll is in place (on_install_exit); after
+# that the three are this version's and stay. A first install has none; over another engine
+# rollback_upgrade brings the old engine back first, with the same bridge.
 D9MT_FILES="engine/lib/wine/x86_64-unix/winemetal.so engine/lib/wine/x86_64-windows/winemetal.dll prefix/drive_c/windows/system32/d3d9.dll"
 backup_d9mt() {
   local f b="$SOM/d9mt-backup"
@@ -1698,7 +1700,6 @@ cmd_install() {
   step "Hooking into the official launcher"
   install_wrapper
   write_manifest
-  D9MT_SAVED=""   # (the install has gone through: d9mt's backup no longer goes back)
   finish_upgrade
   if [ -d "$SOM/d9mt-backup" ]; then run rm -rf "$SOM/d9mt-backup" || true; fi
   # an older version's launcher-update guard (a launchd job, unloaded at the start): nothing of
