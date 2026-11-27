@@ -305,22 +305,17 @@ struct SettingsView: View {
           Text("While the game is in full screen, macOS gives it priority on the CPU and GPU and "
                + "lowers the latency of Bluetooth controllers and headphones.")
         }
-        // Native fullscreen (som.sh nativefs): shown only in development builds until the
-        // maintainer's play test, and in any build while it is on, so a release can still turn
-        // off what a development build turned on. To show it to everyone, remove this `if` line
-        // and its closing brace; the Toggle stays as it is.
-        if Updates.isDevBuild || settings.values["nativefs"] == "on" {
-          Toggle(isOn: settings.toggle("nativefs")) {
-            Text("Native fullscreen (own Space)")
-            Text(settings.running
-                 ? gameRunningNote
-                 : "The game's fullscreen gets its own Space, as Mac games do: Cmd-Tab and Mission "
-                   + "Control switch Spaces. While another app is in front the game isn't drawn, so "
-                   + "leave this off if you record or stream the game from the same Mac. Takes "
-                   + "effect at the next game start.")
-          }
-          .disabled(settings.running)
+        // Native fullscreen (som.sh nativefs), off by default: players opt in
+        Toggle(isOn: settings.toggle("nativefs")) {
+          Text("Native fullscreen (own Space)")
+          Text(settings.running
+               ? gameRunningNote
+               : "In fullscreen the game gets its own Space, like native Mac games: Cmd-Tab and "
+                 + "swipes slide to it and back. While another app is in front the game isn't "
+                 + "drawn, so leave this off if you record or stream it from this Mac. From the "
+                 + "next game start.")
         }
+        .disabled(settings.running)
         Toggle(isOn: settings.toggle("hud")) {
           Text("Show Metal HUD")
           Text("Apple's overlay with the frame rate and frame times, over the game, from the next "

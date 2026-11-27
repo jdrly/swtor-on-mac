@@ -30,7 +30,8 @@
 # switches); nativefs (Native fullscreen: som.sh set nativefs as a dry run on a planted install,
 # the app's Mac driver even with the other driver settings off, with a control that fails; the
 # wrapper's nativefs channel and lines; the session report's block on made-up logs; the Mac
-# driver's decision with scripts/test-nativefs-decide.sh (needs clang); only here, the suite's
+# driver's decision with scripts/test-nativefs-decide.sh (needs clang); Settings' Game pane shows
+# the toggle in every build, a source check with a control; only here, the suite's
 # sections 4b and 6b check the real install and wrapper); release-receipt (scripts/release-receipt.sh
 # on a planted git repository and planted release files: one changed input at a time, another tree,
 # a changed working tree, the version, the channel, the notes, the feed, one byte of the DMG, makes
@@ -134,7 +135,7 @@ for g in $FX_GROUPS; do
     d9mt-pin) fx_d9mt_pin "$REPO/scripts/check-d9mt-pin.sh" "$REPO" "$ROOT/d9mt-pin" ;;
     air-codegen) fx_air_codegen "$REPO/scripts/air-codegen-guard.sh" "$REPO/scripts/build-d9mt.sh" "$ROOT/air-codegen" ;;
     d9mt-ab) fx_d9mt_ab "$REPO/scripts/d9mt-ab.sh" "$ROOT/d9mt-ab" ;;
-    nativefs) fx_nativefs "$APP" "$APP/Contents/Resources/wine-wrapper.sh" "$ROOT/nativefs" "$REPO/scripts/test-nativefs-decide.sh" ;;
+    nativefs) fx_nativefs "$APP" "$APP/Contents/Resources/wine-wrapper.sh" "$ROOT/nativefs" "$REPO/scripts/test-nativefs-decide.sh" "$REPO/src/native/Settings.swift" ;;
     release-receipt) fx_release_receipt "$REPO/scripts/release-receipt.sh" "$REPO/build.sh" "$APP" "$ROOT/release-receipt" ;;
     version-table) fx_version_table "$REPO/build.sh" "$APP/Contents/Resources/wine-wrapper.sh" "$REPO/src/native/App.swift" "$ROOT/version-table" ;;
     exception-ports) fx_exception_ports "$APP" "$ROOT/exception-ports" ;;

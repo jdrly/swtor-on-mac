@@ -13,9 +13,12 @@
 #   and the setting off. Each bad log is flagged; the clean one and the off one are not.
 # - the driver's decision itself (scripts/test-nativefs-decide.sh: the plain C cut out of
 #   patches/winemac-native-fullscreen.patch, built with clang, and two broken stubs that fail).
+# - Settings' Game pane shows the toggle in every build, release builds too (0.1.10): no #if, if
+#   or guard on isDevBuild, SWTOR_DEV or nativefs around it. A source check, since the label is
+#   in a release binary either way; the control puts 0.1.9's dev-only if back and must fail.
 # Sourced; check, piped and the counters come from lib.sh.
 #
-#   fx_nativefs <app> <wine-wrapper.sh> <folder> <test-nativefs-decide.sh>
+#   fx_nativefs <app> <wine-wrapper.sh> <folder> <test-nativefs-decide.sh> <Settings.swift>
 
 # fx_nf_set <som.sh> <value>: som.sh set nativefs <value> as a dry run in the planted install;
 # FX_RC its exit status, $FX_NF_D/set.txt what it printed
@@ -42,9 +45,18 @@ fx_nf_report() { "$FX_NF_SR" "$FX_NF_D/$1.log" >"$FX_NF_D/$1.txt" 2>&1 || true; 
 fx_nf_in() { grep -qE -- "$2" "$FX_NF_D/$1.txt"; }
 # fx_nf_decide <test-nativefs-decide.sh> <folder>: the decision test, its output in <folder>/decide.txt
 fx_nf_decide() { TMPDIR="$2" "$1" >"$2/decide.txt" 2>&1; }
+# fx_nf_shown <Settings.swift>: the Game pane has the nativefs toggle, and no condition in that
+# pane names isDevBuild, SWTOR_DEV or nativefs (which would hide the toggle in release builds)
+fx_nf_shown() {
+  awk '/^    case \.game:/ { g = 1; next }
+       g && /^    case \./ { g = 0 }
+       g && /^[[:space:]]*(#if|if|guard)[[:space:]]/ && /isDevBuild|SWTOR_DEV|nativefs/ { bad = 1 }
+       g && /Toggle\(isOn: settings\.toggle\("nativefs"\)\)/ { t = 1 }
+       END { exit (t && !bad) ? 0 : 1 }' "$1"
+}
 
 fx_nativefs() {
-  local app=$1 wrapper=$2 d=$3 decide=$4 som out dbg
+  local app=$1 wrapper=$2 d=$3 decide=$4 settings=$5 som out dbg
   FX_NF_D=$d FX_NF_SR="$app/Contents/Resources/session-report.sh"
   mkdir -p "$d"
 
@@ -147,4 +159,11 @@ fx_nativefs() {
   # 4. the Mac driver's decision, built from the patch (its two broken stubs must fail)
   check "nativefs: the driver's decision passes its test, and the stubs that never enter or ignore the player's exit fail" \
     fx_nf_decide "$decide" "$d"
+
+  # 5. Settings shows the toggle in every build; the control has 0.1.9's dev-only if around it
+  check "nativefs: Settings' Game pane shows the toggle in release builds too" fx_nf_shown "$settings"
+  awk '/Toggle\(isOn: settings\.toggle\("nativefs"\)\)/ { print "        if Updates.isDevBuild || settings.values[\"nativefs\"] == \"on\" {" } { print }' \
+    "$settings" >"$d/Settings-gated.swift"
+  check "nativefs: control: the toggle under 0.1.9's if Updates.isDevBuild fails the check" \
+    eval '[ "$(grep -c "if Updates.isDevBuild" "$d/Settings-gated.swift")" = 1 ] && ! fx_nf_shown "$d/Settings-gated.swift"'
 }

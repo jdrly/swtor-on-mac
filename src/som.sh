@@ -397,8 +397,8 @@ status() {
 #   nativefs    "Native fullscreen (own Space)": swtor.exe gets NativeFullscreen=y (the app's Mac
 #               driver moves the game's borderless screen-covering window into a fullscreen Space
 #               of its own); the wrapper turns on the driver's nativefs debug channel for the game
-#               from SWTOR_NATIVE_FULLSCREEN=1 in the env file (its NATIVEFS: lines). Settings
-#               shows it only in development builds, or while it is on (Settings.swift)
+#               from SWTOR_NATIVE_FULLSCREEN=1 in the env file (its NATIVEFS: lines). Off by
+#               default; Settings shows it in every build
 # With physkeys, rawmouse or nativefs on, the engine's Mac driver is the app's patched build
 # (Resources/wine/), else the engine's own (install_winemac).
 SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery flushcap nativefs"
