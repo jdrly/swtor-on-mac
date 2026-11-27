@@ -47,7 +47,9 @@ fx_nf_in() { grep -qE -- "$2" "$FX_NF_D/$1.txt"; }
 # fx_nf_decide <test-nativefs-decide.sh> <folder>: the decision test, its output in <folder>/decide.txt
 fx_nf_decide() { TMPDIR="$2" "$1" >"$2/decide.txt" 2>&1; }
 # fx_nf_shown <Settings.swift>: the Game pane's nativefs toggle sits at the Game Mode toggle's
-# indent, so no if wraps it, and outside any #if (either would hide it in release builds)
+# indent, so no if wraps it, and outside any #if (either would hide it in release builds). A
+# regression check for 0.1.9's gate on this one toggle: an if around the whole Section keeps
+# both indents equal and passes
 fx_nf_shown() {
   awk '/^    case \.game:/ { g = 1; next }
        g && /^    case \./ { g = 0 }
