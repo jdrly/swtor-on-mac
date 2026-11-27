@@ -239,15 +239,18 @@ add_log() {  # file max-bytes [folder in the zip [launcher]]: the end of a log (
 # Another CrossOver-based app's Wine (GW2 on Mac's) has the same process names, wine and
 # wineserver. macOS shortens the paths in its reports: the engine's wine is /Users/USER/*/wine,
 # GW2 on Mac's /Users/USER/Library/Application Support/GW2 on Mac arm64/*/wine.app/Contents/MacOS/wine.
-# So a path that names no other app (also none at all) counts as ours.
+# So a path that names no other app (also none at all, or none in the header's first 200 lines)
+# counts as ours, and this app's own path always does.
 APP_BUNDLE=${RES%/Contents/Resources}
 APP_BUNDLE=${APP_BUNDLE##*/}
 report_ours() {
   local p a
   p=$(LC_ALL=C awk '
+    NR > 200 { exit }
     /^Path:/ { sub(/^Path:[ \t]*/, ""); sub(/[ \t\r]+$/, ""); print; exit }
     /^[ \t]*"procPath"[ \t]*:[ \t]*"/ { sub(/^[ \t]*"procPath"[ \t]*:[ \t]*"/, ""); sub(/",?[ \t\r]*$/, ""); gsub(/\\\//, "/"); print; exit }' "$1" 2>/dev/null)
   case "$p" in
+    "${RES%/Contents/Resources}/"*) return 0 ;;
     *"/Library/Application Support/SWTOR on Mac/"* | *"/Library/Application Support/com.broadsword.swtor/"*) ;;
     *"/Library/Application Support/"*) return 1 ;;
   esac
@@ -715,6 +718,10 @@ system_reports() {  # → $work/sys/<name in the zip>, $work/sys-index, $work/sy
     case "$base" in
       gpuEvent-*) kind=gpu ;; WindowServer*.ips) kind=ws ;; *.spin) kind=spin ;; panic-full-*) kind=panic ;; *) kind=diag ;;
     esac
+    # (a resource report of another app's Wine, by its path: not ours, and not counted in SYS_MAX)
+    if [ "$kind" = diag ] && ! report_ours "$f"; then
+      zname=$(sys_zname "$base"); echo "  left out: ${zname:-OTHER-diag} (not the game's)" >>"$work/sys-index"; continue
+    fi
     # the newest SYS_MAX of each kind
     eval "x=\${count_$kind:-0}"; x=$((x + 1)); eval "count_$kind=$x"
     zname=$(sys_zname "$base")
@@ -728,8 +735,6 @@ system_reports() {  # → $work/sys/<name in the zip>, $work/sys-index, $work/sy
     if [ ! -r "$f" ]; then
       unread=$((unread + 1)); echo "  not readable: $zname" >>"$work/sys-index"; continue
     fi
-    # (a resource report of another app's Wine, by its path: not ours)
-    if [ "$kind" = diag ] && ! report_ours "$f"; then echo "  left out: $zname (not the game's)" >>"$work/sys-index"; continue; fi
     ts=$(stat -f '%Sm' -t '%F %R' "$f") cut=""
     case $kind in
       gpu)
