@@ -2385,16 +2385,19 @@ cmd_fit_window() {
   # (under the lock, as a settings change: one fit at a time, none while an install, uninstall
   # or settings change runs; the settings read again with it)
   if [ -z "$DRY" ]; then
-    mkdir "$SOM/.lock" 2>/dev/null || { log "fit-window: an install, uninstall or settings change is running; left alone"; echo "@notice busy"; return 0; }
-    # (the lock this run took is released however it ends, a signal included)
-    FIT_LOCKED=1
-    trap '[ -z "${FIT_LOCKED:-}" ] || rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
-    trap 'exit 2' TERM INT HUP
-    # (SWTOR_ON_MAC_TEST_FIT: in a sandbox, a test's command run right here, with the lock held)
+    # (the lock this run takes is released once, by the EXIT trap, however the run ends; while it
+    # takes it, a signal is held until the run knows whether the lock is its own, then ends it)
+    FIT_LOCKED="" FIT_SIG=""
+    trap '[ -z "$FIT_LOCKED" ] || rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
+    trap 'FIT_SIG=1' TERM INT HUP
+    mkdir "$SOM/.lock" 2>/dev/null && FIT_LOCKED=1
+    # (SWTOR_ON_MAC_TEST_FIT: in a sandbox, a test's command run right here, the lock just taken)
     if [ -n "$ROOT" ] && [ -n "${SWTOR_ON_MAC_TEST_FIT:-}" ]; then eval "$SWTOR_ON_MAC_TEST_FIT"; fi
+    trap 'exit 2' TERM INT HUP
+    [ -z "$FIT_SIG" ] || exit 2
+    [ -n "$FIT_LOCKED" ] || { log "fit-window: an install, uninstall or settings change is running; left alone"; echo "@notice busy"; return 0; }
   fi
   ( load_settings || exit 3; fit_window "$@" ) || rc=$?
-  if [ -n "${FIT_LOCKED:-}" ]; then rmdir "$SOM/.lock" 2>/dev/null || true; FIT_LOCKED=""; fi
   if [ "$rc" = 3 ]; then log "fit-window: settings.conf can't be read; left alone"; echo "@done not read"; fi
   return 0
 }

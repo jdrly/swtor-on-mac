@@ -305,11 +305,17 @@ fx_dx12_fit() {
   { printf '%s\r\n' '[Game]' 'Width=7'; printf '[Renderer]\nWindowX = 0\nWindowY = 124\nWidth = 3840\nHeight = 2036'; } >"$d/ini.want4"
   fx_dx12_som dev fit-window "$s1" "$s2"
   check "dx12 fit: an unterminated [Renderer] header at the end: the keys after it, [Game] untouched, no line end added" cmp -s "$ini" "$d/ini.want4"
-  # a fit ended by a signal with the lock held: the lock released, the file unchanged
+  # a signal the moment the lock is taken: held, then the run ends, the lock released, the file
+  # unchanged; and a signal while another command holds the lock: that lock stays
   cp -p "$d/ini.orig" "$ini"
   SWTOR_ON_MAC_TEST_FIT='kill -TERM $$' fx_dx12_som dev fit-window "$s1" "$s2"
-  check "dx12 fit: ended by a signal with the lock held: the lock released, the file unchanged ($FX_RC)" \
-    eval '[ "$FX_RC" != 0 ] && [ ! -e "$FX_DX12_SOM/.lock" ] && cmp -s "$ini" "$d/ini.orig"'
+  check "dx12 fit: a signal as the lock is taken: the run ends, the lock released, the file unchanged ($FX_RC)" \
+    eval '[ "$FX_RC" = 2 ] && [ ! -e "$FX_DX12_SOM/.lock" ] && cmp -s "$ini" "$d/ini.orig"'
+  mkdir "$FX_DX12_SOM/.lock"
+  SWTOR_ON_MAC_TEST_FIT='kill -TERM $$' fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: a signal while another command holds the lock: its lock stays ($FX_RC)" \
+    eval '[ "$FX_RC" = 2 ] && [ -d "$FX_DX12_SOM/.lock" ] && cmp -s "$ini" "$d/ini.orig"'
+  rmdir "$FX_DX12_SOM/.lock"
   # an install, uninstall or settings change running (the lock): nothing written, said so
   cp -p "$d/ini.orig" "$ini"; mkdir "$FX_DX12_SOM/.lock"
   fx_dx12_som dev fit-window "$s1" "$s2"
