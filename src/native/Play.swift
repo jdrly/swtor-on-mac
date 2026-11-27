@@ -272,9 +272,37 @@ extension Installer {
     }
   }
 
+  // DirectX 12's game window (Settings: "Fit the game window to the screen at each start", som.sh
+  // fit-window): each screen as Wine's Mac driver counts its monitors (points, x right and y down
+  // from the top of the main screen, the menu bar's, which comes first), eight numbers
+  // x,y,w,h,fx,fy,fw,fh: its frame, then the client area that fills its visible frame (no menu
+  // bar or Dock) below a title bar of that height.
+  nonisolated static func dx12WindowFit(screens: [(frame: NSRect, visible: NSRect)], titleBar: CGFloat) -> [String] {
+    guard let top = screens.first?.frame.maxY else { return [] }
+    let n = { (v: CGFloat) in String(format: "%.2f", Double(v)) }
+    return screens.map { s in
+      [s.frame.minX, top - s.frame.maxY, s.frame.width, s.frame.height,
+       s.visible.minX, top - s.visible.maxY + titleBar, s.visible.width, s.visible.height - titleBar]
+        .map(n).joined(separator: ",")
+    }
+  }
+
+  // som.sh fit-window, before the launcher opens (DirectX 12 on; som.sh checks the setting): the
+  // client writes its settings file only while it runs, so the window it opens with is this one
+  private func fitDX12Window() {
+    guard status["dx12"] == "on" else { return }
+    let content = NSRect(x: 0, y: 0, width: 100, height: 100)
+    let titleBar = NSWindow.frameRect(forContentRect: content, styleMask: [.titled, .closable, .miniaturizable, .resizable]).height
+      - content.height
+    let screens = Installer.dx12WindowFit(screens: NSScreen.screens.map { (frame: $0.frame, visible: $0.visibleFrame) },
+                                          titleBar: titleBar)
+    _ = Installer.runScript(["fit-window"] + screens)
+  }
+
   private func launch(_ url: URL, then: @escaping (String?) -> Void) {
     guard !launching else { return }
     launching = true
+    fitDX12Window()
     launchID += 1
     let id = launchID
     let configuration = NSWorkspace.OpenConfiguration()

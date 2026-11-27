@@ -23,6 +23,8 @@
 #                      last <window> (24h): exit 0 found, 1 none, 2 the log could not be read
 #   som.sh dx12-gptk <dmg>  development builds: D3DMetal for the DirectX 12 client from a Game
 #                      Porting Toolkit disk image the user downloaded from Apple (gptk_import)
+#   som.sh fit-window <screen>...  development builds: Play SWTOR's fit of the DirectX 12
+#                      client's saved window to its screen (cmd_fit_window)
 #
 # Environment:
 #   SWTOR_ON_MAC_ROOT=/abs/dir  sandbox for tests: the official install, the app's own files,
@@ -439,16 +441,19 @@ status() {
 #               where macOS has it) or gptk-mtl3 (D3DMetal on Metal 3, D3DM_MTL4=0)
 #   dx12fps     "DirectX 12 Frame Rate Limit", development builds only: off or one of FPS_LIMITS;
 #               with a Mullion driver, Mullion's d3d12.preferredMaxFrameRate in env's MULLION_CONFIG
+#   dx12fit     "Fit the game window to the screen at each start", development builds only, on
+#               by default: Play SWTOR runs fit-window (cmd_fit_window) before it opens the
+#               launcher; nothing in env
 # With physkeys, rawmouse or nativefs on, the engine's Mac driver is the app's patched build
 # (Resources/wine/), else the engine's own (install_winemac).
-SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery flushcap nativefs dx12 dx12driver dx12fps"
+SETTING_KEYS="retina hud gamemode vsync debug memory updates physkeys rawmouse mousespeed hudpos fpslimit fpsbattery flushcap nativefs dx12 dx12driver dx12fps dx12fit"
 MOUSE_SPEEDS="0.5 0.75 1 1.25 1.5 1.75 2 2.5 3"
 HUD_POSITIONS="topleft topcenter topright centerleft centered centerright bottomleft bottomcenter bottomright"
 FPS_LIMITS="off 30 40 45 60"
 DX12_DRIVERS="mullion mullion-mtl3 gptk gptk-mtl3"
 setting_default() {
   case "$1" in
-    retina|gamemode|vsync|updates|rawmouse) echo on ;;
+    retina|gamemode|vsync|updates|rawmouse|dx12fit) echo on ;;
     debug) if [ "$CHANNEL" = dev ]; then echo on; else echo off; fi ;;
     hud|physkeys|fpslimit|fpsbattery|flushcap|nativefs|dx12|dx12fps) echo off ;;
     dx12driver) echo mullion ;;
@@ -465,7 +470,7 @@ setting_valid() { # <key> <value>
     retina:on|retina:off|hud:on|hud:off|gamemode:on|gamemode:off|vsync:on|vsync:off) return 0 ;;
     debug:on|debug:off|updates:on|updates:off|physkeys:on|physkeys:off) return 0 ;;
     rawmouse:on|rawmouse:off|fpsbattery:on|fpsbattery:off|flushcap:on|flushcap:off|dx12:on|dx12:off) return 0 ;;
-    nativefs:on|nativefs:off) return 0 ;;
+    nativefs:on|nativefs:off|dx12fit:on|dx12fit:off) return 0 ;;
     memory:auto|memory:low|memory:medium|memory:high|memory:ultra|memory:unlimited) return 0 ;;
     mousespeed:*) in_list "$2" "$MOUSE_SPEEDS" && return 0 ;;
     hudpos:*) in_list "$2" "$HUD_POSITIONS" && return 0 ;;
@@ -477,7 +482,8 @@ setting_valid() { # <key> <value>
 # Settings per renderer (development builds): DirectX 9 and DirectX 12 each keep a set of their
 # own, and the dx12 switch picks the one in effect; turning it on or off swaps the whole set.
 #   global       the same for both: Debug Logging, the update check, and the DirectX 12
-#                settings themselves (only the DirectX 12 set reads its driver and frame limit)
+#                settings themselves (only the DirectX 12 set reads its driver, frame limit and
+#                window fit)
 #   DX9 only     d9mt's settings, and the ones that don't work with the DirectX 12 client (Jan's
 #                list, 2026-11-26): off in the DirectX 12 set, which doesn't keep them, and
 #                greyed out in Settings while it is in effect
@@ -486,7 +492,7 @@ setting_valid() { # <key> <value>
 # settings.conf keeps the DirectX 9 set as before (key=value, which a release build reads as
 # its own) and the DirectX 12 set's as dx12.<key>=value. A DirectX 12 set not written yet starts
 # as the DirectX 9 set (a file of an earlier version), its DX9-only settings off.
-SETTINGS_GLOBAL="debug updates retina dx12 dx12driver dx12fps"
+SETTINGS_GLOBAL="debug updates retina dx12 dx12driver dx12fps dx12fit"
 SETTINGS_DX9_ONLY="gamemode vsync memory physkeys rawmouse mousespeed fpslimit fpsbattery flushcap nativefs"
 # load_settings: settings.conf read once, into SETTINGS_TEXT, which every setting this command
 # reads comes from; status 1 if it is there but the read failed. settings.conf is written only
@@ -686,7 +692,7 @@ on_set_exit() {
 cmd_set() {
   local key="${1:-}" value="${2:-}"
   setting_valid "$key" "$value" || { echo "@error Unknown setting: $key=$value"; exit 2; }
-  case "$key" in dx12|dx12driver|dx12fps) [ "$CHANNEL" = dev ] || die "DirectX 12 is in development builds only." ;; esac
+  case "$key" in dx12|dx12driver|dx12fps|dx12fit) [ "$CHANNEL" = dev ] || die "DirectX 12 is in development builds only." ;; esac
   [ -f "$MANIFEST" ] || die "SWTOR on Mac is not installed."
   # an install from 0.0.x runs on its own engine until Reinstall upgrades it: settings written
   # for this version's engine would break it
@@ -1832,7 +1838,8 @@ restore_game_settings() {
   # anything to copy? (ContextError.ini aside)
   for item in "$src"/* "$src"/.[!.]*; do
     [ -e "$item" ] || continue
-    [ "${item##*/}" = ContextError.ini ] && continue
+    # (and a write of som.sh fit-window's that didn't finish)
+    case "${item##*/}" in ContextError.ini|client_settings_DX12.ini.new.*) continue ;; esac
     if ! diff -r -q "$item" "$dst/${item##*/}" >/dev/null 2>&1; then changed=1; break; fi
   done
   if [ -z "$changed" ]; then say "Game settings are the same in both prefixes"; return 0; fi
@@ -1845,7 +1852,8 @@ restore_game_settings() {
   run mkdir -p "$dst"
   for item in "$src"/* "$src"/.[!.]*; do
     [ -e "$item" ] || continue
-    [ "${item##*/}" = ContextError.ini ] && continue
+    # (and a write of som.sh fit-window's that didn't finish)
+    case "${item##*/}" in ContextError.ini|client_settings_DX12.ini.new.*) continue ;; esac
     if [ -d "$item" ]; then
       run mkdir -p "$dst/${item##*/}"
       run cp -c -R -p "$item/." "$dst/${item##*/}/"
@@ -2354,6 +2362,145 @@ cmd_uninstall() {
   echo "@done SWTOR on Mac is removed. The official SWTOR app runs as it came from Broadsword. Logs stay in $LOGS."
 }
 
+# som.sh fit-window <screen>...: Play SWTOR, right before it opens the launcher (development
+# builds, DirectX 12 on, Settings' "Fit the game window to the screen at each start" on).
+# swtor_RC2.exe saves its window's place and size (WindowX, WindowY, Width, Height in [Renderer]
+# of client_settings_DX12.ini) at every move or resize while it runs, and opens there, so a
+# window macOS once made smaller (fitted under the menu bar, moved to another display, tiled)
+# stays that small. This gives it the visible area of the screen that holds its saved centre,
+# or of the main screen if none does (a display unplugged). Each <screen> is eight numbers,
+# x,y,w,h,fx,fy,fw,fh in Wine's points (x right, y down from the top of the main screen, as Wine's
+# Mac driver counts its monitors): the screen's frame, then the client area that fills its
+# visible frame below a title bar; the main screen first. Wine's pixels are points × 2 with
+# Retina mode. All four keys are written, a missing one added at the end of [Renderer]; every
+# other line stays byte for byte. No file, no [Renderer] section, no screen, a read that failed:
+# nothing written. The first write keeps the game's own file as backup/client_settings_DX12.ini
+# in the app's folder (outside the prefix's settings, which Uninstall copies back). Started from
+# Broadsword's launcher alone, the game opens as it saved it. One line in rehook.log, numbers
+# only; always status 0 (Play goes on).
+cmd_fit_window() {
+  local rc=0
+  if [ -z "$DRY" ]; then mkdir -p "$LOGS"; LOGFILE="$LOGS/rehook.log"; fi
+  [ -f "$MANIFEST" ] || { echo "@done not installed"; return 0; }
+  # (under the lock, as a settings change: one fit at a time, none while an install, uninstall
+  # or settings change runs; the settings read again with it)
+  if [ -z "$DRY" ]; then
+    # (the lock this run takes is released once, by the EXIT trap, however the run ends; while it
+    # takes it, a signal is held until the run knows whether the lock is its own, then ends it.
+    # mkdir and rmdir themselves ignore the signals, a whole process group's included: a mkdir
+    # that made the lock always says so, and the release always happens)
+    FIT_LOCKED="" FIT_SIG=""
+    trap 'trap "" TERM INT HUP; [ -z "$FIT_LOCKED" ] || rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
+    trap 'FIT_SIG=1' TERM INT HUP
+    ( trap '' TERM INT HUP; exec mkdir "$SOM/.lock" ) 2>/dev/null && FIT_LOCKED=1
+    # (SWTOR_ON_MAC_TEST_FIT: in a sandbox, a test's command run right here, the lock just taken)
+    if [ -n "$ROOT" ] && [ -n "${SWTOR_ON_MAC_TEST_FIT:-}" ]; then eval "$SWTOR_ON_MAC_TEST_FIT"; fi
+    trap 'exit 2' TERM INT HUP
+    [ -z "$FIT_SIG" ] || exit 2
+    [ -n "$FIT_LOCKED" ] || { log "fit-window: an install, uninstall or settings change is running; left alone"; echo "@notice busy"; return 0; }
+  fi
+  ( load_settings || exit 3; fit_window "$@" ) || rc=$?
+  if [ "$rc" = 3 ]; then log "fit-window: settings.conf can't be read; left alone"; echo "@done not read"; fi
+  return 0
+}
+# fit_window <screen>...: cmd_fit_window's work, with the lock held. The helpers' own log lines
+# (paths, which hold the user's name) go nowhere; the one line it logs has numbers only.
+fit_window() {
+  local ini="$SOM/prefix/drive_c/users/crossover/$GAME_SETTINGS_REL/client_settings_DX12.ini"
+  local bak="$SOM/backup/client_settings_DX12.ini" s=1 nonl="" tmp note rc=0 mode
+  if ! dx12_on || [ "$(setting dx12fit)" != on ]; then echo "@done off"; return 0; fi
+  if [ ! -f "$ini" ]; then log "fit-window: no client_settings_DX12.ini yet"; echo "@done no file"; return 0; fi
+  [ "$(setting retina)" != on ] || s=2
+  [ -z "$(tail -c 1 "$ini" 2>/dev/null)" ] || nonl=1
+  tmp=$(mktemp "${TMPDIR:-/tmp}/som-fit.XXXXXX") || { echo "@done not written"; return 0; }
+  # (exit 0: the new file in $tmp; 3: fitted already; 4: no [Renderer] section; 5: no screen;
+  # awk's own 2: the file couldn't be read)
+  note=$(LC_ALL=C awk -v s="$s" -v nonl="$nonl" -v out="$tmp" -v screens="$*" '
+    function num(v) { return v ~ /^-?[0-9]+(\.[0-9]+)?$/ }
+    function px(v) { v *= s; return v < 0 ? -int(-v + 0.5) : int(v + 0.5) }
+    function body(l) { sub(/\r$/, "", l); return l }
+    function key(l) { l = body(l); sub(/^[ \t]+/, "", l); sub(/[ \t]*=.*/, "", l); return l }
+    function val(l) { l = body(l); sub(/^[^=]*=[ \t]*/, "", l); sub(/[ \t]+$/, "", l); return l }
+    { line[++nl] = $0 }
+    END {
+      ns = split(screens, arg, " ")
+      for (i = 1; i <= ns; i++) {
+        if (split(arg[i], f, ",") != 8) continue
+        ok = 1; for (j = 1; j <= 8; j++) if (!num(f[j])) ok = 0
+        if (!ok) continue
+        n++; for (j = 1; j <= 8; j++) scr[n, j] = f[j] + 0
+      }
+      for (i = 1; i <= nl; i++) {
+        b = body(line[i])
+        if (b ~ /^[ \t]*\[/) { in_r = (b ~ /^[ \t]*\[Renderer\][ \t]*$/); if (in_r) { found = 1; hdr = i } }
+        if (in_r) last = i
+        if (in_r && index(b, "=")) {
+          k = key(line[i])
+          if (k ~ /^(WindowX|WindowY|Width|Height)$/) { at[i] = k; seen[k] = 1; v = val(line[i]); if (num(v)) old[k] = v + 0 }
+        }
+      }
+      if (!found) exit 4
+      if (!n) exit 5
+      pick = 1
+      if (("WindowX" in old) && ("WindowY" in old) && ("Width" in old) && ("Height" in old)) {
+        cx = old["WindowX"] + old["Width"] / 2; cy = old["WindowY"] + old["Height"] / 2
+        for (i = n; i >= 1; i--)
+          if (cx >= px(scr[i, 1]) && cx < px(scr[i, 1]) + px(scr[i, 3]) && cy >= px(scr[i, 2]) && cy < px(scr[i, 2]) + px(scr[i, 4])) pick = i
+      }
+      new["WindowX"] = px(scr[pick, 5]); new["WindowY"] = px(scr[pick, 6])
+      new["Width"] = px(scr[pick, 7]); new["Height"] = px(scr[pick, 8])
+      same = 1
+      for (k in new) if (!(k in seen) || !(k in old) || old[k] != new[k]) same = 0
+      for (i in at) if (val(line[i]) != new[at[i]] "") same = 0
+      was = sprintf("%s,%s %sx%s", ("WindowX" in old) ? old["WindowX"] : "?", ("WindowY" in old) ? old["WindowY"] : "?",
+        ("Width" in old) ? old["Width"] : "?", ("Height" in old) ? old["Height"] : "?")
+      now = sprintf("screen %d of %d: %d,%d %dx%d", pick, n, new["WindowX"], new["WindowY"], new["Width"], new["Height"])
+      if (same) { print "fitted already (" now ")"; exit 3 }
+      eol = (line[hdr] ~ /\r$/) ? "\r" : ""
+      for (i = 1; i <= nl; i++) {
+        l = line[i]
+        if (i in at) { p = body(l); sub(/=.*/, "=", p); l = p " " new[at[i]] ((l ~ /\r$/) ? "\r" : "") }
+        add = ""
+        if (i == last)
+          for (j = 1; j <= 4; j++) {
+            k = (j == 1 ? "WindowX" : j == 2 ? "WindowY" : j == 3 ? "Width" : "Height")
+            if (!(k in seen)) add = add k " = " new[k] eol "\n"
+          }
+        # (the missing keys after the last line of the section; when that line ends the file
+        # without a line end, before it, which keeps it, or after it if it is the header, the
+        # last key then without a line end)
+        if (i == nl && nonl) {
+          if (i == hdr && add != "") { sub(/\n$/, "", add); printf "%s\n%s", l, add > out }
+          else printf "%s%s", add, l > out
+          continue
+        }
+        printf "%s\n%s", l, add > out
+      }
+      print "fitted to " now " (was " was ")"
+    }' "$ini" 2>/dev/null) || rc=$?
+  case $rc in
+    0)
+      mode=$(stat -c %a "$ini" 2>/dev/null || stat -f %Lp "$ini" 2>/dev/null)
+      # (a copy of the game's own file first, once, in the app's folder, with its mode; then the
+      # new file in its place in one step, with the mode it had; put's per-attempt file beside it
+      # removed if that failed)
+      if [ -n "$mode" ] && [ -s "$tmp" ] &&
+         ( LOGFILE=/dev/null; [ -e "$bak" ] || { run mkdir -p "$SOM/backup" && copy_atomic "$ini" "$bak" "$mode"; } ) &&
+         ( LOGFILE=/dev/null; put "$ini" "$mode" <"$tmp" ); then
+        log "fit-window: $note"; echo "@done fitted"
+      else
+        rm -f "$ini.new.$$" "$bak.new.$$"
+        log "fit-window: client_settings_DX12.ini could not be written"; echo "@done not written"
+      fi ;;
+    3) log "fit-window: $note"; echo "@done fitted already" ;;
+    4) log "fit-window: no [Renderer] section in client_settings_DX12.ini"; echo "@done no section" ;;
+    5) log "fit-window: no screen given"; echo "@done no screen" ;;
+    *) log "fit-window: client_settings_DX12.ini could not be read"; echo "@done not read" ;;
+  esac
+  rm -f "$tmp"
+  return 0
+}
+
 # A settings.conf that is there but can't be read: every command refuses before it changes or
 # guesses anything from it, so nothing writes defaults over it. Status says so first (its other
 # lines don't read settings.conf), and the window shows it in place of Play.
@@ -2372,5 +2519,6 @@ case "${1:-}" in
   fetch-engine) cmd_fetch_engine ;;
   btm-check) cmd_btm_check "${2:-}" ;;
   dx12-gptk) cmd_dx12_gptk "${2:-}" ;;
+  fit-window) shift; cmd_fit_window "$@" ;;
   *) sed -n '2,/^# Environment/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac

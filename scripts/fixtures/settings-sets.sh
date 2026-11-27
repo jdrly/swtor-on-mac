@@ -86,7 +86,7 @@ REG
   check "settings-sets: ...the DX9-only ones off (memory auto, mouse speed 1), the global ones as they are" \
     eval '( for k in $dx9only; do case $k in memory) piped -qx memory=auto "$d/out.txt" ;; mousespeed) piped -qx mousespeed=1 "$d/out.txt" ;; *) piped -qx "$k=off" "$d/out.txt" ;; esac || exit 1; done ) && [ -n "$dx9only" ] && piped -qx debug=on "$d/out.txt" && piped -qx updates=on "$d/out.txt"'
   check "settings-sets: the file keeps the DirectX 9 set's lines as they were, the DirectX 12 set as dx12.* lines" \
-    eval 'diff <(grep -v -e "^#" -e "^dx12\\." -e "^dx12=" "$d/settings.old") <(grep -v -e "^#" -e "^dx12\\." -e "^dx12=" "$FX_SS_SOM/settings.conf") >/dev/null && fx_ss_conf dx12.hud=on && fx_ss_conf dx12.hudpos=topleft && [ "$(grep -c "^dx12\\." "$FX_SS_SOM/settings.conf")" = 2 ]'
+    eval 'diff <(grep -v -e "^#" -e "^dx12\\." -e "^dx12=" -e "^dx12fit=" "$d/settings.old") <(grep -v -e "^#" -e "^dx12\\." -e "^dx12=" -e "^dx12fit=" "$FX_SS_SOM/settings.conf") >/dev/null && fx_ss_conf dx12.hud=on && fx_ss_conf dx12.hudpos=topleft && [ "$(grep -c "^dx12\\." "$FX_SS_SOM/settings.conf")" = 2 ]'
   # (the files hold both sets: swtor.exe's values and env's game settings the DirectX 9 set's,
   # which a fallback to swtor.exe runs with; swtor_RC2.exe's the DirectX 12 set's)
   check "settings-sets: DirectX 12 on: swtor_RC2.exe gets the DirectX 12 set (its DX9-only ones off), swtor.exe keeps the DirectX 9 set" \
@@ -206,7 +206,7 @@ REG
   rmdir "$FX_SS_SOM/.lock"
   fx_ss_som rehook
   check "settings-sets: an earlier install with DirectX 12 on: the hook check writes both sets into settings.conf, the DirectX 9 set's lines as they were" \
-    eval 'fx_ss_conf dx12.hud=on && fx_ss_conf dx12.hudpos=topleft && diff <(grep -v -e "^#" -e "^dx12\\." "$d/settings.old" | sed "s/^dx12=off$/dx12=on/") <(grep -v -e "^#" -e "^dx12\\." "$FX_SS_SOM/settings.conf") >/dev/null'
+    eval 'fx_ss_conf dx12.hud=on && fx_ss_conf dx12.hudpos=topleft && diff <(grep -v -e "^#" -e "^dx12\\." -e "^dx12fit=" "$d/settings.old" | sed "s/^dx12=off$/dx12=on/") <(grep -v -e "^#" -e "^dx12\\." -e "^dx12fit=" "$FX_SS_SOM/settings.conf") >/dev/null'
   check "settings-sets: ...and nothing else: env and user.reg as they were" \
     eval 'cmp -s "$d/env.before" "$FX_SS_SOM/env" && cmp -s "$d/user.reg.before" "$FX_SS_SOM/prefix/user.reg"'
   cp "$FX_SS_SOM/settings.conf" "$d/settings.before"
