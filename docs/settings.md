@@ -73,10 +73,10 @@ screen-covering window into a fullscreen Space of its own, as Mac games do: the 
 tile in Mission Control, and Cmd-Tab and Space swipes slide to and from it. The cost: while
 another app is in front the game is hidden, so it isn't drawn, and a recording or stream of the
 game from the same Mac freezes at every Cmd-Tab. Settings shows it in every build from 0.1.10 on.
-It stays off by default, so players opt in, until testers on M1–M4 have reported on it. With the
-setting on, the driver logs `NATIVEFS:` lines in `wine.log` (see
-[Logs and debugging](logs-and-debugging.md)); a driver build without the option ignores it, and
-then no `NATIVEFS: on` line comes.
+It is off by default, so players opt in. It becomes the default only after testers on M1–M5
+report that it's at least as good as today's fullscreen. With the setting on, the driver logs
+`NATIVEFS:` lines in `wine.log` (see [Logs and debugging](logs-and-debugging.md)); a driver build
+without the option ignores it, and then no `NATIVEFS: on` line comes.
 
 What the driver does with it on (`patches/winemac-native-fullscreen.patch`): the game's window
 goes into its Space when it has no title bar and covers exactly one screen, for 300 ms, with
