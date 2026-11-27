@@ -157,7 +157,8 @@ before it creates the pre-release; so does the one-go `scripts/release.sh` below
 Development builds (`APP_VERSION` `X.Y.Z-dev.N`, on the `dev` branch):
 `./build.sh && scripts/release.sh --dev`. It signs, notarizes and staples the DMG, then
 creates the GitHub pre-release `v<version>` with the DMG and `release-notes/<version>.md`, and
-no feed. The other modes refuse dev versions.
+no feed. The other modes refuse dev versions. `build.sh` stops on any version that isn't
+`X.Y.Z`, `X.Y.Z.W` or `X.Y.Z-dev.N` with N from 1.
 
 `./build.sh && scripts/release.sh` also does everything in one go (sign, notarize, feed, a draft
 release with the DMG, the deltas and the feed), without the gates above.

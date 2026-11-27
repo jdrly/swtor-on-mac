@@ -45,16 +45,18 @@ APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.9}
 # 0.1.1-dev.N -> 0.1.0.(1000+N). Sparkle's standard comparator orders 0.0.5 < 0.0.5.1001 <
 # 0.0.5.1002 < 0.0.6 (and 0.0.6 < 0.0.9999.1001 < 0.1.0 < 0.1.0.1001 < 0.1.1), so a dev build
 # is never offered the previous release again and is offered the public X.Y.Z once that is
-# out. Releases: CFBundleVersion = the version.
+# out. Releases: CFBundleVersion = the version. Any other form (no dev number, two components)
+# stops the build: its CFBundleVersion would sort in the wrong place.
 bundle_version() {
-  local v=$1 core n x y z
+  local v=$1 re='^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+|-dev\.[1-9][0-9]*)?$' core n x y z
+  if ! [[ $v =~ $re ]]; then
+    echo "Unsupported version $v (X.Y.Z, X.Y.Z.W or X.Y.Z-dev.N with N from 1)" >&2; return 1
+  fi
   case "$v" in
     *-dev.*) core=${v%%-*}; n=${v##*-dev.} ;;
-    *-*) echo "Unsupported version $v (X.Y.Z or X.Y.Z-dev.N)" >&2; return 1 ;;
     *) echo "$v"; return ;;
   esac
   IFS=. read -r x y z <<<"$core"
-  case "$x$y$z$n" in *[!0-9]*|'') echo "Unsupported version $v" >&2; return 1 ;; esac
   if [ "$z" -gt 0 ]; then echo "$x.$y.$((z - 1)).$((1000 + n))"
   elif [ "$y" -gt 0 ]; then echo "$x.$((y - 1)).9999.$((1000 + n))"
   else echo "$((x - 1)).9999.9999.$((1000 + n))"; fi
