@@ -45,10 +45,12 @@ APP_VERSION=${SWTOR_ON_MAC_VERSION:-0.1.9}
 # 0.1.1-dev.N -> 0.1.0.(1000+N). Sparkle's standard comparator orders 0.0.5 < 0.0.5.1001 <
 # 0.0.5.1002 < 0.0.6 (and 0.0.6 < 0.0.9999.1001 < 0.1.0 < 0.1.0.1001 < 0.1.1), so a dev build
 # is never offered the previous release again and is offered the public X.Y.Z once that is
-# out. Releases: CFBundleVersion = the version. Any other form (no dev number, two components)
-# stops the build: its CFBundleVersion would sort in the wrong place.
+# out. Releases: CFBundleVersion = the version. Any other form (no dev number, two components, a
+# zero-padded number, which bash would read as octal) stops the build: its CFBundleVersion would
+# sort in the wrong place.
 bundle_version() {
-  local v=$1 re='^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+|-dev\.[1-9][0-9]*)?$' core n x y z
+  local v=$1 d='(0|[1-9][0-9]*)' re core n x y z
+  re="^$d\\.$d\\.$d(\\.$d|-dev\\.[1-9][0-9]*)?\$"
   if ! [[ $v =~ $re ]]; then
     echo "Unsupported version $v (X.Y.Z, X.Y.Z.W or X.Y.Z-dev.N with N from 1)" >&2; return 1
   fi
