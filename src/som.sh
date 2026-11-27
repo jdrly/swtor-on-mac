@@ -2386,9 +2386,15 @@ cmd_fit_window() {
   # or settings change runs; the settings read again with it)
   if [ -z "$DRY" ]; then
     mkdir "$SOM/.lock" 2>/dev/null || { log "fit-window: an install, uninstall or settings change is running; left alone"; echo "@notice busy"; return 0; }
+    # (the lock this run took is released however it ends, a signal included)
+    FIT_LOCKED=1
+    trap '[ -z "${FIT_LOCKED:-}" ] || rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
+    trap 'exit 2' TERM INT HUP
+    # (SWTOR_ON_MAC_TEST_FIT: in a sandbox, a test's command run right here, with the lock held)
+    if [ -n "$ROOT" ] && [ -n "${SWTOR_ON_MAC_TEST_FIT:-}" ]; then eval "$SWTOR_ON_MAC_TEST_FIT"; fi
   fi
   ( load_settings || exit 3; fit_window "$@" ) || rc=$?
-  [ -n "$DRY" ] || rmdir "$SOM/.lock" 2>/dev/null || true
+  if [ -n "${FIT_LOCKED:-}" ]; then rmdir "$SOM/.lock" 2>/dev/null || true; FIT_LOCKED=""; fi
   if [ "$rc" = 3 ]; then log "fit-window: settings.conf can't be read; left alone"; echo "@done not read"; fi
   return 0
 }
@@ -2455,9 +2461,14 @@ fit_window() {
             k = (j == 1 ? "WindowX" : j == 2 ? "WindowY" : j == 3 ? "Width" : "Height")
             if (!(k in seen)) add = add k " = " new[k] eol "\n"
           }
-        # (the missing keys after the last line of the section, or before it when that line ends
-        # the file without a line end, which it keeps)
-        if (i == nl && nonl) { printf "%s%s", add, l > out; continue }
+        # (the missing keys after the last line of the section; when that line ends the file
+        # without a line end, before it, which keeps it, or after it if it is the header, the
+        # last key then without a line end)
+        if (i == nl && nonl) {
+          if (i == hdr && add != "") { sub(/\n$/, "", add); printf "%s\n%s", l, add > out }
+          else printf "%s%s", add, l > out
+          continue
+        }
         printf "%s\n%s", l, add > out
       }
       print "fitted to " now " (was " was ")"

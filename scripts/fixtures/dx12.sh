@@ -299,6 +299,17 @@ fx_dx12_fit() {
   { printf '%s\r\n' '[Renderer]' 'Height = 2036' 'Width = 3840' 'WindowX = 0' 'WindowY = 124'; printf 'Gamma=1'; } >"$d/ini.want3"
   fx_dx12_som dev fit-window "$s1" "$s2"
   check "dx12 fit: a missing key and an unterminated last line: the key before it, the line and the end of the file as they were" cmp -s "$ini" "$d/ini.want3"
+  # an empty [Renderer] header ending the file without a line end: the keys after it, the last
+  # one without a line end
+  printf '%s\r\n' '[Game]' 'Width=7' >"$ini"; printf '[Renderer]' >>"$ini"
+  { printf '%s\r\n' '[Game]' 'Width=7'; printf '[Renderer]\nWindowX = 0\nWindowY = 124\nWidth = 3840\nHeight = 2036'; } >"$d/ini.want4"
+  fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: an unterminated [Renderer] header at the end: the keys after it, [Game] untouched, no line end added" cmp -s "$ini" "$d/ini.want4"
+  # a fit ended by a signal with the lock held: the lock released, the file unchanged
+  cp -p "$d/ini.orig" "$ini"
+  SWTOR_ON_MAC_TEST_FIT='kill -TERM $$' fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: ended by a signal with the lock held: the lock released, the file unchanged ($FX_RC)" \
+    eval '[ "$FX_RC" != 0 ] && [ ! -e "$FX_DX12_SOM/.lock" ] && cmp -s "$ini" "$d/ini.orig"'
   # an install, uninstall or settings change running (the lock): nothing written, said so
   cp -p "$d/ini.orig" "$ini"; mkdir "$FX_DX12_SOM/.lock"
   fx_dx12_som dev fit-window "$s1" "$s2"
