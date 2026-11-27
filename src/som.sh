@@ -1563,12 +1563,12 @@ D9MT_FILES="engine/lib/wine/x86_64-unix/winemetal.so engine/lib/wine/x86_64-wind
 backup_d9mt() {
   local f
   run rm -rf "$SOM/d9mt-backup"
+  D9MT_SAVED=1
   for f in $D9MT_FILES; do
     [ -f "$SOM/$f" ] || continue
     run mkdir -p "$SOM/d9mt-backup/${f%/*}"
     run cp -c -p "$SOM/$f" "$SOM/d9mt-backup/$f"
   done
-  D9MT_SAVED=1
 }
 
 restore_d9mt() {
