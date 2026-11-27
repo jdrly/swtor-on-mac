@@ -2386,11 +2386,13 @@ cmd_fit_window() {
   # or settings change runs; the settings read again with it)
   if [ -z "$DRY" ]; then
     # (the lock this run takes is released once, by the EXIT trap, however the run ends; while it
-    # takes it, a signal is held until the run knows whether the lock is its own, then ends it)
+    # takes it, a signal is held until the run knows whether the lock is its own, then ends it.
+    # mkdir and rmdir themselves ignore the signals, a whole process group's included: a mkdir
+    # that made the lock always says so, and the release always happens)
     FIT_LOCKED="" FIT_SIG=""
-    trap '[ -z "$FIT_LOCKED" ] || rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
+    trap 'trap "" TERM INT HUP; [ -z "$FIT_LOCKED" ] || rmdir "$SOM/.lock" 2>/dev/null || true' EXIT
     trap 'FIT_SIG=1' TERM INT HUP
-    mkdir "$SOM/.lock" 2>/dev/null && FIT_LOCKED=1
+    ( trap '' TERM INT HUP; exec mkdir "$SOM/.lock" ) 2>/dev/null && FIT_LOCKED=1
     # (SWTOR_ON_MAC_TEST_FIT: in a sandbox, a test's command run right here, the lock just taken)
     if [ -n "$ROOT" ] && [ -n "${SWTOR_ON_MAC_TEST_FIT:-}" ]; then eval "$SWTOR_ON_MAC_TEST_FIT"; fi
     trap 'exit 2' TERM INT HUP

@@ -316,6 +316,16 @@ fx_dx12_fit() {
   check "dx12 fit: a signal while another command holds the lock: its lock stays ($FX_RC)" \
     eval '[ "$FX_RC" = 2 ] && [ -d "$FX_DX12_SOM/.lock" ] && cmp -s "$ini" "$d/ini.orig"'
   rmdir "$FX_DX12_SOM/.lock"
+  # a signal to the whole process group as mkdir makes the lock and as rmdir removes it (stand-ins
+  # that send it to themselves and to som.sh, at the lock only): the lock released all the same
+  mkdir -p "$d/grp"
+  printf '#!/bin/bash\ncase "$*" in *.lock*) /bin/mkdir "$@" || exit; kill -TERM "$PPID" "$$" ;; *) exec /bin/mkdir "$@" ;; esac\n' >"$d/grp/mkdir"
+  printf '#!/bin/bash\ncase "$*" in *.lock*) kill -TERM "$$"; exec /bin/rmdir "$@" ;; *) exec /bin/rmdir "$@" ;; esac\n' >"$d/grp/rmdir"
+  chmod 755 "$d/grp/mkdir" "$d/grp/rmdir"
+  cp -p "$d/ini.orig" "$ini"
+  PATH="$d/grp:$PATH" fx_dx12_som dev fit-window "$s1" "$s2"
+  check "dx12 fit: a process group's signal as the lock is made and removed: the run ends, no lock left, the file unchanged ($FX_RC)" \
+    eval '[ "$FX_RC" = 2 ] && [ ! -e "$FX_DX12_SOM/.lock" ] && cmp -s "$ini" "$d/ini.orig"'
   # an install, uninstall or settings change running (the lock): nothing written, said so
   cp -p "$d/ini.orig" "$ini"; mkdir "$FX_DX12_SOM/.lock"
   fx_dx12_som dev fit-window "$s1" "$s2"
