@@ -822,10 +822,41 @@ check "wrapper: engine wine answers ($out)" test "$out" = wine-11.0
 cleanup_wine
 check "wrapper: no Wine left running" test -z "$(sandbox_wine)"
 
+echo "== 5b. a Reinstall whose Wine setup fails leaves d9mt's bridge and d3d9.dll as it found them (a wine that fails)"
+# The installed files stand in for another version's (a line added to each). The install copies
+# the bridge before wineboot -u and d3d9.dll after it; a mixed set would pair a bridge with a
+# driver of another struct layout (#158)
+D9F="$SOM/engine/lib/wine/x86_64-unix/winemetal.so|$SOM/engine/lib/wine/x86_64-windows/winemetal.dll|$SOM/prefix/drive_c/windows/system32/d3d9.dll"
+# d9mt_state: for each of the three, "app" (this app's), "prev" (the stand-in) or "other"
+d9mt_state() {
+  local f r=$APP/Contents/Resources/d9mt s="" n=0 IFS='|'
+  for f in $D9F; do
+    n=$((n + 1))
+    if cmp -s "$f" "$r/${f##*/}"; then s="$s app"
+    elif [ "$(shasum -a 256 "$f" | cut -d' ' -f1)" = "$(echo "$D9PREV" | cut -d' ' -f$n)" ]; then s="$s prev"
+    else s="$s other"; fi
+  done
+  echo "${s# }"
+}
+(IFS='|'; for f in $D9F; do echo previous >>"$f"; done)
+D9PREV=$(IFS='|'; for f in $D9F; do shasum -a 256 "$f" | cut -d' ' -f1; done | tr '\n' ' ')
+mv "$SOM/engine/bin/wine" "$SANDBOX/wine.real"
+printf '#!/bin/sh\nexit 1\n' >"$SOM/engine/bin/wine"; chmod 755 "$SOM/engine/bin/wine"
+if som install >"$SANDBOX/d9mt-fail.txt" 2>&1; then bad "reinstall with a failing wine succeeded"; fi
+mv -f "$SANDBOX/wine.real" "$SOM/engine/bin/wine"
+check "d9mt files: the install stopped at Wine setup" grep -q '^@error Wine could not set up the prefix' "$SANDBOX/d9mt-fail.txt"
+d9s=$(d9mt_state)
+check "d9mt files: winemetal.so, winemetal.dll and d3d9.dll all the previous ones ($d9s)" test "$d9s" = "prev prev prev"
+check "d9mt files: no backup left" test ! -e "$SOM/d9mt-backup"
+check "d9mt files: no Wine left running" test -z "$(sandbox_wine)"
+
 echo "== 6. reinstall is idempotent"
 ino=$(stat -f %i "$SOM/engine/lib/wine/x86_64-unix/wine")
 som install >"$SANDBOX/reinstall.txt" 2>&1 || { tail -20 "$SANDBOX/reinstall.txt"; bad "reinstall exit"; }
 check "reinstall: engine kept" test "$ino" = "$(stat -f %i "$SOM/engine/lib/wine/x86_64-unix/wine")"
+d9s=$(d9mt_state)
+check "reinstall: winemetal.so, winemetal.dll and d3d9.dll this app's again ($d9s)" test "$d9s" = "app app app"
+check "reinstall: no d9mt backup left" test ! -e "$SOM/d9mt-backup"
 check "reinstall: prefix kept" grep -q 'Updating the existing Wine prefix' "$SANDBOX/reinstall.txt"
 check "reinstall: wrapper ours" test "$(st wrapper)" = ours
 check "reinstall: no Wine left running" test -z "$(sandbox_wine)"

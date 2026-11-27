@@ -16,7 +16,7 @@ install, uninstall and the wrapper, never while a wineserver of theirs runs, nev
 prefix's, never Broadsword's `mac_wine`), the Wine session (a `mac_wine`-like call that starts
 it returns at once although its system process lives on, `-p10`, nothing of the caller
 inherited, one start for two calls at once), a failed
-install, Collect Logs, what Play SWTOR would open, *Game keys by keyboard position* and *Raw
+install, a Reinstall whose Wine setup fails (d9mt's bridge and `d3d9.dll` stay as they were), Collect Logs, what Play SWTOR would open, *Game keys by keyboard position* and *Raw
 mouse-look* (the Mac driver's three files and the registry values, and what the game sees: a
 probe program run as `swtor.exe` with Czech, German and US layouts, picked through the
 driver's `WINEMAC_TEST_KEYBOARD_LAYOUT` test hook without changing the Mac's input source; the
