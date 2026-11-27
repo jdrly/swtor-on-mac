@@ -21,8 +21,8 @@ VT_MAP="0.0.6-dev.1 0.0.5.1001
 1.0.0-dev.1 0.9999.9999.1001
 0.1.8 0.1.8
 0.1.7.1 0.1.7.1"
-# versions build.sh refuses
-VT_REFUSED="0.1.5.2-dev.1 0.1.8-rc.1"
+# versions build.sh refuses (#136: no dev number, a dev number 0, two components, zero-padded)
+VT_REFUSED="0.1.5.2-dev.1 0.1.8-rc.1 0.1.8-dev. 0.1.8-dev.0 0.1-dev.1 0.1 0.1.010-dev.1"
 
 # vt_older <a> <b>: dotted numbers, a before b
 vt_older() {
