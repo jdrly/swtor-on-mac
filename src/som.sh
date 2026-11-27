@@ -1563,21 +1563,24 @@ D9MT_FILES="engine/lib/wine/x86_64-unix/winemetal.so engine/lib/wine/x86_64-wind
 backup_d9mt() {
   local f
   run rm -rf "$SOM/d9mt-backup"
-  D9MT_SAVED=1
   for f in $D9MT_FILES; do
     [ -f "$SOM/$f" ] || continue
     run mkdir -p "$SOM/d9mt-backup/${f%/*}"
     run cp -c -p "$SOM/$f" "$SOM/d9mt-backup/$f"
   done
+  D9MT_SAVED=1
 }
 
+# (a backup this run didn't finish, or an older run's, only goes; one that didn't all go back stays)
 restore_d9mt() {
-  local b="$SOM/d9mt-backup" f
-  [ -n "${D9MT_SAVED:-}" ] || return 0
-  for f in $D9MT_FILES; do
-    if [ -f "$b/$f" ] && [ -d "$SOM/${f%/*}" ]; then mv -f "$b/$f" "$SOM/$f" && log "rolled back $f"; fi
-  done
-  rm -rf "$b"
+  local b="$SOM/d9mt-backup" f keep=""
+  if [ -n "${D9MT_SAVED:-}" ]; then
+    for f in $D9MT_FILES; do
+      [ -f "$b/$f" ] && [ -d "$SOM/${f%/*}" ] || continue
+      if mv -f "$b/$f" "$SOM/$f"; then log "rolled back $f" || true; else keep=1; fi
+    done
+  fi
+  [ -n "$keep" ] || rm -rf "$b"
 }
 
 # The upgrade went through: the old engine, its libraries and the copies go
@@ -1605,6 +1608,7 @@ rollback_upgrade() {
 
 on_install_exit() {
   local st=$?
+  trap '' TERM INT HUP   # a second Cancel doesn't cut the rollback short
   if [ $st -ne 0 ] && [ -z "$DRY" ]; then
     if [ -n "${FETCH_PID:-}" ]; then kill "$FETCH_PID" 2>/dev/null || true; fi
     stop_wine >/dev/null 2>&1 || true
@@ -1694,6 +1698,7 @@ cmd_install() {
   install_wrapper
   write_manifest
   finish_upgrade
+  D9MT_SAVED=""
   if [ -d "$SOM/d9mt-backup" ]; then run rm -rf "$SOM/d9mt-backup"; fi
   # an older version's launcher-update guard (a launchd job, unloaded at the start): nothing of
   # SWTOR on Mac runs while the app is closed any more (the app checks the hook when it opens)
