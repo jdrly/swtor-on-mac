@@ -23,7 +23,9 @@ cloned once). Everything else lives in SWTOR on Mac's own folders:
     `x86_64-windows/winemac.drv`, `i386-windows/winemac.drv`; the engine's own files are kept
     as `<name>.stock`)
   - `frameworks/` – only in installs of 0.0.x: the old engine's libraries (removed by the
-    Reinstall that upgrades it); `upgrade-backup/` – only while that Reinstall runs
+    Reinstall that upgrades it); `upgrade-backup/` – only while that Reinstall runs;
+    `d9mt-backup/` – only while an install runs: d9mt's bridge and `d3d9.dll` as it found them,
+    put back together if it fails or is cancelled before the new ones are all in place
   - `prefix/` – the game's Wine prefix: an APFS clone of Broadsword's, updated for the engine,
     with d9mt's `d3d9.dll` in `system32` (Wine's own kept as `d3d9.dll.wine`) and the settings
     in [Settings](settings.md); your existing game settings are taken over once
