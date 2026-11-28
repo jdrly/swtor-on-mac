@@ -91,7 +91,7 @@ check "...and nothing of it left running" eval '! pgrep -f "$T/stalled" >/dev/nu
 printf '#include <signal.h>\n#include <stdio.h>\n#include <unistd.h>\nint main(int c, char **v) { FILE *f; signal(SIGTERM, SIG_IGN); f = fopen(v[1], "w"); fprintf(f, "%%d\\n", getpid()); fclose(f); for (;;) pause(); }\n' >"$T/ignore.c"
 clang -o "$T/ignore" "$T/ignore.c"
 "$T/ignore" "$T/warm.pid" & wp=$!
-wait_for 10 test -s "$T/warm.pid" || true
+wait_for 10 test -s "$T/warm.pid" || bad "setup: the TERM-ignoring dummy did not start (no $T/warm.pid in 10 s)"
 kill -KILL "$wp" 2>/dev/null || true; wait "$wp" 2>/dev/null || true
 mkdir -p "$T/shim"; : >"$T/resist"
 printf '#!/bin/bash\ntrap "" TERM\n[ "$1" = "%s/resist" ] && exec "%s/ignore" "%s/resist.pid"\nexec /bin/cat "$@"\n' "$T" "$T" "$T" >"$T/shim/cat"
