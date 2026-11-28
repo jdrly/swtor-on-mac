@@ -184,10 +184,12 @@ Since `9b64581` it adds:
   - a depth/stencil clear drawn in a viewport inside the open pass, `D9MT_INPASS_CLEAR`, #219;
   - the open pass kept across a visit that only clears other targets,
     `D9MT_KEEP_PASS_OVER_CLEAR_VISIT`, #220;
-  - a pixel shader's Metal library made at its first draw instead of at its creation (C5),
+  - a pixel shader's Metal library made when a draw or the state cache's prewarm first asks for
+    it, instead of at the shader's creation (C5; its SM3-to-IR step still starts at creation),
     `D9MT_PS_PREFETCH=1` gives the old behaviour, #221;
   - flushes capped at strong hints (C4), `D9MT_FLUSH_CAP=0` turns the cap off, #222. Settings'
-    *Fewer GPU Batches* sets the same cap, so in SWTOR it no longer changes anything;
+    *Fewer GPU Batches* sets the same cap, so with SWTOR's default profile it no longer changes
+    anything (under `D9MT_APP_PROFILE=generic` it still turns the cap on);
 - a sampler's `D3DSAMP_MIPMAPLODBIAS` applied on Apple10 GPUs (M5), which every Mac dropped;
   `D9MT_SAMPLER_LOD_BIAS=0` turns it off, #215;
 - a Lock that syncs the CS thread for queued draws even when an older GPU use retires during the
