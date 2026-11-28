@@ -83,14 +83,21 @@ t0=$SECONDS; SWTOR_ON_MAC_BTM_TIMEOUT=1 btm "$T/stalled" 1h; dt=$((SECONDS - t0)
 check "a query that doesn't answer: ended after its limit ($dt s), error (status $rc)" eval '[ "$rc" = 2 ] && grep -q "ran out of time (1 s)" "$T/out" && [ "$dt" -le 4 ]'
 check "...and nothing of it left running" eval '! pgrep -f "$T/stalled" >/dev/null'
 # a query that ignores TERM (a stand-in for cat on PATH runs a dummy for $T/resist): ended with
-# KILL at the limit, and also when som.sh itself is ended (TERM) while it waits
+# KILL at the limit, and also when som.sh itself is ended (TERM) while it waits. The TERM must not
+# end the dummy before it has written its pid file: the stand-in ignores TERM before it starts the
+# dummy (which inherits that), the dummy has been launched once already (macOS checks a new
+# program at its first launch, 0.3 s on an M1, during which the TERM landed), and the limit is
+# 2 s (som.sh counts whole seconds, so a limit of 1 can trip right after the start)
 printf '#include <signal.h>\n#include <stdio.h>\n#include <unistd.h>\nint main(int c, char **v) { FILE *f; signal(SIGTERM, SIG_IGN); f = fopen(v[1], "w"); fprintf(f, "%%d\\n", getpid()); fclose(f); for (;;) pause(); }\n' >"$T/ignore.c"
 clang -o "$T/ignore" "$T/ignore.c"
+"$T/ignore" "$T/warm.pid" & wp=$!
+wait_for 10 test -s "$T/warm.pid" || bad "setup: the TERM-ignoring dummy did not start (no $T/warm.pid in 10 s)"
+kill -KILL "$wp" 2>/dev/null || true; wait "$wp" 2>/dev/null || true
 mkdir -p "$T/shim"; : >"$T/resist"
-printf '#!/bin/bash\n[ "$1" = "%s/resist" ] && exec "%s/ignore" "%s/resist.pid"\nexec /bin/cat "$@"\n' "$T" "$T" "$T" >"$T/shim/cat"
+printf '#!/bin/bash\ntrap "" TERM\n[ "$1" = "%s/resist" ] && exec "%s/ignore" "%s/resist.pid"\nexec /bin/cat "$@"\n' "$T" "$T" "$T" >"$T/shim/cat"
 chmod +x "$T/shim/cat"
 rm -f "$T/resist.pid"
-PATH="$T/shim:$PATH" SWTOR_ON_MAC_BTM_TIMEOUT=1 btm "$T/resist" 1h
+PATH="$T/shim:$PATH" SWTOR_ON_MAC_BTM_TIMEOUT=2 btm "$T/resist" 1h
 check "a query that ignores TERM: KILLed at the limit (status $rc)" eval '[ "$rc" = 2 ] && [ -s "$T/resist.pid" ] && ! kill -0 "$(cat "$T/resist.pid")" 2>/dev/null'
 rm -f "$T/resist.pid"
 PATH="$T/shim:$PATH" SWTOR_ON_MAC_ROOT="$T" SWTOR_ON_MAC_BTM_LOG="$T/resist" SWTOR_ON_MAC_BTM_TIMEOUT=30 \
