@@ -173,17 +173,23 @@ request, the version PR's included. A pin older than d9mt's CI (before `45fcedb`
 passes with a note. Exit status 1 means the pin fails; 2 means GitHub didn't answer or d9mt's run
 hasn't finished, which is no verdict: run it again.
 
-`main` pins d9mt `6f577b3`, d9mt main after jdrly/d9mt#220: the driver `main` builds for 0.1.10.
+`main` pins d9mt `b195bc2`, d9mt main after jdrly/d9mt#222: the driver `main` builds for 0.1.10.
 Since `9b64581` it adds:
 
 - an app profile of SWTOR's own, which an exe named `swtor.exe` selects (d9mt ADR-0008), #212.
   Every other exe selects the generic one; `D9MT_APP_PROFILE=swtor` or `generic` overrides the
-  exe's choice, for tests and A/Bs. Three fields of the profile are on for SWTOR, and each has a 0/1
-  environment override:
+  exe's choice, for tests and A/Bs. Five fields of the profile differ for SWTOR, and each has a
+  0/1 environment override:
   - static buffers mapped directly on every memory profile, `D9MT_STATIC_BUFFERS_DIRECT`, #218;
   - a depth/stencil clear drawn in a viewport inside the open pass, `D9MT_INPASS_CLEAR`, #219;
   - the open pass kept across a visit that only clears other targets,
     `D9MT_KEEP_PASS_OVER_CLEAR_VISIT`, #220;
+  - a pixel shader's Metal library made when a draw or the state cache's prewarm first asks for
+    it, instead of at the shader's creation (C5; its SM3-to-IR step still starts at creation),
+    `D9MT_PS_PREFETCH=1` gives the old behaviour, #221;
+  - flushes capped at strong hints (C4), `D9MT_FLUSH_CAP=0` turns the cap off, #222. Settings'
+    *Fewer GPU Batches* sets the same cap, so with SWTOR's default profile it no longer changes
+    anything (under `D9MT_APP_PROFILE=generic` it still turns the cap on);
 - a sampler's `D3DSAMP_MIPMAPLODBIAS` applied on Apple10 GPUs (M5), which every Mac dropped;
   `D9MT_SAMPLER_LOD_BIAS=0` turns it off, #215;
 - a Lock that syncs the CS thread for queued draws even when an older GPU use retires during the
@@ -196,7 +202,8 @@ Since `9b64581` it adds:
   and the GPU gates' bench set, #207.
 
 None of them changes the AIR codegen: the bridge reports `25fc2491…` with no lineage, as 0.1.8's
-and 0.1.9's did, so players keep the shaders 0.1.8 compiled. #215 changes the bridge's Metal side
+and 0.1.9's did, so players keep the shaders 0.1.8 compiled. #221 and #222 change only the driver
+(`d3d9.dll`). #215 changes the bridge's Metal side
 (`winemetal_unix.c`, `winemetal.h`), which is outside the id; `winemetal.dll` is byte for byte
 0.1.9's.
 
