@@ -38,7 +38,7 @@ START="$PWD"
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 REPO="${D9MT_SRC:-https://github.com/jdrly/d9mt.git}"
-COMMIT=6f577b33f5479295dee05218023432665908e30a
+COMMIT=b195bc22afcb3733ef8718922575f7364f668bdc
 MACOS_MIN=26.0
 # The AIR codegen id the bridge must report (d9mt ADR-0006), the identity of the code that
 # compiles the game's shaders. 0.1.8 changed that code on purpose, so this id has no lineage:
