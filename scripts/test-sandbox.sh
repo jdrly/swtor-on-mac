@@ -513,6 +513,11 @@ ntdll_is_apps() {
   cmp -s "$APP/Contents/Resources/wine/ntdll.so" "$WM/ntdll.so" &&
     [ "$(shasum -a 256 "$WM/ntdll.so.stock" | cut -d" " -f1)" = "$(sed -n 's/^ENGINE_NTDLL_SHA256=//p' "$SOMSH")" ]
 }
+# ntdll_was_known <ntdll.so an older version installed> <that version's app>: the engine's own, this
+# app's build (its code), or that app's own build (its code; 0.1.9's before #148 rebuilt it)
+ntdll_was_known() {
+  cmp -s "$1" "$WM/ntdll.so.stock" || macho_same "$1" "$WM/ntdll.so" || macho_same "$1" "$2/Contents/Resources/wine/ntdll.so"
+}
 # the engine's Mac driver, all three files: the app's build (app) or the engine's own (stock)
 wm_is() {
   local r="$APP/Contents/Resources/wine"
@@ -1920,8 +1925,14 @@ if [ -x "$PREV_APP/Contents/Resources/som.sh" ]; then
   check "over $PREVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/prev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/prev-engine.diff"
   check "over $PREVV: the engine unchanged, signatures aside, but ntdll.so and this app's Mac driver$([ "$prev_bridge" = kept ] || echo " and d9mt bridge") ($(tr '\n' ' ' <"$SANDBOX/prev-engine.diff"))" engine_same prev "$prev_bridge"
-  # ($PREVV's ntdll.so: the engine's own, or, from 0.1.2 on, the app's build in its own signature)
-  check "over $PREVV: the app's ntdll.so, the engine's own kept as .stock" eval 'ntdll_is_apps && { cmp -s "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" || macho_same "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so"; }'
+  # ($PREVV's ntdll.so: the engine's own, or, from 0.1.2 on, an app's build in its own signature:
+  # this one's, or $PREVV's own when the build changed since, 0.1.9's before #148)
+  check "over $PREVV: the app's ntdll.so, the engine's own kept as .stock" eval 'ntdll_is_apps && ntdll_was_known "$SANDBOX/prev-engine/lib/wine/x86_64-unix/ntdll.so" "$PREV_APP"'
+  # (and another build, this app's with one byte of code changed, is none of the three)
+  cp "$WM/ntdll.so" "$SANDBOX/other-ntdll.so"
+  perl -e 'open(F, "+<", $ARGV[0]) or die; seek(F, 16384, 0); read(F, $c, 1); seek(F, 16384, 0); print F chr(ord($c) ^ 1)' "$SANDBOX/other-ntdll.so"
+  check "over $PREVV: another ntdll.so build is not taken for one of them" eval '! ntdll_was_known "$SANDBOX/other-ntdll.so" "$PREV_APP"'
+  rm -f "$SANDBOX/other-ntdll.so"
   if [ "$prev_bridge" = moved ]; then
     check "over $PREVV: winemetal.so is this app's code, the bridge moved with the d9mt pin ($(cat "$PREV_APP/Contents/Resources/d9mt/VERSION") -> $(cat "$APP/Contents/Resources/d9mt/VERSION"); LC_UUID $(dwarfdump -u "$WM/winemetal.so" | awk '{ print $2 }'))" \
       eval 'macho_same "$APP/Contents/Resources/d9mt/winemetal.so" "$WM/winemetal.so" && [ "$(dwarfdump -u "$WM/winemetal.so" | awk "{ print \$2 }")" = "$(dwarfdump -u "$APP/Contents/Resources/d9mt/winemetal.so" | awk "{ print \$2 }")" ]'
@@ -2004,9 +2015,9 @@ if [ "$CHANNEL" = release ] && [ -x "$DEV_APP/Contents/Resources/som.sh" ] && [ 
   check "over $DEVV: the prefix's d3d9.dll is this app's" cmp -s "$APP/Contents/Resources/d9mt/d3d9.dll" "$sys/d3d9.dll"
   { snap "$SOM/engine" | diff "$SANDBOX/dev-engine.txt" - || true; } | sed -n 's/^[<>] \(\.[^|]*\)|.*/\1/p; s/^[<>] [0-9a-f]\{64\}  \(.*\)/\1/p' | sort -u >"$SANDBOX/dev-engine.diff"
   check "over $DEVV: the engine unchanged, signatures aside, but ntdll.so and this app's Mac driver$([ "$dev_bridge" = kept ] || echo " and d9mt bridge") ($(tr '\n' ' ' <"$SANDBOX/dev-engine.diff"))" engine_same dev "$dev_bridge"
-  # ($DEVV's ntdll.so: the engine's own, or, from 0.1.2-dev.1 on, the app's build in its own
-  # signature, its code ours)
-  check "over $DEVV: the app's ntdll.so, the engine's own kept as .stock ($DEVV had $(cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" && echo "the engine's" || echo "the app's build"))" eval 'ntdll_is_apps && { cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" || macho_same "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so"; }'
+  # ($DEVV's ntdll.so: the engine's own, or, from 0.1.2-dev.1 on, an app's build in its own
+  # signature: this one's, or $DEVV's own when the build changed since)
+  check "over $DEVV: the app's ntdll.so, the engine's own kept as .stock ($DEVV had $(cmp -s "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$WM/ntdll.so.stock" && echo "the engine's" || echo "the app's build"))" eval 'ntdll_is_apps && ntdll_was_known "$SANDBOX/dev-engine/lib/wine/x86_64-unix/ntdll.so" "$DEV_APP"'
   check "over $DEVV: no Wine left running" test -z "$(sandbox_wine)"
   som install >"$SANDBOX/dev-reinstall.txt" 2>&1 || bad "reinstall after $DEVV exit"
   check "over $DEVV: a Reinstall after it has nothing more to remove" eval 'grep -q "^@done" "$SANDBOX/dev-reinstall.txt" && ! grep -q -e "^Removed a development build" -e "^Removed the launcher-update guard" "$SANDBOX/dev-reinstall.txt"'
